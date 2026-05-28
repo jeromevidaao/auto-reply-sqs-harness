@@ -29,23 +29,96 @@ These keys need at minimum the following permissions:
 
 ### Option 2: Recommended — GitHub OIDC (No long-lived keys)
 
-This is the modern and more secure way.
+This is the modern and more secure way. We have switched the workflow to use OIDC.
 
-1. In AWS IAM, create an Identity Provider for GitHub OIDC.
-2. Create an IAM Role that trusts GitHub's OIDC provider with conditions for your repository.
-3. Grant the role permission to update the Lambda function.
+#### Step-by-step OIDC Setup
 
-Then in the workflow, replace the credentials step with:
+**1. Create the OIDC Identity Provider in AWS (one time per account)**
+
+If you haven't done this before for GitHub Actions:
+
+- Go to IAM → Identity providers → Add provider
+- Provider type: **OpenID Connect**
+- Provider URL: `https://token.actions.githubusercontent.com`
+- Audience: `sts.amazonaws.com`
+- Click **Add provider**
+
+**2. Create an IAM Role for GitHub Actions**
+
+- IAM → Roles → Create role
+- Trusted entity type: **Web identity**
+- Identity provider: `token.actions.githubusercontent.com`
+- Audience: `sts.amazonaws.com`
+- Click **Next**
+
+**3. Add trust policy conditions (important!)**
+
+After creating the role, edit the Trust policy and replace it with this:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::834917996497:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:jeromevidaao/auto-reply-sqs-harness:*"
+        }
+      }
+    }
+  ]
+}
+```
+
+**4. Attach permissions to the role**
+
+Attach a policy with at minimum:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:UpdateFunctionCode",
+        "lambda:GetFunction"
+      ],
+      "Resource": "arn:aws:lambda:us-east-1:834917996497:function:guest-messaging-agent-harness"
+    }
+  ]
+}
+```
+
+**5. Create the GitHub Secret**
+
+- Go to your GitHub repo → **Settings → Secrets and variables → Actions**
+- Create a new secret called: `AWS_ROLE_ARN`
+- Value: the ARN of the role you just created (e.g. `arn:aws:iam::834917996497:role/github-actions-harness-deploy`)
+
+**6. Update the workflow (already done)**
+
+The `deploy.yml` now uses:
 
 ```yaml
-- name: Configure AWS credentials
+- name: Configure AWS credentials (via OIDC)
   uses: aws-actions/configure-aws-credentials@v4
   with:
-    role-to-assume: arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_GITHUB_OIDC_ROLE
+    role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
     aws-region: us-east-1
 ```
 
-We can help you set this up if you want (just say the word).
+---
+
+**Current status**: The workflow is ready for OIDC. Once you complete the steps above and add the `AWS_ROLE_ARN` secret, pushes to `main` will authenticate to AWS without any long-lived keys.
 
 ## Enabling Branch Protection (Required)
 

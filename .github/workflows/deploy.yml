@@ -22,6 +22,11 @@ jobs:
     name: Deploy guest-messaging-agent-harness
     runs-on: ubuntu-latest
 
+    # Required for OIDC
+    permissions:
+      id-token: write
+      contents: read
+
     # IMPORTANT: For safe continuous deployment, you MUST enable Branch Protection
     # on the `main` branch and require the CI jobs ("Run Tests" and "Run Evaluation Suite")
     # to pass before allowing merges. This prevents broken code from being deployed.
@@ -52,16 +57,13 @@ jobs:
           echo "Lambda package size:"
           ls -lh $GITHUB_WORKSPACE/guest-messaging-harness.zip
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (via OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # === RECOMMENDED: Use GitHub OIDC (no long-lived AWS keys) ===
-          # See docs below for setup instructions.
-          #
-          # Quick start (less secure): Store long-lived keys as GitHub Secrets
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
+          # Optional but recommended for tighter security
+          role-session-name: github-actions-harness-deploy
 
       - name: Deploy to Lambda
         run: |
