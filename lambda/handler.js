@@ -22,7 +22,7 @@
 import { GuestMessagingAgent } from '../src/agent.js';
 
 export const handler = async (event, context) => {
-  console.log('Guest Messaging Harness invoked');
+  console.log('🚀 Guest Messaging Harness invoked (deployed via GitHub Actions OIDC)');
   console.log('Event keys:', Object.keys(event || {}));
 
   const agent = new GuestMessagingAgent({
@@ -61,6 +61,8 @@ export const handler = async (event, context) => {
           confidence: result.confidence,
           escalated: result.escalated,
         },
+        // Hello World test marker - visible proof the pipeline deployed this version
+        helloWorldTest: "✅ GitHub Actions OIDC pipeline test - " + new Date().toISOString(),
         // Include full result for debugging during manual tests
         fullResult: result,
       }),
