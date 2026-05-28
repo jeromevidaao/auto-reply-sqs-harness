@@ -1,0 +1,78 @@
+name: Deploy to AWS Lambda
+
+on:
+  # Manual trigger only for now (safe)
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+  # Optional: Uncomment later if you want to auto-deploy on pushes to a specific branch
+  # push:
+  #   branches: [ deploy ]
+
+jobs:
+  deploy:
+    name: Deploy guest-messaging-agent-harness
+    runs-on: ubuntu-latest
+    # Add 'environment' protection rules in GitHub repo settings for extra safety
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Lambda deployment package
+        run: |
+          mkdir -p /tmp/lambda-deploy
+          cp -r src prompts lambda /tmp/lambda-deploy/
+          cp package.json /tmp/lambda-deploy/
+          cp -r node_modules /tmp/lambda-deploy/
+
+          cd /tmp/lambda-deploy
+          zip -r $GITHUB_WORKSPACE/guest-messaging-harness.zip . -q
+
+          echo "Lambda package size:"
+          ls -lh $GITHUB_WORKSPACE/guest-messaging-harness.zip
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Recommended: Use OIDC (no long-lived keys)
+          # For now, you can also use access keys stored in GitHub Secrets
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy to Lambda
+        run: |
+          FUNCTION_NAME="guest-messaging-agent-harness"
+
+          aws lambda update-function-code \
+            --function-name $FUNCTION_NAME \
+            --zip-file fileb://guest-messaging-harness.zip \
+            --region us-east-1
+
+          echo "Deployment of $FUNCTION_NAME completed."
+
+      - name: Deployment summary
+        run: |
+          echo "✅ Successfully deployed to AWS Lambda"
+          echo "Function: guest-messaging-agent-harness"
+          echo "Region: us-east-1"
+          echo "Triggered by: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"

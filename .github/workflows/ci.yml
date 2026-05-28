@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  eval:
+    name: Run Evaluation Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run evaluation harness
+        run: npm run eval
+
+  # Optional: Build the Lambda package as an artifact on main
+  # This is useful even before full CD is set up
+  build-lambda:
+    name: Build Lambda Package
+    runs-on: ubuntu-latest
+    # Only build on main to avoid spamming artifacts on every PR
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare Lambda package
+        run: |
+          # Create a clean staging directory
+          mkdir -p /tmp/lambda-deploy
+          cp -r src prompts lambda /tmp/lambda-deploy/
+          cp package.json /tmp/lambda-deploy/
+          cp -r node_modules /tmp/lambda-deploy/
+
+          cd /tmp/lambda-deploy
+          zip -r /tmp/guest-messaging-harness.zip . -q
+
+          # Move to the workspace for artifact upload
+          mv /tmp/guest-messaging-harness.zip $GITHUB_WORKSPACE/
+
+      - name: Upload Lambda artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-messaging-harness-lambda
+          path: guest-messaging-harness.zip
+          retention-days: 30
