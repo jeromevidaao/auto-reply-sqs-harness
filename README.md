@@ -60,7 +60,10 @@ prompts/
   versions/                 # Versioned snapshots for experiments
 src/
   agent.js                  # Core GuestMessagingAgent (the "brain")
-  adapters/llm/             # pluggable LLM clients (mock + real grok)
+  adapters/                 # pluggable infrastructure (LLM + notifications)
+  tools/                    # Unified Tool abstraction + index.js barrel
+                            # (BaseTool, ToolRegistry, CleaningIssueTool, ...)
+                            # All capability-style features (detectors, policies, lookups) go here for consistency
 eval/
   scenarios/                # Recorded guest situations (JSON)
   goldens/                  # Human-approved ideal responses

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { detectCleaningIssue } from './detectors/cleaning.js';
+import { ToolRegistry, CleaningIssueTool } from './tools/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -22,6 +22,17 @@ export class GuestMessagingAgent {
     this.promptPath = options.promptPath || path.join(root, 'prompts', 'system', 'base.md');
     this.propertiesDir = path.join(root, 'prompts', 'properties');
     this.systemPrompt = null;
+
+    // Tools registry (unified interface for capabilities like cleaning detection, future tools)
+    if (options.tools instanceof ToolRegistry) {
+      this.tools = options.tools;
+    } else {
+      this.tools = new ToolRegistry();
+      // Register default tools (can be overridden by passing custom ones in options)
+      if (!this.tools.has('detect_cleaning_issue')) {
+        this.tools.register(new CleaningIssueTool());
+      }
+    }
   }
 
   /**
@@ -164,7 +175,12 @@ export class GuestMessagingAgent {
     }
 
     // === Cleaning issue detection (separate high-priority alert) ===
-    const cleaningIssue = detectCleaningIssue(guestMessage, context);
+    // Uses the unified Tool interface (CleaningIssueTool registered by default)
+    const cleaningTool = this.tools.get('detect_cleaning_issue');
+    const cleaningIssue = cleaningTool
+      ? await cleaningTool.execute(guestMessage, context)
+      : { detected: false };
+
     if (cleaningIssue.detected) {
       await this.notification.notifyCleaningIssue({
         cleaningIssue,

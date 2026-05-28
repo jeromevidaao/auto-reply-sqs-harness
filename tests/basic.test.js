@@ -40,4 +40,26 @@ describe('GuestMessagingAgent (mock mode)', () => {
     assert.equal(result.typeOfMessageReceived, 'OTHER_MESSAGE');
     assert.equal(result.proposedResponse, 'none');
   });
+
+  it('detects cleaning issues using the unified Tool (CleaningIssueTool) in handleMessage', async () => {
+    const agent = new GuestMessagingAgent({
+      llm: 'mock',
+      projectRoot: projectRootForTests
+    });
+
+    const result = await agent.handleMessage(
+      "There was hair in the shower and the ceiling tiles were stained when we arrived.",
+      {
+        guestName: 'Josh',
+        checkIn: '2026-05-25',
+        checkOut: '2026-05-27',
+        listingId: 'c899481f-2e5b-402d-80c4-3167fd824d96',
+        propertyName: '53 Pine #1B'
+      }
+    );
+
+    assert.equal(result.cleaningIssueDetected, true);
+    // Mock treats unknown messages as OTHER_MESSAGE + none → escalates
+    assert.equal(result.escalated, true);
+  });
 });
