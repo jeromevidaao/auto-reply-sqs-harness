@@ -102,7 +102,9 @@ Attach a policy with at minimum:
 
 - Go to your GitHub repo → **Settings → Secrets and variables → Actions**
 - Create a new secret called: `AWS_ROLE_ARN`
-- Value: the ARN of the role you just created (e.g. `arn:aws:iam::834917996497:role/github-actions-harness-deploy`)
+- Value: `arn:aws:iam::834917996497:role/github-actions-auto-reply-sqs-harness-deploy`
+
+(The role has been pre-created for you with the correct trust policy and minimal permissions.)
 
 **6. Update the workflow (already done)**
 
