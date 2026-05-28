@@ -82,4 +82,56 @@ export class SnsNotificationAdapter {
       throw err;
     }
   }
+
+  /**
+   * Dedicated cleaning issue notification via SNS.
+   * For now it publishes to the same topic with a special subject.
+   * Later this can be pointed to a dedicated SNS topic or email list for the cleaning crew.
+   */
+  async notifyCleaningIssue({ cleaningIssue, guestMessage, context, timestamp = new Date() }) {
+    if (!this._sns) {
+      await this._getSnsClient();
+    }
+
+    const res = cleaningIssue.reservation || context || {};
+    const subject = `[CLEANING ALERT] ${res.guestName || 'Guest'} - ${res.propertyName || 'Property'}`;
+
+    const message = [
+      `CLEANING ISSUE DETECTED`,
+      `Time: ${timestamp.toISOString()}`,
+      '',
+      `Guest: ${res.guestName || 'Unknown'}`,
+      `Reservation: ${res.id || res.reservationId || 'N/A'}`,
+      `Property: ${res.propertyName || 'N/A'}`,
+      `Check-in:  ${res.checkIn || 'N/A'}`,
+      `Check-out: ${res.checkOut || 'N/A'}`,
+      '',
+      `Issue: ${cleaningIssue.summary || cleaningIssue.matchedPhrase}`,
+      '',
+      `Full message:`,
+      guestMessage,
+      '',
+      `Please forward to the cleaning team.`,
+    ].join('\n');
+
+    const command = new PublishCommand({
+      TopicArn: this.topicArn,
+      Subject: subject,
+      Message: message,
+    });
+
+    try {
+      const result = await this._sns.send(command);
+      console.log(`✅ Cleaning issue published to SNS (MessageId: ${result.MessageId})`);
+      return {
+        notified: true,
+        type: 'cleaning_issue',
+        channel: 'sns',
+        messageId: result.MessageId,
+      };
+    } catch (err) {
+      console.error('❌ Failed to publish cleaning issue to SNS:', err.message);
+      throw err;
+    }
+  }
 }

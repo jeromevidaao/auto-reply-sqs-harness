@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
+import { detectCleaningIssue } from './detectors/cleaning.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -162,9 +163,20 @@ export class GuestMessagingAgent {
       });
     }
 
+    // === Cleaning issue detection (separate high-priority alert) ===
+    const cleaningIssue = detectCleaningIssue(guestMessage, context);
+    if (cleaningIssue.detected) {
+      await this.notification.notifyCleaningIssue({
+        cleaningIssue,
+        guestMessage,
+        context,
+      });
+    }
+
     return {
       ...decision,
       escalated: shouldEscalate,
+      cleaningIssueDetected: cleaningIssue.detected,
     };
   }
 }

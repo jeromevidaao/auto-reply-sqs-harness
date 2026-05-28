@@ -82,4 +82,86 @@ export class ConsoleEscalationAdapter {
       }
     };
   }
+
+  /**
+   * Dedicated notification for cleaning issues found in guest feedback.
+   * This sends a separate, high-visibility alert (currently console, later email/SNS).
+   */
+  async notifyCleaningIssue({ cleaningIssue, guestMessage, context, timestamp = new Date() }) {
+    const lines = [];
+
+    const res = cleaningIssue.reservation || context || {};
+
+    // Format dates nicely with day of week
+    const formatDateWithDay = (dateStr) => {
+      if (!dateStr) return 'N/A';
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    };
+
+    lines.push('\n' + '#'.repeat(80));
+    lines.push('🧹  CLEANING ISSUE ALERT — ACTION REQUIRED FOR CLEANING CREW');
+    lines.push('#'.repeat(80));
+    lines.push(`Detected at: ${timestamp.toISOString()}`);
+    lines.push('');
+
+    if (res.guestName) {
+      lines.push(`Guest: ${res.guestName}`);
+    }
+    if (res.id || res.reservationId) {
+      lines.push(`Reservation ID: ${res.id || res.reservationId}`);
+    }
+    if (res.propertyName) {
+      lines.push(`Property: ${res.propertyName}`);
+    }
+    if (res.listingId) {
+      lines.push(`Listing ID: ${res.listingId}`);
+    }
+
+    lines.push('');
+    lines.push(`Check-in : ${formatDateWithDay(res.checkIn)}`);
+    lines.push(`Check-out: ${formatDateWithDay(res.checkOut)}`);
+    lines.push('');
+
+    lines.push('Specific cleaning issue mentioned:');
+    lines.push(`→ ${cleaningIssue.summary || cleaningIssue.matchedPhrase || 'Cleaning complaint detected'}`);
+    lines.push('');
+
+    if (cleaningIssue.contextSnippet) {
+      lines.push('Context from guest message:');
+      lines.push('---');
+      lines.push(cleaningIssue.contextSnippet);
+      lines.push('---');
+      lines.push('');
+    }
+
+    lines.push('Full guest message:');
+    lines.push('---');
+    lines.push(guestMessage);
+    lines.push('---');
+    lines.push('');
+
+    lines.push('Action: Please review and forward to the cleaning team.');
+    lines.push('Recipient (for now): jerome.ans@gmail.com');
+    lines.push('#'.repeat(80) + '\n');
+
+    console.error(lines.join('\n'));
+
+    return {
+      notified: true,
+      type: 'cleaning_issue',
+      channel: 'console',
+      payload: {
+        cleaningIssue,
+        guestMessage,
+        context,
+        timestamp: timestamp.toISOString(),
+      }
+    };
+  }
 }
