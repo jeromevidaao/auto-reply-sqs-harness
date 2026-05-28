@@ -44,6 +44,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Debug - Show role ARN (remove after testing)
+        run: |
+          echo "Role ARN from secret: ${{ secrets.AWS_ROLE_ARN }}"
+          if [ -z "${{ secrets.AWS_ROLE_ARN }}" ]; then
+            echo "❌ AWS_ROLE_ARN secret is EMPTY or not set"
+          else
+            echo "✅ AWS_ROLE_ARN secret is present"
+          fi
+
       - name: Build Lambda deployment package
         run: |
           mkdir -p /tmp/lambda-deploy
