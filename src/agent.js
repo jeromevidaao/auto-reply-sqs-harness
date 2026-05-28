@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { ToolRegistry, CleaningIssueTool } from './tools/index.js';
+import { ToolRegistry, CleaningIssueTool, ThermostatTool } from './tools/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -31,6 +31,9 @@ export class GuestMessagingAgent {
       // Register default tools (can be overridden by passing custom ones in options)
       if (!this.tools.has('detect_cleaning_issue')) {
         this.tools.register(new CleaningIssueTool());
+      }
+      if (!this.tools.has('get_thermostat_instructions')) {
+        this.tools.register(new ThermostatTool());
       }
     }
   }
@@ -189,10 +192,26 @@ export class GuestMessagingAgent {
       });
     }
 
+    // === Thermostat / HVAC instructions (KumoCloud + Nest warnings) ===
+    // Uses the unified Tool interface.
+    // We call it for any message — the tool itself determines relevance and
+    // whether we have good per-unit data. This is more reliable than depending
+    // only on the LLM category.
+    const thermostatTool = this.tools.get('get_thermostat_instructions');
+    let thermostatInfo = null;
+
+    if (thermostatTool) {
+      const info = await thermostatTool.execute(guestMessage, context);
+      if (info && info.detected) {
+        thermostatInfo = info;
+      }
+    }
+
     return {
       ...decision,
       escalated: shouldEscalate,
       cleaningIssueDetected: cleaningIssue.detected,
+      thermostatInfo,
     };
   }
 }

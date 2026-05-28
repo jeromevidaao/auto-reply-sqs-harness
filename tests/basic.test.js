@@ -62,4 +62,27 @@ describe('GuestMessagingAgent (mock mode)', () => {
     // Mock treats unknown messages as OTHER_MESSAGE + none → escalates
     assert.equal(result.escalated, true);
   });
+
+  it('returns structured thermostat instructions via ThermostatTool for HVAC-related messages', async () => {
+    const agent = new GuestMessagingAgent({
+      llm: 'mock',
+      projectRoot: projectRootForTests
+    });
+
+    // Apt 3 has a known "ignore the Nest" warning
+    const result = await agent.handleMessage(
+      "How do I turn on the heat? It's freezing in here.",
+      {
+        guestName: 'Alex',
+        listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+        propertyName: 'Apt 3'
+      }
+    );
+
+    assert.ok(result.thermostatInfo);
+    assert.equal(result.thermostatInfo.detected, true);
+    assert.ok(result.thermostatInfo.warning && result.thermostatInfo.warning.includes("don't use the Nest thermostat"));
+    assert.ok(result.thermostatInfo.system.includes('KumoCloud'));
+    assert.ok(result.thermostatInfo.howTo.some(step => step.includes('remotes on the wall')));
+  });
 });
