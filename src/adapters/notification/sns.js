@@ -5,16 +5,7 @@
  * Publishes a message to the configured SNS topic, which can trigger email (or other) notifications.
  */
 
-// Lazy import so the harness works without @aws-sdk/client-sns installed
-// (only needed when you actually want SNS escalation)
-let SNSClient, PublishCommand;
-async function loadAwsSdk() {
-  if (!SNSClient) {
-    const awsSdk = await import('@aws-sdk/client-sns');
-    SNSClient = awsSdk.SNSClient;
-    PublishCommand = awsSdk.PublishCommand;
-  }
-}
+import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 
 export class SnsNotificationAdapter {
   constructor(options = {}) {
@@ -26,15 +17,7 @@ export class SnsNotificationAdapter {
       throw new Error('SNS topic ARN is required for SnsNotificationAdapter (set SNS_TOPIC_ARN or pass topicArn)');
     }
 
-    this._sns = null; // lazy
-  }
-
-  async _getSnsClient() {
-    if (!this._sns) {
-      await loadAwsSdk();
-      this._sns = new SNSClient({ region: this.region });
-    }
-    return this._sns;
+    this._sns = new SNSClient({ region: this.region });
   }
 
   async notifyEscalation({ decision, guestMessage, context, timestamp = new Date() }) {
@@ -79,15 +62,14 @@ export class SnsNotificationAdapter {
 
     const message = messageLines.join('\n');
 
-    const command = new PublishCommand({
-      TopicArn: this.topicArn,
-      Subject: subject,
-      Message: message,
-    });
-
     try {
-      const sns = await this._getSnsClient();
-      const result = await sns.send(command);
+      const command = new PublishCommand({
+        TopicArn: this.topicArn,
+        Subject: subject,
+        Message: message,
+      });
+
+      const result = await this._sns.send(command);
       console.log(`✅ Escalation published to SNS (MessageId: ${result.MessageId})`);
       return {
         escalated: true,

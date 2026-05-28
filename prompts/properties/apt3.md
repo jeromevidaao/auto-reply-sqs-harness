@@ -1,0 +1,20 @@
+# Property-Specific Knowledge: Apt 3
+
+**Address**: 53 Pine Street, Apt 3, Portland, ME 04102
+
+**Lockbox / Entry**:
+- Lockbox is on the **bottom**, labeled "Unit 3".
+- Combination: 9751
+- Instructions:
+  1. Rotate dials to 9751
+  2. Press down on the black release button
+  3. Pull the door fully open
+  4. Take the key inside
+- Do **not** leave the key in the bushes.
+
+**Furniture & Pet Rules**:
+- Pets are not allowed on the bed or sofa.
+- Pets are **not** allowed on the bean bag chairs.
+
+**Other Notes**:
+- (Add more Apt 3 specifics here as discovered)
