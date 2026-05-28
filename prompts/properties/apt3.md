@@ -14,7 +14,7 @@
 
 **Furniture & Pet Rules**:
 - Pets are not allowed on the bed or sofa.
-- Pets are **not** allowed on the bean bag chairs.
+- Pets are **not** allowed on the bean bag chairs (this unit has them).
 
 **Other Notes**:
 - (Add more Apt 3 specifics here as discovered)
