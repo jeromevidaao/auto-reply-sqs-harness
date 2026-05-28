@@ -105,9 +105,15 @@ We are starting clean and growing the harness deliberately rather than doing a b
 
 The original `auto-reply-sqs` Lambda will **later** be refactored to become a thin consumer of this package (or a published version of the agent core). No Lambda work is happening in this repo right now.
 
+## CI/CD & Deployment
+
+Pushing code to the `main` branch now automatically deploys to AWS Lambda (`guest-messaging-agent-harness`).
+
+**Important**: You must enable Branch Protection on `main` (requiring CI to pass) to avoid deploying broken code. See [docs/deployment.md](./docs/deployment.md).
+
 ## Next Steps (Iteration Plan)
 
-See `docs/ROADMAP.md` (to be added in the next commits) for the concrete backlog.
+See `ROADMAP.md` for the concrete backlog.
 
 ---
 

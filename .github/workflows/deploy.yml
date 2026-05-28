@@ -1,27 +1,30 @@
 name: Deploy to AWS Lambda
 
 on:
-  # Manual trigger only for now (safe)
+  # Automatic deployment on every push to main
+  push:
+    branches: [main]
+
+  # Manual trigger (useful for emergency/hotfix deploys or rollbacks)
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deployment environment'
-        required: true
-        default: 'staging'
+        description: 'Deployment environment (for future use)'
+        required: false
+        default: 'production'
         type: choice
         options:
           - staging
           - production
 
-  # Optional: Uncomment later if you want to auto-deploy on pushes to a specific branch
-  # push:
-  #   branches: [ deploy ]
-
 jobs:
   deploy:
     name: Deploy guest-messaging-agent-harness
     runs-on: ubuntu-latest
-    # Add 'environment' protection rules in GitHub repo settings for extra safety
+
+    # IMPORTANT: For safe continuous deployment, you MUST enable Branch Protection
+    # on the `main` branch and require the CI jobs ("Run Tests" and "Run Evaluation Suite")
+    # to pass before allowing merges. This prevents broken code from being deployed.
 
     steps:
       - name: Checkout repository
@@ -52,8 +55,10 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Recommended: Use OIDC (no long-lived keys)
-          # For now, you can also use access keys stored in GitHub Secrets
+          # === RECOMMENDED: Use GitHub OIDC (no long-lived AWS keys) ===
+          # See docs below for setup instructions.
+          #
+          # Quick start (less secure): Store long-lived keys as GitHub Secrets
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
