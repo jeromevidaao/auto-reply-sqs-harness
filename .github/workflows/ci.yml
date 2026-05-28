@@ -1,5 +1,9 @@
 name: CI
 
+env:
+  # Opt into Node.js 24 for all actions to avoid Node 20 deprecation warnings
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main]
