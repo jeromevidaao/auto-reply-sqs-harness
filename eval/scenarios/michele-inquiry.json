@@ -1,0 +1,15 @@
+{
+  "id": "michele-inquiry-2026-04-09",
+  "description": "Michele asking about availability today → Saturday (2 nights). Hospitable captured only 1 night.",
+  "guestMessage": "Hi Jerome\nI'm coming to Portland again today and leaving Saturday\nIs your place available ?",
+  "context": {
+    "guestName": "Michele",
+    "checkIn": "2026-04-09",
+    "checkOut": "2026-04-10",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "hasPets": false,
+    "petCount": 0,
+    "conversationHistory": []
+  }
+}

@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# OS / Editor
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# Build / output
+dist/
+coverage/
+eval/reports/
+
+# Secrets (never commit real keys)
+*.pem
+secrets/

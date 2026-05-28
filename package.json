@@ -1,0 +1,35 @@
+{
+  "name": "auto-reply-sqs-harness",
+  "version": "0.1.0",
+  "description": "Local-first evaluation harness and core for the Grok-powered guest messaging agent. Fully runnable locally for rapid prompt, category, and behavior iteration.",
+  "type": "module",
+  "main": "src/agent.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:watch": "node --test --watch tests/*.test.js",
+    "simulate": "node simulator/cli.js",
+    "eval": "node eval/runner.js",
+    "eval:report": "node eval/runner.js --report",
+    "lint": "echo 'Add eslint later if desired'"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "harness",
+    "evaluation",
+    "grok",
+    "airbnb",
+    "guest-messaging"
+  ],
+  "author": "Jerome Ansia",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  },
+  "optionalDependencies": {
+    "@aws-sdk/client-sns": "^3.1056.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
