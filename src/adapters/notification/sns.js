@@ -71,6 +71,8 @@ export class SnsNotificationAdapter {
 
       const result = await this._sns.send(command);
       console.log(`✅ Escalation published to SNS (MessageId: ${result.MessageId})`);
+      console.log('📤 ACTUAL ESCALATION MESSAGE SENT TO CLOUDWATCH/SNS:');
+      console.log(message);
       return {
         escalated: true,
         channel: 'sns',
@@ -123,6 +125,8 @@ export class SnsNotificationAdapter {
     try {
       const result = await this._sns.send(command);
       console.log(`✅ Cleaning issue published to SNS (MessageId: ${result.MessageId})`);
+      console.log('📤 ACTUAL CLEANING ALERT SENT TO CLOUDWATCH/SNS:');
+      console.log(message);
       return {
         notified: true,
         type: 'cleaning_issue',

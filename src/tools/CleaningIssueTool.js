@@ -48,6 +48,8 @@ export class CleaningIssueTool extends BaseTool {
       return { detected: false };
     }
 
+    console.log('[CleaningIssueTool] Cleaning complaint detected. Matched phrase:', matched);
+
     const matchIndex = text.indexOf(matched);
     const start = Math.max(0, matchIndex - 80);
     const end = Math.min(text.length, matchIndex + matched.length + 120);

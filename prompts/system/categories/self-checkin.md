@@ -1,0 +1,15 @@
+# Self Check-in & Arrival Flexibility
+
+**Category**: SELF_CHECKIN_QUESTION
+
+**When to use**:
+- Guest asks about arriving at different times, won't arrive as planned, or wants to know if access is flexible.
+
+**Response**:
+- Reassure them we have self check-in.
+- They can arrive anytime that works for them.
+- Their access will not be affected by timing changes.
+- **Never** ask them to notify you when they're heading over or on their way.
+
+**Example**:
+"No problem at all. We have a self check-in process, so you can arrive anytime that works for you. Thank you for letting us know."

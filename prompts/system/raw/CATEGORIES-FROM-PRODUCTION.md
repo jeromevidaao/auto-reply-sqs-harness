@@ -1,0 +1,103 @@
+# All Message Categories Defined in Current Production Prompt
+
+Extracted from the full Lambda source pasted 2026-05-28.
+
+This is the complete list of `typeOfMessageReceived` values the production agent is trained to output.
+
+## Full List (in order they appear in the prompt)
+
+1. THANK_YOU_MESSAGE
+2. CHECK_IN_TIME_QUESTION
+3. PARKING_AVAILABILITY_QUESTION
+4. PARKING_PLOWING_SERVICE
+5. PARKING_PLOWING_STATUS
+6. PARKING_TEMPORARY_REQUEST
+7. PARKING_ADDITIONAL_QUESTION
+8. GUEST_CHECKOUT
+9. EARLY_CHECKIN_QUESTION
+10. WRONG_ENTRANCE_LOCKBOX
+11. DOOR_CODE_ISSUE
+12. GUEST_COUNT_CHANGE_REQUEST
+13. DISCOUNT_REQUEST
+14. JULY_4TH_FIREWORKS
+15. SOFA_BED_SIZE
+16. OFF_PLATFORM_BOOKING
+17. LUGGAGE_DROP_OFF
+18. SLEEPING_ARRANGEMENTS
+19. PACK_AND_PLAY_BRAND
+20. COOKING_UTENSILS
+21. LATE_CHECKOUT
+22. NEARBY_BEACH
+23. SELF_CHECKIN_QUESTION
+24. HOTEL_RECOMMENDATION
+25. REVIEW_LINK_REQUEST
+26. REVIEW_SUBMITTED
+27. REVIEW_PROMISE
+28. LAUNDRY_QUESTION
+29. LAUNDRY_DETERGENT_QUESTION
+30. LUGGAGE_STORAGE
+31. WIFI_PASSWORD
+32. WIFI_TROUBLESHOOTING
+33. PET_QUESTIONS
+34. SLEEPING_ACCOMMODATION
+35. DOOR_LOCKING_ISSUE
+36. LUNCH_RECOMMENDATION
+37. LOBSTER_RECOMMENDATION
+38. DINNER_RECOMMENDATION
+39. CANCELLATION_POLICY
+40. EXTRA_LINENS_TOWELS
+41. THERMOSTAT_HEATPUMP   ← Already moved to ThermostatTool
+42. EVENT_REQUEST
+43. CONDO_COMPARISON
+44. STREET_SAFETY_NOISE
+45. OUTDOOR_TRASH_QUESTION
+46. DISTANCE_CALCULATION
+47. NEW_RESERVATION_WELCOME
+48. NEW_INQUIRY_WELCOME
+49. DAMAGE_REPORT
+50. LOCKBOX_KEY_TAKEN
+51. CANCELLATION_NOTIFICATION
+52. PRICING_INQUIRY
+53. ROUTER_ETHERNET_ACCESS
+54. CHECKOUT_INSTRUCTIONS
+55. CHECKOUT_TRASH_LINEN
+56. APT3_LOCKBOX_ISSUE
+57. CHECKIN_LOCATION_GUIDANCE
+58. STUDIO_FUTON_QUESTION
+59. STUDIO_FUTON_BLANKET
+60. MARINA_DOWNTOWN_PARKING
+61. WATER_QUALITY_QUESTION
+62. EV_CHARGER_QUESTION
+63. FLOOR_STAIRS_QUESTION
+64. BATH_AMENITIES_QUESTION
+65. CANCELLATION_POLICY_EXCEPTION   (added later in prompt)
+
+Plus the fallback:
+- OTHER_MESSAGE
+- UNCATEGORIZED (mentioned in rules)
+
+## Current Harness Coverage (as of 2026-05-28)
+
+**Already have dedicated Tools:**
+- THERMOSTAT_HEATPUMP → `ThermostatTool`
+- (Cleaning detection was added as a Tool even though it wasn't a formal category)
+
+**Good prompt coverage:**
+- Many simple categories (WIFI_PASSWORD, LATE_CHECKOUT, PET_QUESTIONS, etc.)
+
+**Weak / High-risk areas with very light coverage:**
+- CANCELLATION_POLICY + CANCELLATION_NOTIFICATION + CANCELLATION_POLICY_EXCEPTION (very complex refund math + anti-contradiction rules)
+- EVENT_REQUEST
+- NEW_RESERVATION_WELCOME / NEW_INQUIRY_WELCOME (the big welcome messages with dynamic logic)
+- DAMAGE_REPORT + LOCKBOX_KEY_TAKEN
+- Several location / parking edge cases
+
+## Recommended Next Actions (from "let's do all" plan)
+
+1. **Immediate** — Finish extracting the full clean text of this prompt into `raw/`.
+2. Deep work on Cancellation categories (highest risk).
+3. Create `EventRequestTool`.
+4. Improve welcome message logic (NEW_*_WELCOME) — this is currently one of the longest and most fragile sections.
+5. Turn more of the complex rule blocks into Tools or category-specific prompt files.
+
+This file will be updated as we modularize.

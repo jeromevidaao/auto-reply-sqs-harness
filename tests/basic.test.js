@@ -41,6 +41,54 @@ describe('GuestMessagingAgent (mock mode)', () => {
     assert.equal(result.proposedResponse, 'none');
   });
 
+  it('loads modular prompt with categories when useModularPrompt is true', async () => {
+    const modularAgent = new GuestMessagingAgent({
+      llm: 'mock',
+      projectRoot: projectRootForTests,
+      useModularPrompt: true
+    });
+
+    const prompt = await modularAgent.loadPrompt({});
+    assert.ok(prompt.includes('Category Rules'), 'Modular prompt should include category rules');
+    assert.ok(prompt.includes('cancellation') || prompt.includes('Cancellation'), 'Should include cancellation category');
+  });
+
+  it('can load raw production prompt when fullPromptPath is provided', async () => {
+    const rawPath = path.join(projectRootForTests, 'prompts/system/raw/production-system-prompt-raw.txt');
+    const rawAgent = new GuestMessagingAgent({
+      llm: 'mock',
+      projectRoot: projectRootForTests,
+      fullPromptPath: rawPath
+    });
+
+    const prompt = await rawAgent.loadPrompt({});
+    assert.ok(prompt.length > 1000, 'Raw prompt should be substantial');
+  });
+
+  it('supports reflection mode without crashing', async () => {
+    const agent = new GuestMessagingAgent({
+      llm: 'mock',
+      projectRoot: projectRootForTests,
+      enableReflection: true,
+      reflectionCategories: ['CANCELLATION_POLICY']
+    });
+
+    // This should not throw even though the mock LLM may return garbage
+    const result = await agent.handleMessage(
+      "I need to cancel my reservation due to an emergency.",
+      {
+        guestName: 'Test',
+        bookingTimestamp: '2026-05-01T10:00:00Z',
+        checkIn: '2026-06-01',
+        listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d'
+      }
+    );
+
+    assert.ok(result);
+    // Either reflection ran or it was skipped gracefully
+    assert.ok(result.reflection === undefined || typeof result.reflection.decision === 'string');
+  });
+
   it('detects cleaning issues using the unified Tool (CleaningIssueTool) in handleMessage', async () => {
     const agent = new GuestMessagingAgent({
       llm: 'mock',

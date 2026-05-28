@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
- * Very lightweight eval runner for v0.1.
- * In later iterations this will become much more sophisticated.
+ * Eval runner with rubrics and prompt mode support (v0.3).
+ *
+ * Usage:
+ *   npm run eval                    # default modular prompt
+ *   npm run eval -- --mode=raw --raw-prompt=prompts/system/raw/production-current.md
  */
 
 import fs from 'node:fs/promises';
@@ -18,16 +21,28 @@ async function loadJson(p) {
 }
 
 async function main() {
-  console.log('🧪 Running auto-reply-sqs-harness evaluation suite\n');
+  const args = process.argv.slice(2);
+  const mode = args.find(a => a.startsWith('--mode='))?.split('=')[1] || 'modular';
+  const rawPromptPath = args.find(a => a.startsWith('--raw-prompt='))?.split('=')[1];
 
-  const agent = new GuestMessagingAgent({
+  console.log(`🧪 Running evaluation suite (mode: ${mode})\n`);
+
+  const agentOptions = {
     llm: 'mock',
-    projectRoot: path.resolve(__dirname, '..')
-  }); // force mock for deterministic evals
-  const files = await fs.readdir(scenariosDir);
+    projectRoot: path.resolve(__dirname, '..'),
+    useModularPrompt: mode === 'modular'
+  };
 
+  if (mode === 'raw' && rawPromptPath) {
+    agentOptions.fullPromptPath = rawPromptPath;
+  }
+
+  const agent = new GuestMessagingAgent(agentOptions);
+
+  const files = await fs.readdir(scenariosDir);
   let passed = 0;
   let failed = 0;
+  const results = [];
 
   for (const file of files.filter(f => f.endsWith('.json'))) {
     const scenarioPath = path.join(scenariosDir, file);
@@ -36,26 +51,79 @@ async function main() {
 
     console.log(`→ ${scenario.id || file}`);
 
-    const result = await agent.processMessage(scenario.guestMessage, scenario.context);
+    const context = {
+      guestName: scenario.guestName,
+      checkIn: scenario.checkIn,
+      checkOut: scenario.checkOut,
+      listingId: scenario.listingId,
+      ...scenario.context
+    };
 
-    // Very basic heuristic check for v0.1
-    const looksGood = result.shouldReply === true &&
-                      result.proposedResponse &&
-                      result.proposedResponse.length > 20 &&
-                      !result.proposedResponse.toLowerCase().includes('$30'); // shouldn't mention pet fee
+    const result = await agent.processMessage(scenario.message || scenario.guestMessage, context);
 
-    if (looksGood) {
-      console.log(`   ✅ PASS — ${result.typeOfMessageReceived}`);
+    // Basic rubric scoring
+    const rubric = scenario.rubric || {};
+    let score = 0;
+    let maxScore = 0;
+    const notes = [];
+
+    // Category check
+    if (rubric.expectedCategory) {
+      maxScore++;
+      if (result.typeOfMessageReceived === rubric.expectedCategory || 
+          (Array.isArray(result.typeOfMessageReceived) && result.typeOfMessageReceived.includes(rubric.expectedCategory))) {
+        score++;
+      } else {
+        notes.push(`Expected category ${rubric.expectedCategory}, got ${result.typeOfMessageReceived}`);
+      }
+    }
+
+    // Should reply
+    if (rubric.shouldReply !== undefined) {
+      maxScore++;
+      if (result.shouldReply === rubric.shouldReply) score++;
+      else notes.push(`shouldReply mismatch`);
+    }
+
+    // Must not contain forbidden phrases
+    if (rubric.forbiddenPhrases) {
+      maxScore++;
+      const lower = (result.proposedResponse || '').toLowerCase();
+      const hasForbidden = rubric.forbiddenPhrases.some(p => lower.includes(p.toLowerCase()));
+      if (!hasForbidden) score++;
+      else notes.push(`Contained forbidden phrase`);
+    }
+
+    // Must contain required phrases (loose check)
+    if (rubric.requiredPhrases) {
+      maxScore += rubric.requiredPhrases.length;
+      const lower = (result.proposedResponse || '').toLowerCase();
+      rubric.requiredPhrases.forEach(phrase => {
+        if (lower.includes(phrase.toLowerCase())) score++;
+        else notes.push(`Missing required phrase: ${phrase}`);
+      });
+    }
+
+    const passedScenario = score === maxScore && maxScore > 0;
+
+    console.log(`   ${passedScenario ? '✅' : '❌'} Score: ${score}/${maxScore} — ${result.typeOfMessageReceived}`);
+    if (notes.length > 0) console.log(`      Notes: ${notes.join('; ')}`);
+
+    if (passedScenario) {
       passed++;
     } else {
-      console.log(`   ❌ FAIL`);
-      console.log(`      Type: ${result.typeOfMessageReceived}`);
-      console.log(`      Reply: ${result.proposedResponse?.slice(0, 120)}...`);
       failed++;
     }
+
+    results.push({ id: scenario.id || file, score, maxScore, passed: passedScenario });
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`);
+  console.log(`\n=== Summary ===`);
+  console.log(`${passed} passed, ${failed} failed`);
+
+  const totalScore = results.reduce((a, b) => a + b.score, 0);
+  const totalMax = results.reduce((a, b) => a + b.maxScore, 0);
+  console.log(`Overall rubric score: ${totalScore}/${totalMax}`);
 
   if (failed > 0) {
     process.exitCode = 1;

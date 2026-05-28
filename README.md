@@ -56,21 +56,20 @@ npm run simulate
 ```
 prompts/
   system/
-    base.md                 # The main system prompt (categories, rules, tone)
-  versions/                 # Versioned snapshots for experiments
+    base.md                 # Core prompt (v0.2)
+    categories/             # 32+ modular category rule files extracted from production
+    raw/                    # Raw production prompt(s) for fidelity testing & comparison
+  properties/               # Per-unit knowledge (1b.md, apt2.md, apt3.md)
 src/
-  agent.js                  # Core GuestMessagingAgent (the "brain")
-  adapters/                 # pluggable infrastructure (LLM + notifications)
-  tools/                    # Unified Tool abstraction + index.js barrel
-                            # (BaseTool, ToolRegistry, CleaningIssueTool, ...)
-                            # All capability-style features (detectors, policies, lookups) go here for consistency
+  agent.js                  # GuestMessagingAgent — supports modular vs raw production prompt modes
+  tools/                    # CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool...
 eval/
   scenarios/                # Recorded guest situations (JSON)
   goldens/                  # Human-approved ideal responses
-  runner.js                 # The evaluation harness
+  runner.js                 # Evaluation harness (supports modular vs raw prompt modes)
 simulator/
   cli.js                    # Local interactive development tool
-tests/                      # Fast unit + integration tests
+tests/                      # Unit + integration tests (including prompt composition tests)
 ```
 
 ## Adding a New Test Scenario (Recommended Workflow)
@@ -83,6 +82,17 @@ tests/                      # Fast unit + integration tests
 6. Commit both the scenario/golden + the prompt change.
 
 This is how we will drive quality improvements safely.
+
+## Importing the Real Production Prompt
+
+The current `prompts/system/base.md` is a starting skeleton. To reach production parity we need the **actual full system prompt** currently running in the original Lambda.
+
+**Process**:
+1. Paste the exact full system prompt (the complete text sent as the `system` message to Grok).
+2. It will be saved verbatim into `prompts/system/raw/production-current.md`.
+3. We will then analyze it and begin modular refactoring while preserving the original.
+
+See `prompts/system/README.md` for the intended long-term structure.
 
 ## Current Status (v0.1)
 

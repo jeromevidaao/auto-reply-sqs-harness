@@ -11,5 +11,11 @@
     "hasPets": false,
     "petCount": 0,
     "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "NEW_INQUIRY_WELCOME",
+    "shouldReply": true,
+    "forbiddenPhrases": ["$30", "pet fee"],
+    "requiredPhrases": ["welcome", "book"]
   }
 }
