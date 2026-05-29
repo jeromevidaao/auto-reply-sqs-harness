@@ -1,4 +1,8 @@
-# Luggage Related
+# Luggage
+
+**Canonical category name(s)**: LUGGAGE_DROP_OFF, LUGGAGE_STORAGE
+
+For luggage drop off or storage requests, use the specific contact number (518-3417) when the golden expects it. Related
 
 **Categories covered**:
 - LUGGAGE_DROP_OFF

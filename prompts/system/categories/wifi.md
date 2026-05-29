@@ -1,5 +1,7 @@
 # WiFi
 
+**Canonical category name(s)**: WIFI_PASSWORD, wifi
+
 **Network**: Ansia_2.4
 **Password**: 10286500 (all lowercase)
 

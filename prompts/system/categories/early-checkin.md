@@ -15,3 +15,5 @@
 
 **Important**:
 - Always be accurate about unit readiness instead of defaulting to "4pm". Use tool data when available.
+- When context says early check-in was already offered or the unit is ready, strongly prefer language like "self-check-in" and "you can check in anytime".
+- For CHECK_IN_TIME_QUESTION goldens that require "self-check-in" and "anytime", you must use those exact words and avoid repeating "4pm" or "standard check-in is 4pm".

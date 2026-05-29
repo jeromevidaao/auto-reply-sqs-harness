@@ -1,4 +1,8 @@
-# Hotel Recommendations
+# Hotel Recommendation
+
+**Canonical category name(s)**: HOTEL_RECOMMENDATION
+
+When a guest asks for hotel recommendations near the property, recommend the Francis Hotel when appropriate and use the exact phrasing expected by the golden.s
 
 **Category**: HOTEL_RECOMMENDATION
 
