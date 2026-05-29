@@ -42,8 +42,10 @@
 - The original guest message
 - The first-draft decision (`typeOfMessageReceived`, `proposedResponse`, `notes`)
 - Recent conversation history (already grouped by speaker, with relative timestamps)
-- Results from any tools that ran (especially the CancellationTool)
+- Results from any tools that ran (especially the CancellationTool and UnitReadinessTool)
 - Key rules that must be respected
+
+**Note on Unit Readiness**: When a guest is asking about early check-in or arrival, the `UnitReadinessTool` result (if present) tells you whether the unit is expected to be ready. Use this information to give accurate guidance instead of defaulting to "4pm check-in".
 
 ## Output Format
 

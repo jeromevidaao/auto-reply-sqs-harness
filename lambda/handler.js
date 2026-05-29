@@ -20,6 +20,9 @@
  */
 
 import { GuestMessagingAgent } from '../src/agent.js';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { HospitableClient } from '../src/clients/HospitableClient.js';
 
 export const handler = async (event, context) => {
   const requestId = context?.awsRequestId || 'local-' + Date.now();
@@ -65,6 +68,10 @@ export const handler = async (event, context) => {
     };
   }
 
+  // === Clients for UnitReadinessTool ===
+  const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
+  const hospitableClient = new HospitableClient();
+
   const agent = new GuestMessagingAgent({
     llm: process.env.GROK_API_KEY ? 'auto' : 'mock',
     notification: 'auto',
@@ -72,7 +79,11 @@ export const handler = async (event, context) => {
     // Conversation Judge (anti-repetition, consistency, and policy enforcement)
     // With only 4-5 messages per day, we run the judge on every message by default.
     // Set ENABLE_CONVERSATION_JUDGE=false only if you want to disable it.
-    enableConversationJudge: process.env.ENABLE_CONVERSATION_JUDGE !== 'false'
+    enableConversationJudge: process.env.ENABLE_CONVERSATION_JUDGE !== 'false',
+
+    // Clients for UnitReadinessTool (used for unit readiness / early check-in logic)
+    ddbClient,
+    hospitableClient
   });
 
 

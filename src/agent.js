@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { ToolRegistry, CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool, AirbnbPolicyTool } from './tools/index.js';
+import { ToolRegistry, CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool } from './tools/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -64,6 +64,12 @@ export class GuestMessagingAgent {
       }
       if (!this.tools.has('get_airbnb_cancellation_policy')) {
         this.tools.register(new AirbnbPolicyTool());
+      }
+      if (!this.tools.has('get_unit_readiness')) {
+        this.tools.register(new UnitReadinessTool({
+          ddbClient: options.ddbClient || null,
+          hospitableClient: options.hospitableClient || null
+        }));
       }
     }
   }
