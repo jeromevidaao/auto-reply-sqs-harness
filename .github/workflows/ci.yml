@@ -14,6 +14,10 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    env:
+      # Force Node 24 runtime for actions that still declare node20 internally.
+      # See: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout repository
@@ -34,10 +38,13 @@ jobs:
   eval:
     name: Run Evaluation Suite
     runs-on: ubuntu-latest
-    # GROK_API_KEY is optional. When present the eval runs the full live-Grok suite
-    # (all goldens with real model + tools + reflection + judge). When absent it
-    # exits cleanly (0) so CI stays green. Matches the "never mock" rule.
     env:
+      # Force Node 24 runtime for actions that still declare node20 internally.
+      # See: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # GROK_API_KEY is optional. When present the eval runs the full live-Grok suite
+      # (all goldens with real model + tools + reflection + judge). When absent it
+      # exits cleanly (0) so CI stays green. Matches the "never mock" rule.
       GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
 
     steps:
