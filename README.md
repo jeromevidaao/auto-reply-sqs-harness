@@ -56,77 +56,89 @@ npm run simulate
 ```
 prompts/
   system/
-    base.md                 # Core prompt (v0.2)
-    categories/             # 32+ modular category rule files extracted from production
-    raw/                    # Raw production prompt(s) for fidelity testing & comparison
-  properties/               # Per-unit knowledge (1b.md, apt2.md, apt3.md)
+    base.md                 # Core prompt
+    categories/             # 34 modular category rule files (real production scenarios heavily represented)
+    raw/                    # Original monolithic prompt for comparison
+  properties/               # Per-unit knowledge
+
 src/
-  agent.js                  # GuestMessagingAgent — supports modular vs raw production prompt modes
-  tools/                    # CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool...
+  agent.js                  # GuestMessagingAgent (multipass: early traces → LLM → tools → Reflection → Judge)
+  tools/                    # Rich tool system (Cancellation, Thermostat, UnitReadiness, ConversationContext, etc.)
+  clients/                  # HospitableClient, etc.
+
 eval/
-  scenarios/                # Recorded guest situations (JSON)
-  goldens/                  # Human-approved ideal responses
-  runner.js                 # Evaluation harness (supports modular vs raw prompt modes)
+  scenarios/                # 43 goldens (many are real production scenarios)
+  goldens/
+  runner.js
+
 simulator/
-  cli.js                    # Local interactive development tool
-tests/                      # Unit + integration tests (including prompt composition tests)
+  cli.js
+
+tests/
 ```
 
 ## Adding a New Test Scenario (Recommended Workflow)
 
-1. Capture a real guest message + enough context (or synthesize a good one).
-2. Add it under `eval/scenarios/`.
-3. Write (or let the agent generate) the ideal response in `eval/goldens/`.
-4. Run `npm run eval` — the harness will score it.
-5. Tweak the prompt in `prompts/system/base.md` until the agent produces high-quality output on your scenarios.
-6. Commit both the scenario/golden + the prompt change.
+We treat real guest conversations as first-class test data.
 
-This is how we will drive quality improvements safely.
+1. Capture a real guest message + rich context (highly preferred) or create a high-value synthetic one.
+2. Add the scenario under `eval/scenarios/`.
+3. Write the ideal response + clear rubric in `eval/goldens/`.
+4. Run `npm run eval`.
+5. Improve prompts, tools, or early trace enrichment until the multipass system produces excellent output.
+6. Commit the scenario + golden together with any agent/prompt changes.
 
-## Importing the Real Production Prompt
+This is the primary way we drive response quality.
 
-The current `prompts/system/base.md` is a starting skeleton. To reach production parity we need the **actual full system prompt** currently running in the original Lambda.
+## Production Prompt & Modularization
 
-**Process**:
-1. Paste the exact full system prompt (the complete text sent as the `system` message to Grok).
-2. It will be saved verbatim into `prompts/system/raw/production-current.md`.
-3. We will then analyze it and begin modular refactoring while preserving the original.
+We have already done a large extraction of the original monolithic prompt into modular category files (see `prompts/system/categories/`). 
 
-See `prompts/system/README.md` for the intended long-term structure.
+The raw original is preserved in `prompts/system/raw/` for comparison and regression testing.
 
-## Current Status (v0.1)
+Ongoing work focuses on refining the modular prompts + the multipass agent logic that uses them.
 
-- [x] Local-only execution (mocks by default)
-- [x] Basic agent core + pluggable LLM adapter
-- [x] Pluggable notification / escalation adapter
-  - `console` (default for local dev) — very visible output + direct Airbnb link
-  - `sns` — publishes to AWS SNS (exact same mechanism as the original production Lambda)
-  - Auto mode: uses SNS if `SNS_TOPIC_ARN` / `ESCALATION_SNS_TOPIC_ARN` is set
-- [x] Escalations now include a direct clickable Airbnb messages link (e.g. `https://www.airbnb.com/hosting/messages/2492335251`)
-- [x] When the agent decides **not** to auto-reply, it triggers escalation (visible in simulator + via `handleMessage`)
-- [x] Starting system prompt with key categories (including recent ones like `CHECKOUT_TRASH_LINEN`)
-- [x] Michele inquiry scenario as the first golden test
-- [x] Interactive simulator (now shows escalation behavior)
-- [ ] Real email escalation adapter (to jerome.ans@gmail.com etc.)
-- [ ] Full port of every rule from the original 148k monster (we will do this iteratively)
-- [ ] Sophisticated rubrics + LLM-as-judge
-- [ ] Shadow mode / canary helpers (later)
+## Current State
 
-We are starting clean and growing the harness deliberately rather than doing a big-bang port.
+- [x] Fully local execution (mocks by default, real Grok supported)
+- [x] Mature core agent with pluggable LLM + notification adapters
+- [x] Rich Tool system (`BaseTool` + `ToolRegistry`) — Cleaning, Thermostat, Cancellation (+ live policy), Event, UnitReadiness, ConversationContext, etc.
+- [x] Sophisticated multipass response system:
+  - Early "Pre-processing / Trace Enrichment" step (pre-approval detection, recent host activity, duplicate risk, unit readiness hints)
+  - Main LLM generation with rich traces
+  - Reflection pass (high-risk categories)
+  - Conversation Judge (anti-repetition + consistency, runs on nearly every message)
+- [x] 43 goldens (heavy emphasis on real production scenarios extracted from the original monolithic Lambda)
+- [x] Strong focus on leveraging traces + tools for highest-quality responses
+- [x] 34 modular category rule files + property-specific knowledge
+- [x] Full evaluation harness with rubrics (`npm run eval`)
+- [x] Rich CloudWatch-style tracing in production Lambda handler
+- [x] CI runs full test + eval on every push
+
+The harness is now the primary place where response quality is developed and validated.
 
 ## Relationship to the Original Lambda
 
-The original `auto-reply-sqs` Lambda will **later** be refactored to become a thin consumer of this package (or a published version of the agent core). No Lambda work is happening in this repo right now.
+The core agent and evaluation harness now live here. The original Lambda has been updated to consume this package as its brain (thin handler + rich logging + OIDC deployment).
+
+Most quality and safety work happens in this repository.
 
 ## CI/CD & Deployment
 
-Pushing code to the `main` branch now automatically deploys to AWS Lambda (`guest-messaging-agent-harness`).
+Pushing to `main` runs the full test + eval suite in CI and (if passing) deploys to the `guest-messaging-agent-harness` Lambda via GitHub OIDC.
 
-**Important**: You must enable Branch Protection on `main` (requiring CI to pass) to avoid deploying broken code. See [docs/deployment.md](./docs/deployment.md).
+Branch protection requiring CI + eval to pass is strongly recommended. See `docs/deployment.md`.
 
-## Next Steps (Iteration Plan)
+## Current Focus & Next Steps
 
-See `ROADMAP.md` for the concrete backlog.
+See `ROADMAP.md` for the live backlog.
+
+Current emphasis:
+- Continuing to harden the multipass system (early trace enrichment, better use of tools + conversation history across all passes)
+- Porting more high-value real production scenarios as goldens
+- Moving remaining old safety logic (duplicate checks, pre-approval fast paths, etc.) into reusable tools
+
+The goal is the highest quality responses possible by ensuring every pass in the pipeline has excellent traces and tool outputs.
 
 ---
 
