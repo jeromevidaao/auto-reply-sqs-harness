@@ -1,5 +1,7 @@
 # Parking
 
+**Canonical category name(s)**: PARKING, PARKING_ADDITIONAL_QUESTION, PARKING_PLOWING_SERVICE
+
 **General rule**:
 - All units have one dedicated off-street parking spot.
 

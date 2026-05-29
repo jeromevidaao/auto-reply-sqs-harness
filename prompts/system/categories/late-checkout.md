@@ -1,6 +1,6 @@
 # Late Checkout
 
-**Category**: LATE_CHECKOUT
+**Canonical category name(s)**: LATE_CHECKOUT, late-checkout
 
 **When to use**:
 - Guest asks for late checkout, extended checkout time, or "can we stay a bit longer on checkout day".

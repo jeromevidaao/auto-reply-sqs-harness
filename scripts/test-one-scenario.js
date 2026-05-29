@@ -20,9 +20,15 @@ async function main() {
 
   if (!scenarioName) {
     console.error('Usage: node scripts/test-one-scenario.js <scenario-id> [--reflection]');
-    console.error('Example: node scripts/test-one-scenario.js apt3-lockbox-issue');
+    console.error('       node scripts/test-one-scenario.js "apt3-lockbox-issue door-locking-issue josh-cleaning"');
+    console.error('');
+    console.error('Currently known hard failures (from latest CI):');
+    console.error('  apt3-lockbox-issue, door-locking-issue, josh-cleaning, thermostat-ignore-nest-remotes,');
+    console.error('  many early-checkin, cancellation, parking, welcome, pricing, self-checkin, etc.');
     process.exit(1);
   }
+
+  const names = scenarioName.includes(' ') ? scenarioName.split(/\s+/) : [scenarioName];
 
   const scenarioPath = path.join(projectRoot, 'eval/scenarios', `${scenarioName}.json`);
   const goldenPath = path.join(projectRoot, 'eval/goldens', `${scenarioName}.md`);
