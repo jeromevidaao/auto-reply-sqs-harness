@@ -5,7 +5,7 @@
  *
  * Usage:
  *   npm run simulate
- *   node simulator/cli.js --llm=mock
+ *   node simulator/cli.js
  */
 
 import readline from 'node:readline';
@@ -14,10 +14,15 @@ import { createLLMAdapter } from '../src/adapters/llm/index.js';
 
 async function main() {
   const args = process.argv.slice(2);
-  const llmPref = args.includes('--llm=mock') ? 'mock' : 'auto';
+  const llmPref = 'auto';
+
+  if (args.includes('--llm=mock')) {
+    console.error('❌ --llm=mock is no longer supported. Mock LLM has been removed.');
+    process.exit(1);
+  }
 
   console.log('🧠 Guest Messaging Agent — Local Simulator');
-  console.log(`   LLM adapter: ${llmPref === 'mock' ? 'mock (deterministic)' : 'auto (real Grok if key present)'}`);
+  console.log('   LLM adapter: auto (real Grok)');
   console.log('   Type "exit" or "quit" to leave.\n');
 
   const llm = createLLMAdapter(llmPref);

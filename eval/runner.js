@@ -27,8 +27,14 @@ async function main() {
 
   console.log(`🧪 Running evaluation suite (mode: ${mode})\n`);
 
+  if (!process.env.GROK_API_KEY) {
+    console.error('❌ GROK_API_KEY is required to run the evaluation suite.');
+    console.error('   Mock LLM is no longer supported, even for evals.');
+    process.exit(1);
+  }
+
   const agentOptions = {
-    llm: 'mock',
+    llm: 'auto',
     projectRoot: path.resolve(__dirname, '..'),
     useModularPrompt: mode === 'modular'
   };

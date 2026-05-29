@@ -208,14 +208,17 @@ export const handler = async (event, context) => {
   const hospitableClient = new HospitableClient();
 
   // Ensure we have the real Grok key (fetch from SSM /grok/api-key if not already in env)
-  // This allows the harness to use the full multipass + Judge with real Grok,
-  // matching production behavior from the old auto-reply-sqs Lambda.
+  // Mock LLM is no longer supported at all (even for tests).
   await getGrokApiKey();
+
+  if (!process.env.GROK_API_KEY) {
+    throw new Error('GROK_API_KEY is required. Mock LLM is disabled.');
+  }
 
   // Reflection is now always enabled in production.
   // This ensures the complete pipeline (Main LLM → Tools → Reflection → Judge) runs on every message.
   const agent = new GuestMessagingAgent({
-    llm: process.env.GROK_API_KEY ? 'auto' : 'mock',
+    llm: 'auto',
     notification: 'auto',
 
     // Reflection (second-pass critique) is now always on in production.

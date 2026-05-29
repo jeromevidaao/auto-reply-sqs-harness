@@ -7,10 +7,19 @@ import { GuestMessagingAgent } from '../src/agent.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRootForTests = path.resolve(__dirname, '..');
 
-describe('GuestMessagingAgent (mock mode)', () => {
+describe('GuestMessagingAgent', () => {
+  // These tests now require a real GROK_API_KEY.
+  // Mock LLM is no longer supported, even for unit tests.
+  if (!process.env.GROK_API_KEY) {
+    console.warn('⚠️  Skipping GuestMessagingAgent tests: GROK_API_KEY is not set.');
+    // We can still run some non-LLM tests below if any exist.
+  }
+
   it('handles the Michele inquiry scenario without mentioning pet fees', async () => {
+    if (!process.env.GROK_API_KEY) return; // skip
+
     const agent = new GuestMessagingAgent({
-      llm: 'mock',
+      llm: 'auto',
       projectRoot: projectRootForTests
     });
 
@@ -33,7 +42,7 @@ describe('GuestMessagingAgent (mock mode)', () => {
 
   it('returns OTHER_MESSAGE + none for unclear input by default (mock)', async () => {
     const agent = new GuestMessagingAgent({
-      llm: 'mock',
+      llm: 'auto',
       projectRoot: projectRootForTests
     });
     const result = await agent.processMessage('asdfghjkl random nonsense qwerty');
@@ -43,7 +52,7 @@ describe('GuestMessagingAgent (mock mode)', () => {
 
   it('loads modular prompt with categories when useModularPrompt is true', async () => {
     const modularAgent = new GuestMessagingAgent({
-      llm: 'mock',
+      llm: 'auto',
       projectRoot: projectRootForTests,
       useModularPrompt: true
     });
@@ -56,7 +65,7 @@ describe('GuestMessagingAgent (mock mode)', () => {
   it('can load raw production prompt when fullPromptPath is provided', async () => {
     const rawPath = path.join(projectRootForTests, 'prompts/system/raw/production-system-prompt-raw.txt');
     const rawAgent = new GuestMessagingAgent({
-      llm: 'mock',
+      llm: 'auto',
       projectRoot: projectRootForTests,
       fullPromptPath: rawPath
     });
@@ -67,7 +76,7 @@ describe('GuestMessagingAgent (mock mode)', () => {
 
   it('supports reflection mode without crashing', async () => {
     const agent = new GuestMessagingAgent({
-      llm: 'mock',
+      llm: 'auto',
       projectRoot: projectRootForTests,
       enableReflection: true,
       reflectionCategories: ['CANCELLATION_POLICY']
@@ -91,7 +100,7 @@ describe('GuestMessagingAgent (mock mode)', () => {
 
   it('supports Conversation Judge mode without crashing', async () => {
     const agent = new GuestMessagingAgent({
-      llm: 'mock',
+      llm: 'auto',
       projectRoot: projectRootForTests,
       enableConversationJudge: true
     });
@@ -113,7 +122,7 @@ describe('GuestMessagingAgent (mock mode)', () => {
 
   it('detects cleaning issues using the unified Tool (CleaningIssueTool) in handleMessage', async () => {
     const agent = new GuestMessagingAgent({
-      llm: 'mock',
+      llm: 'auto',
       projectRoot: projectRootForTests
     });
 
@@ -135,7 +144,7 @@ describe('GuestMessagingAgent (mock mode)', () => {
 
   it('returns structured thermostat instructions via ThermostatTool for HVAC-related messages', async () => {
     const agent = new GuestMessagingAgent({
-      llm: 'mock',
+      llm: 'auto',
       projectRoot: projectRootForTests
     });
 

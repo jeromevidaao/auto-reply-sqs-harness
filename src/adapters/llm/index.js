@@ -1,21 +1,21 @@
-import { MockLLMAdapter } from './mock.js';
 import { GrokLLMAdapter } from './grok.js';
 
 export function createLLMAdapter(preferred = 'auto') {
   const hasKey = !!process.env.GROK_API_KEY;
 
   if (preferred === 'mock') {
-    return new MockLLMAdapter();
+    throw new Error(
+      'Mock LLM has been permanently removed. ' +
+      'Set GROK_API_KEY and use the real Grok model.'
+    );
   }
 
   if (preferred === 'grok' || (preferred === 'auto' && hasKey)) {
-    try {
-      return new GrokLLMAdapter();
-    } catch (e) {
-      console.warn('Failed to create real Grok adapter, falling back to mock:', e.message);
-      return new MockLLMAdapter();
-    }
+    return new GrokLLMAdapter();
   }
 
-  return new MockLLMAdapter();
+  throw new Error(
+    'No GROK_API_KEY found. Real Grok is required. ' +
+    'Set the GROK_API_KEY environment variable.'
+  );
 }

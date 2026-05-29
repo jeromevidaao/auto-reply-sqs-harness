@@ -177,7 +177,7 @@ async function main() {
   }
 
   // Run the agent anyway (to see what decision it would make if the guard wasn't there)
-  const llm = createLLMAdapter('mock');
+  const llm = createLLMAdapter('auto');
   const agent = new GuestMessagingAgent({
     llmAdapter: llm,
     enableReflection: true,

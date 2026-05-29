@@ -71,7 +71,7 @@ async function main() {
 
   console.log('✅ Passed sender guard\n');
 
-  const llm = createLLMAdapter('mock');
+  const llm = createLLMAdapter('auto');
   const agent = new GuestMessagingAgent({
     llmAdapter: llm,
     enableReflection: true,

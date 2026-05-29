@@ -32,7 +32,7 @@ async function main() {
     sender_type: "guest"
   };
 
-  const llm = createLLMAdapter('mock');   // deterministic, same rules as before
+  const llm = createLLMAdapter('auto');
   const agent = new GuestMessagingAgent({
     llmAdapter: llm,
     enableReflection: true,
