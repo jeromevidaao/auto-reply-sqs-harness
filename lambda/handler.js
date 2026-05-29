@@ -227,6 +227,7 @@ export const handler = async (event, context) => {
       'CANCELLATION_POLICY_EXCEPTION',
       'NEW_RESERVATION_WELCOME',
       'NEW_INQUIRY_WELCOME',
+      'GENERAL_ACKNOWLEDGMENT',   // common short "thanks / okay perfect" replies — now fully reflected for safety
       'OTHER_MESSAGE'   // include generic messages so the full pipeline (including Reflection) is exercised on "other" traffic
     ],
 
@@ -318,6 +319,9 @@ export const handler = async (event, context) => {
       const convId = msgContext.conversation_id || msgContext.airbnb_conversation_id;
 
       if (convId) {
+        const sentPreview = result.proposedResponse.substring(0, 80);
+        console.log('📤 SENDING REPLY → conversation_id:', convId, '| preview:', sentPreview);
+
         try {
           await hospitableClient.sendMessage(convId, result.proposedResponse);
           console.log('✅ Reply successfully sent to guest via Hospitable');
@@ -329,8 +333,6 @@ export const handler = async (event, context) => {
 
             const recentMessages = await hospitableClient.getConversationMessages(convId, 5);
             const latestMessage = recentMessages[0];
-
-            const sentPreview = result.proposedResponse.substring(0, 60);
 
             if (latestMessage && latestMessage.body && latestMessage.body.includes(sentPreview)) {
               console.log('✅ Verification successful: The reply appears as one of the most recent messages in the conversation.');
