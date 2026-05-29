@@ -289,43 +289,97 @@ export class GuestMessagingAgent {
    * Runs before the first LLM call (processMessage) so the entire multipass pipeline
    * (main generation + reflection + judge) benefits from the best possible signals.
    *
-   * Currently includes:
-   * - Conversation safety traces (pre-approval, recent host messages)
-   * - (Future) Unit readiness quick check, duplicate prevention signals, etc.
+   * Design goals:
+   * - Run cheap, high-signal tools early by default.
+   * - Keep expensive calls conditional.
+   * - Fail open (non-fatal) so we never break the main flow.
+   * - Make it easy to extend over time.
    */
   async _enrichTracesEarly(enrichedContext, guestMessage) {
+    // Layer 1: Core safety traces (always run)
+    await this._runCoreSafetyTraces(enrichedContext, guestMessage);
+
+    // Layer 2: Cheap + high-value signals (run almost always)
+    await this._runLightweightHighValueTraces(enrichedContext, guestMessage);
+
+    // Layer 3: Context-aware / more expensive traces (conditional)
+    await this._runContextualTraces(enrichedContext, guestMessage);
+  }
+
+  /**
+   * Layer 1: Core safety and conversation context.
+   * These are high value and we already pay the cost for them.
+   */
+  async _runCoreSafetyTraces(enrichedContext, guestMessage) {
     const conversationContextTool = this.tools.get('get_conversation_context');
 
-    if (conversationContextTool) {
+    if (!conversationContextTool) return;
+
+    try {
+      const traces = await conversationContextTool.execute(guestMessage, enrichedContext);
+      if (traces) {
+        enrichedContext.conversationTraces = traces;
+
+        const summary = [];
+        if (traces.hasRecentHostMessage) {
+          const mins = traces.minutesSinceLastHostMessage ? ` (${traces.minutesSinceLastHostMessage}m ago)` : '';
+          summary.push(`recent host message${mins}`);
+        }
+        if (traces.duplicateRisk) summary.push('duplicate risk');
+        if (traces.preApprovalDetected) summary.push('pre-approval detected');
+        if (traces.traces?.length) summary.push(...traces.traces);
+
+        if (summary.length > 0) {
+          console.log('[Agent] → Early trace enrichment complete:', summary.join(' | '));
+        } else {
+          console.log('[Agent] → Early trace enrichment complete (no special signals)');
+        }
+      }
+    } catch (err) {
+      console.warn('[Agent] Core safety trace enrichment failed (non-fatal):', err.message);
+    }
+  }
+
+  /**
+   * Layer 2: Very cheap tools that provide high signal for the first pass.
+   * These are safe to run on almost every message.
+   */
+  async _runLightweightHighValueTraces(enrichedContext, guestMessage) {
+    // Event / party requests — extremely cheap (pure regex) and high value when present
+    const eventTool = this.tools.get('handle_event_request');
+    if (eventTool) {
       try {
-        const traces = await conversationContextTool.execute(guestMessage, enrichedContext);
-        if (traces) {
-          enrichedContext.conversationTraces = traces;
-
-          const summary = [];
-          if (traces.hasRecentHostMessage) {
-            const mins = traces.minutesSinceLastHostMessage ? ` (${traces.minutesSinceLastHostMessage}m ago)` : '';
-            summary.push(`recent host message${mins}`);
-          }
-          if (traces.duplicateRisk) summary.push('duplicate risk');
-          if (traces.preApprovalDetected) summary.push('pre-approval detected');
-          if (traces.traces?.length) summary.push(...traces.traces);
-
-          if (summary.length > 0) {
-            console.log('[Agent] → Early trace enrichment complete:', summary.join(' | '));
-          } else {
-            console.log('[Agent] → Early trace enrichment complete (no special signals)');
-          }
+        const eventInfo = await eventTool.execute(guestMessage, enrichedContext);
+        if (eventInfo && eventInfo.detected) {
+          enrichedContext.earlyEventDetection = eventInfo;
+          console.log('[Agent] → Early event request detected');
         }
       } catch (err) {
-        console.warn('[Agent] Early trace enrichment failed (non-fatal):', err.message);
-        // Fail open — we still want the main pass to run
+        // Non-fatal
       }
     }
 
-    // === Optional cheap Unit Readiness trace (for check-in day messages) ===
-    // This is a "quick peek" — we only do it when it is likely relevant (check-in day)
-    // so we don't burn unnecessary Hospitable/DDB calls on every message.
+    // Thermostat / HVAC — very cheap (mostly static per listing) and extremely actionable
+    const thermostatTool = this.tools.get('get_thermostat_instructions');
+    if (thermostatTool) {
+      try {
+        const info = await thermostatTool.execute(guestMessage, enrichedContext);
+        if (info && info.detected && info.guestMessageRelevant) {
+          enrichedContext.earlyThermostatInfo = info;
+          console.log('[Agent] → Early thermostat relevance detected');
+        }
+      } catch (err) {
+        // Non-fatal
+      }
+    }
+  }
+
+  /**
+   * Layer 3: More expensive or context-dependent traces.
+   * These are only run when they are likely to be relevant.
+   */
+  async _runContextualTraces(enrichedContext, guestMessage) {
+    // Unit readiness — only on check-in day (existing logic, kept as-is)
     const isCheckInDay = this._looksLikeCheckInDay(enrichedContext);
     if (isCheckInDay) {
       const unitReadinessTool = this.tools.get('get_unit_readiness');
@@ -344,6 +398,9 @@ export class GuestMessagingAgent {
         }
       }
     }
+
+    // Future: We could add lightweight early cancellation signal detection here
+    // if we want to bias the first pass even more strongly.
   }
 
   /**
@@ -468,14 +525,19 @@ export class GuestMessagingAgent {
     }
 
     // === Thermostat / HVAC instructions (KumoCloud + Nest warnings) ===
-    const thermostatTool = this.tools.get('get_thermostat_instructions');
-    let thermostatInfo = null;
-    if (thermostatTool) {
-      const info = await thermostatTool.execute(guestMessage, enrichedContext);
-      if (info && info.detected) {
-        thermostatInfo = info;
-        console.log('[Agent] → Thermostat info generated');
+    // Prefer early trace if we already ran it
+    let thermostatInfo = enrichedContext.earlyThermostatInfo || null;
+    if (!thermostatInfo) {
+      const thermostatTool = this.tools.get('get_thermostat_instructions');
+      if (thermostatTool) {
+        const info = await thermostatTool.execute(guestMessage, enrichedContext);
+        if (info && info.detected) {
+          thermostatInfo = info;
+          console.log('[Agent] → Thermostat info generated (late)');
+        }
       }
+    } else {
+      console.log('[Agent] → Using early thermostat info');
     }
 
     // === Cancellation handling (high-risk policy area) ===
@@ -509,14 +571,19 @@ export class GuestMessagingAgent {
     }
 
     // === Event / party requests ===
-    const eventTool = this.tools.get('handle_event_request');
-    let eventInfo = null;
-    if (eventTool) {
-      const info = await eventTool.execute(guestMessage, enrichedContext);
-      if (info && info.detected) {
-        eventInfo = info;
-        console.log('[Agent] → Event request detected');
+    // Prefer early trace if available
+    let eventInfo = enrichedContext.earlyEventDetection || null;
+    if (!eventInfo) {
+      const eventTool = this.tools.get('handle_event_request');
+      if (eventTool) {
+        const info = await eventTool.execute(guestMessage, enrichedContext);
+        if (info && info.detected) {
+          eventInfo = info;
+          console.log('[Agent] → Event request detected (late)');
+        }
       }
+    } else {
+      console.log('[Agent] → Using early event detection');
     }
 
     const category = Array.isArray(finalDecision.typeOfMessageReceived)
@@ -531,6 +598,12 @@ export class GuestMessagingAgent {
       cancellationInfo,
       eventInfo,
       unitReadiness: enrichedContext.unitReadiness || null,
+      earlyTraces: {
+        conversationTraces: enrichedContext.conversationTraces || null,
+        unitReadiness: enrichedContext.unitReadiness || null,
+        earlyThermostatInfo: enrichedContext.earlyThermostatInfo || null,
+        earlyEventDetection: enrichedContext.earlyEventDetection || null,
+      },
     };
 
     // === Urgent Access Escalation (SMS) ===
