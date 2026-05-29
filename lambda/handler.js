@@ -69,18 +69,12 @@ export const handler = async (event, context) => {
     llm: process.env.GROK_API_KEY ? 'auto' : 'mock',
     notification: 'auto',
 
-    // Conversation Judge (anti-repetition & consistency)
-    // Enable via environment variable when ready to test in production
-    enableConversationJudge: process.env.ENABLE_CONVERSATION_JUDGE === 'true',
-    judgeCategories: [
-      'CANCELLATION_POLICY',
-      'CANCELLATION_NOTIFICATION',
-      'CANCELLATION_POLICY_EXCEPTION',
-      'NEW_RESERVATION_WELCOME',
-      'NEW_INQUIRY_WELCOME',
-      'OTHER_MESSAGE'
-    ]
+    // Conversation Judge (anti-repetition, consistency, and policy enforcement)
+    // With only 4-5 messages per day, we run the judge on every message by default.
+    // Set ENABLE_CONVERSATION_JUDGE=false only if you want to disable it.
+    enableConversationJudge: process.env.ENABLE_CONVERSATION_JUDGE !== 'false'
   });
+
 
   try {
     const result = await agent.handleMessage(guestMessage, msgContext);

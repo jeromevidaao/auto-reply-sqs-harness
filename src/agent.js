@@ -37,16 +37,10 @@ export class GuestMessagingAgent {
       'NEW_INQUIRY_WELCOME'
     ];
 
-    // Conversation Judge (anti-repetition & consistency) - higher level than basic reflection
-    this.enableConversationJudge = options.enableConversationJudge === true;
-    this.judgeCategories = options.judgeCategories || [
-      'CANCELLATION_POLICY',
-      'CANCELLATION_NOTIFICATION',
-      'CANCELLATION_POLICY_EXCEPTION',
-      'NEW_RESERVATION_WELCOME',
-      'NEW_INQUIRY_WELCOME',
-      'OTHER_MESSAGE'
-    ];
+    // Conversation Judge (anti-repetition, consistency, and high-stakes policy enforcement)
+    // With very low volume (~4-5 messages/day), we run the judge on every message by default
+    // when enabled. This gives strong protection against repetition and bad cancellation answers.
+    this.enableConversationJudge = options.enableConversationJudge !== false; // on by default
 
     this.systemPrompt = null;
 
@@ -369,11 +363,11 @@ export class GuestMessagingAgent {
     }
 
     // === Conversation Judge (stronger anti-repetition & consistency) ===
-    // Force the judge on ANY cancellation-related message (as requested by user)
+    // With only 4-5 messages per day, we run the judge on *every* message when enabled.
+    // We still force it for cancellations even if the global flag is off (safety net).
     const isCancellationRelated = cancellationInfo ||
       ['CANCELLATION_POLICY', 'CANCELLATION_NOTIFICATION', 'CANCELLATION_POLICY_EXCEPTION'].includes(category);
 
-    // Always run judge for cancellations, even if the global flag is off
     const shouldRunJudge = this.enableConversationJudge || isCancellationRelated;
 
     if (shouldRunJudge) {
@@ -527,10 +521,8 @@ export class GuestMessagingAgent {
       ? firstDecision.typeOfMessageReceived[0]
       : firstDecision.typeOfMessageReceived;
 
-    if (!this.judgeCategories.includes(category)) {
-      return { verdict: 'APPROVE', notes: 'Category not configured for Conversation Judge' };
-    }
-
+    // With very low volume (4-5 messages/day), we run the judge on every message
+    // when enabled. The category check is now mostly informational.
     console.log('[Agent] Running Conversation Judge for category:', category);
 
     const judgePrompt = await this._buildConversationJudgePrompt(firstDecision, toolResults, context);

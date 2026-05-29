@@ -93,8 +93,7 @@ describe('GuestMessagingAgent (mock mode)', () => {
     const agent = new GuestMessagingAgent({
       llm: 'mock',
       projectRoot: projectRootForTests,
-      enableConversationJudge: true,
-      judgeCategories: ['NEW_INQUIRY_WELCOME', 'OTHER_MESSAGE']
+      enableConversationJudge: true
     });
 
     const result = await agent.handleMessage(
