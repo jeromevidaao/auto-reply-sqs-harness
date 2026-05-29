@@ -1,0 +1,21 @@
+{
+  "id": "early-checkin-future-booking-unit-ready",
+  "description": "Guest asks about early check-in 5 days before arrival on a future booking with no previous day guests. Unit should be ready. Should give accurate positive early check-in information.",
+  "guestMessage": "We're getting in around 11am on check-in day. Is there any chance of early check-in?",
+  "context": {
+    "guestName": "Liam",
+    "checkIn": "2026-06-10",
+    "checkOut": "2026-06-13",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-15T11:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "EARLY_CHECKIN_QUESTION",
+    "shouldReply": true,
+    "forbiddenPhrases": ["we cannot guarantee early check-in", "standard check-in is 4pm"],
+    "requiredPhrases": ["ready", "early", "11am"]
+  },
+  "notes": "Exercises the positive path of unit readiness logic that should be used for early check-in answers on future bookings."
+}

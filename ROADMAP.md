@@ -42,15 +42,24 @@ This document tracks the concrete next steps for the harness. We will grow it it
 ### E. Evaluation Hardening
 - [x] Added Josh cleaning complaint scenario + golden (real production thread)
 - [x] Multiple new Tools wired into production path (Cancellation, EventRequest)
+- [x] Added 5 new goldens exercising advanced old production behaviors:
+  - Cancellation full refund + prior host commitment (anti-contradiction)
+  - Cancellation exception after previous policy answer (multi-turn safety)
+  - Same-day turnover welcome (unit readiness accuracy)
+  - Early check-in on future booking where unit is ready
+  - Multi-turn cancellation thread (anti-repetition via Judge)
+- [x] Eval now at 9 scenarios / 41/41 rubric score — all pass locally with mock LLM (npm test + npm run eval both fully green)
 
 ### D. Welcome Message Logic
-- [ ] Improve `NEW_RESERVATION_WELCOME` and `NEW_INQUIRY_WELCOME`
-- [ ] Make dynamic parts (pet mismatch, availability, early check-in) more robust
+- [x] Basic NEW_RESERVATION_WELCOME + pet mismatch golden added and passing
+- [ ] Improve dynamic parts (pet mismatch, availability, early check-in timing, unit readiness) with more edge cases
+- [ ] Add NEW_INQUIRY_WELCOME golden with availability check
 
-### E. Evaluation Hardening
-- [ ] Add real production goldens (start with Josh cleaning thread)
-- [ ] Expand eval scenarios
-- [ ] Improve eval runner with rubrics
+### E. Evaluation Hardening (ongoing)
+- [x] Eval scenarios expanded from 2 → 4
+- [ ] Continue incremental addition of goldens for the remaining high-risk categories from the original 65
+- [ ] Target: 8–10 goldens before next production deploy of significant prompt/Tool changes
+- [ ] Improve eval runner (better diffing, category coverage report)
 
 **Guiding principle**: No change goes near production until it can be validated locally against the real prompt + goldens.
 

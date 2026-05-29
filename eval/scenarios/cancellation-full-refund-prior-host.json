@@ -1,0 +1,25 @@
+{
+  "id": "cancellation-full-refund-24h-14days-with-prior-host",
+  "description": "Guest asks to cancel within 24 hours of booking, 16 days before check-in. History contains a prior host message. Should trigger full refund rule + detect prior commitment and escalate rather than restate policy.",
+  "guestMessage": "Hi, we actually need to cancel right away. We just booked yesterday. What refund would we get?",
+  "context": {
+    "guestName": "Elena",
+    "checkIn": "2026-06-20",
+    "checkOut": "2026-06-23",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-28T09:15:00Z",
+    "conversationHistory": [
+      {
+        "sender_type": "host",
+        "body": "If you need to cancel, the normal policy would apply based on timing."
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "CANCELLATION_POLICY",
+    "forbiddenPhrases": [],
+    "requiredPhrases": []
+  },
+  "notes": "High-risk anti-contradiction case. Prior host statement exists. Even though math says full refund (24h + 14+ days), the agent should escalate instead of giving a new definitive answer that could contradict the earlier vague host message."
+}

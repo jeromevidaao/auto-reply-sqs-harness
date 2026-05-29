@@ -1,0 +1,29 @@
+{
+  "id": "cancellation-exception-after-prior-policy-answer",
+  "description": "Multi-turn: First host gave a clear 50% policy answer. Then guest asks for exception due to husband's illness. Should detect both prior commitment and exception request, and escalate.",
+  "guestMessage": "My husband just got very sick. Is there any way you can make an exception this one time?",
+  "context": {
+    "guestName": "Priya",
+    "checkIn": "2026-06-15",
+    "checkOut": "2026-06-18",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-20T10:00:00Z",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "We need to cancel. What refund would we get?"
+      },
+      {
+        "sender_type": "host",
+        "body": "Because you booked more than 24 hours ago and your check-in is more than 7 days away, you would receive a 50% refund if you cancel now. See https://www.airbnb.com/help/article/475"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "CANCELLATION_POLICY",
+    "forbiddenPhrases": [],
+    "requiredPhrases": []
+  },
+  "notes": "Critical safety case. Prior host policy answer exists + exception request. Must escalate, not soften policy or restate numbers."
+}

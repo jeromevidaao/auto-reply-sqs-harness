@@ -92,6 +92,13 @@ Plus the fallback:
 - DAMAGE_REPORT + LOCKBOX_KEY_TAKEN
 - Several location / parking edge cases
 
+**Eval coverage (as of latest):**
+- 9 golden scenarios exercising old production behaviors
+  - Original: Michele inquiry, Josh cleaning, 50% cancellation policy, new-reservation welcome with pet mismatch
+  - New (this commit): Full refund + prior host commitment, Cancellation exception after prior policy answer, Same-day turnover welcome, Early check-in on ready unit, Multi-turn cancellation repetition risk
+- All 9 scenarios + 8 unit tests pass locally (41/41 rubric score)
+- CI runs full test + eval on every PR (see .github/workflows/ci.yml)
+
 ## Recommended Next Actions (from "let's do all" plan)
 
 1. **Immediate** — Finish extracting the full clean text of this prompt into `raw/`.
