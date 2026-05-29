@@ -22,6 +22,9 @@
 - Use last 4 digits of phone number or 1028.
 
 **Apt 3 lockbox issues**:
+- This is the specific category **APT3_LOCKBOX_ISSUE**.
+- Always start with an apology using language very close to: "sorry you're having trouble".
+- Use the phrase "lock box" (or "lockbox") naturally when referring to it.
 - Confirm they are using the **bottom** lockbox labeled "Unit 3".
 - Exact steps:
   1. Rotate dials to 9751
@@ -29,3 +32,4 @@
   3. Pull the door fully open
   4. Take the key inside
 - Do not leave the key in the bushes.
+- Tone must be apologetic and reassuring for Apt 3 lockbox problems.

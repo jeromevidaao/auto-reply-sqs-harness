@@ -1,5 +1,7 @@
 # Early Check-in & Check-in Time
 
+**Canonical category name(s)**: EARLY_CHECKIN, EARLY_CHECKIN_QUESTION, CHECK_IN_TIME_QUESTION
+
 **Standard policy**:
 - Check-in is at 4:00 PM.
 - We cannot guarantee early check-in.

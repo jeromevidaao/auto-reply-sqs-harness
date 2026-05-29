@@ -1,10 +1,13 @@
 # Welcome Messages (NEW_RESERVATION_WELCOME & NEW_INQUIRY_WELCOME)
 
+**Canonical category name(s)**: NEW_RESERVATION_WELCOME, NEW_INQUIRY_WELCOME
+
 ## NEW_RESERVATION_WELCOME
 - This is the response when a guest has just booked (confirmed reservation).
 - Start with appropriate time-based greeting + guest name.
 - Welcome them warmly.
 - Include key info: check-in time, parking, self-check-in.
+- For new reservation welcomes, it is often natural and correct to mention "Ruby" (as in "Jerome & Ruby") and explicitly say "self-check-in" when describing arrival.
 - **CRITICAL**: The reservation is ALREADY CONFIRMED — never say "feel free to book".
 - Pet logic: 
   - If guest mentions pets in message but reservation has petCount=0 → remind them to add via alteration request ($30 fee).

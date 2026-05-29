@@ -1,5 +1,7 @@
 # Cancellation & Refund Policy
 
+**Canonical category name(s)**: CANCELLATION_POLICY, CANCELLATION, CANCELLATION_NOTIFICATION
+
 This module contains the detailed cancellation rules extracted from production.
 
 **Source**: Production prompt (2026-05-28)
