@@ -321,6 +321,31 @@ export const handler = async (event, context) => {
         try {
           await hospitableClient.sendMessage(convId, result.proposedResponse);
           console.log('✅ Reply successfully sent to guest via Hospitable');
+
+          // === Verification step: Pull latest messages to confirm delivery ===
+          try {
+            // Short delay to account for eventual consistency on Hospitable side
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            const recentMessages = await hospitableClient.getConversationMessages(convId, 5);
+            const latestMessage = recentMessages[0];
+
+            const sentPreview = result.proposedResponse.substring(0, 60);
+
+            if (latestMessage && latestMessage.body && latestMessage.body.includes(sentPreview)) {
+              console.log('✅ Verification successful: The reply appears as one of the most recent messages in the conversation.');
+            } else {
+              console.warn('⚠️ Verification warning: Could not confirm the sent reply in the latest messages.');
+              console.warn('   Sent preview:', sentPreview);
+              console.warn('   Latest messages:', recentMessages.map(m => ({
+                sender_type: m.sender_type,
+                body_preview: m.body?.substring(0, 80)
+              })));
+            }
+          } catch (verifyError) {
+            console.warn('⚠️ Verification step failed (non-critical):', verifyError.message);
+          }
+
         } catch (sendError) {
           console.error('❌ Failed to send reply to guest:', sendError.message);
           // We still return 200 so the SQS message is deleted (avoid infinite retries on send failure).
