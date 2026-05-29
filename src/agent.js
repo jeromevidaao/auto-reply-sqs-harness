@@ -404,6 +404,13 @@ export class GuestMessagingAgent {
       console.log('[Agent] → Recent host message detected — first pass will be biased toward suppression to avoid duplicates');
     }
 
+    // Broad safety net: any cancellation talk + recent host activity = escalate so Jerome can watch
+    const isCancellationTalk = /cancel|refund|policy|exception/i.test(guestMessage);
+    if (isCancellationTalk && traces.hasRecentHostMessage) {
+      enrichedContext.forceCancellationEscalation = true;
+      console.log('[Agent] → Cancellation talk detected with recent host activity — will force escalation email');
+    }
+
     const decision = await this.processMessage(guestMessage, enrichedContext);
 
     // Post-first-pass safety net from early traces
@@ -473,6 +480,18 @@ export class GuestMessagingAgent {
         const policyInfo = await policyTool.execute(guestMessage, enrichedContext);
         cancellationInfo.policy = policyInfo;   // Attach structured policy data
         console.log('[Agent] → Latest Airbnb policy snapshot attached');
+      }
+
+      // === Force escalation for risky cancellations so Jerome can monitor ===
+      // This ensures that any cancellation conversation with prior host statements,
+      // exception requests, or other risk signals results in an email alert with the direct chat URL.
+      if (cancellationInfo.needsEscalation || enrichedContext.forceCancellationEscalation) {
+        console.log('[Agent] → Risky cancellation detected — forcing escalation email to jerome.ans@gmail.com');
+        await this.notification.notifyEscalation({
+          decision: finalDecision,
+          guestMessage,
+          context: enrichedContext,
+        });
       }
     }
 
