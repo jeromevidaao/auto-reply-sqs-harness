@@ -17,6 +17,10 @@
  *     ...
  *   }
  * }
+ *
+ * Environment variables for urgent access (guest cannot get in):
+ *   URGENT_ACCESS_SNS_TOPIC_ARN     (preferred - supports multiple SMS recipients)
+ *   URGENT_ACCESS_PHONE_NUMBER      (comma-separated, e.g. +16462043958,+15086676477)
  */
 
 import { GuestMessagingAgent } from '../src/agent.js';

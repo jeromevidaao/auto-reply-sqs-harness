@@ -12,6 +12,10 @@ export class SnsNotificationAdapter {
     this.name = 'sns';
     this.region = options.region || 'us-east-1';
     this.topicArn = options.topicArn || process.env.SNS_TOPIC_ARN || process.env.ESCALATION_SNS_TOPIC_ARN;
+
+    // Urgent access can be configured via a dedicated SNS topic (recommended for multiple recipients)
+    // or via direct phone number(s)
+    this.urgentAccessTopicArn = options.urgentAccessTopicArn || process.env.URGENT_ACCESS_SNS_TOPIC_ARN;
     this.urgentAccessPhone = options.urgentAccessPhone || process.env.URGENT_ACCESS_PHONE_NUMBER;
 
     this._sns = new SNSClient({ region: this.region });
@@ -138,18 +142,15 @@ export class SnsNotificationAdapter {
   }
 
   /**
-   * Urgent access issue notification via direct SMS.
+   * Urgent access issue notification.
    * Used for situations where a guest cannot get into the property (lockbox, door code, wrong entrance, etc.).
-   * This is considered time-sensitive and routes via SMS to the configured urgent phone number.
+   * This is considered time-sensitive.
+   *
+   * Supports two modes:
+   * 1. Dedicated SNS topic (recommended when notifying multiple people, e.g. Jerome + Ruby)
+   * 2. Direct phone number(s) via URGENT_ACCESS_PHONE_NUMBER (comma-separated supported)
    */
   async notifyUrgentAccessIssue({ guestMessage, context, timestamp = new Date() }) {
-    const phoneNumber = this.urgentAccessPhone;
-
-    if (!phoneNumber) {
-      console.warn('[SNS] URGENT_ACCESS_PHONE_NUMBER not configured. Cannot send urgent access SMS.');
-      return { notified: false, reason: 'no_phone_configured' };
-    }
-
     const guestName = context.guestDisplayName || context.guestName || 'Guest';
     const property = context.propertyName || context.listingId || 'Unknown property';
     const dates = (context.checkIn && context.checkOut)
@@ -177,34 +178,72 @@ export class SnsNotificationAdapter {
       'Please assist the guest immediately.',
     ].filter(Boolean).join('\n');
 
-    const normalizedPhone = phoneNumber.startsWith('+') 
-      ? phoneNumber 
-      : `+1${phoneNumber.replace(/\D/g, '')}`;
+    // Preferred: Publish to a dedicated SNS topic (supports multiple SMS subscriptions)
+    if (this.urgentAccessTopicArn) {
+      try {
+        const command = new PublishCommand({
+          TopicArn: this.urgentAccessTopicArn,
+          Message: message,
+          Subject: `URGENT: Guest cannot get in - ${property}`,
+        });
 
-    try {
-      const command = new PublishCommand({
-        PhoneNumber: normalizedPhone,
-        Message: message,
-        MessageAttributes: {
-          'AWS.SNS.SMS.SMSType': {
-            DataType: 'String',
-            StringValue: 'Transactional'
-          }
-        }
-      });
-
-      const result = await this._sns.send(command);
-      console.log(`✅ Urgent access SMS sent to ${normalizedPhone} (MessageId: ${result.MessageId})`);
-      return {
-        notified: true,
-        type: 'urgent_access',
-        channel: 'sms',
-        phoneNumber: normalizedPhone,
-        messageId: result.MessageId,
-      };
-    } catch (err) {
-      console.error('❌ Failed to send urgent access SMS via SNS:', err.message);
-      throw err;
+        const result = await this._sns.send(command);
+        console.log(`✅ Urgent access notification published to topic ${this.urgentAccessTopicArn} (MessageId: ${result.MessageId})`);
+        return {
+          notified: true,
+          type: 'urgent_access',
+          channel: 'sns-topic',
+          topicArn: this.urgentAccessTopicArn,
+          messageId: result.MessageId,
+        };
+      } catch (err) {
+        console.error('❌ Failed to publish urgent access to SNS topic:', err.message);
+        throw err;
+      }
     }
+
+    // Fallback: Direct SMS to one or more phone numbers
+    const phoneNumbersRaw = this.urgentAccessPhone;
+    if (!phoneNumbersRaw) {
+      console.warn('[SNS] Neither URGENT_ACCESS_SNS_TOPIC_ARN nor URGENT_ACCESS_PHONE_NUMBER configured. Cannot send urgent access alert.');
+      return { notified: false, reason: 'no_urgent_access_config' };
+    }
+
+    const phoneNumbers = phoneNumbersRaw
+      .split(',')
+      .map(p => p.trim())
+      .filter(Boolean)
+      .map(p => p.startsWith('+') ? p : `+1${p.replace(/\D/g, '')}`);
+
+    const results = [];
+
+    for (const phone of phoneNumbers) {
+      try {
+        const command = new PublishCommand({
+          PhoneNumber: phone,
+          Message: message,
+          MessageAttributes: {
+            'AWS.SNS.SMS.SMSType': {
+              DataType: 'String',
+              StringValue: 'Transactional'
+            }
+          }
+        });
+
+        const result = await this._sns.send(command);
+        console.log(`✅ Urgent access SMS sent to ${phone} (MessageId: ${result.MessageId})`);
+        results.push({ phone, messageId: result.MessageId });
+      } catch (err) {
+        console.error(`❌ Failed to send urgent access SMS to ${phone}:`, err.message);
+        // Continue trying other numbers
+      }
+    }
+
+    return {
+      notified: results.length > 0,
+      type: 'urgent_access',
+      channel: 'sms-direct',
+      results,
+    };
   }
 }
