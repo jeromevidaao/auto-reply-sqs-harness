@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { ToolRegistry, CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool } from './tools/index.js';
+import { ToolRegistry, CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool } from './tools/index.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +69,11 @@ export class GuestMessagingAgent {
       if (!this.tools.has('get_unit_readiness')) {
         this.tools.register(new UnitReadinessTool({
           ddbClient: options.ddbClient || null,
+          hospitableClient: options.hospitableClient || null
+        }));
+      }
+      if (!this.tools.has('get_conversation_context')) {
+        this.tools.register(new ConversationContextTool({
           hospitableClient: options.hospitableClient || null
         }));
       }
@@ -240,6 +245,20 @@ export class GuestMessagingAgent {
       });
     }
 
+    // Rich traces for higher quality first-pass decisions (pre-approval, recent host messages, etc.)
+    if (context.conversationTraces) {
+      lines.push('- Conversation safety traces:');
+      if (context.conversationTraces.hasRecentHostMessage) {
+        lines.push('  • Recent host message detected (within ~10 min window)');
+      }
+      if (context.conversationTraces.preApprovalDetected) {
+        lines.push('  • Pre-approval detected for this inquiry');
+      }
+      if (context.conversationTraces.traces?.length) {
+        context.conversationTraces.traces.forEach(t => lines.push(`  • ${t}`));
+      }
+    }
+
     lines.push('');
     lines.push('Respond with the required JSON only.');
 
@@ -267,6 +286,18 @@ export class GuestMessagingAgent {
     };
 
     console.log('[Agent] handleMessage started for guest:', enrichedContext.guestDisplayName || enrichedContext.guestName || 'Unknown');
+
+    // === Early trace enrichment (pre-approval, recent host messages, etc.) ===
+    // This gives the main LLM, reflection, and judge much richer context — critical for quality.
+    const conversationContextTool = this.tools.get('get_conversation_context');
+    let conversationTraces = null;
+    if (conversationContextTool) {
+      conversationTraces = await conversationContextTool.execute(guestMessage, enrichedContext);
+      if (conversationTraces) {
+        enrichedContext.conversationTraces = conversationTraces;
+        console.log('[Agent] → Conversation traces enriched (pre-approval / recent host checks)');
+      }
+    }
 
     const decision = await this.processMessage(guestMessage, enrichedContext);
 
@@ -358,6 +389,7 @@ export class GuestMessagingAgent {
         thermostat: thermostatInfo,
         cancellation: cancellationInfo,
         event: eventInfo,
+        conversationContext: enrichedContext.conversationTraces || null,
       };
 
       const reflectionContext = {
@@ -395,6 +427,7 @@ export class GuestMessagingAgent {
         cancellation: cancellationInfo,
         event: eventInfo,
         airbnbPolicy: cancellationInfo?.policy || null,
+        conversationContext: enrichedContext.conversationTraces || null,
       };
 
       // Make policy data more prominent for the judge
