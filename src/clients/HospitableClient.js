@@ -191,7 +191,6 @@ export class HospitableClient {
 
     return response.data?.data || response.data;
   }
-}
 
   /**
    * Get full details for an inquiry (used for pre-approval detection).
