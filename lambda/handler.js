@@ -340,34 +340,49 @@ export const handler = async (event, context) => {
           console.log('✅ Reply successfully sent to guest via Hospitable');
 
           // === Verification step: Pull latest messages to confirm delivery ===
-          try {
-            // Short delay to account for eventual consistency on Hospitable side
-            await new Promise(resolve => setTimeout(resolve, 2000));
+          // Hard failure if we cannot confirm delivery. This makes send problems visible in CloudWatch.
+          await new Promise(resolve => setTimeout(resolve, 2000));
 
-            const recentMessages = await hospitableClient.getConversationMessages(convId, 5);
+          // We may only have reservationId. Resolve conversation_id for verification when needed.
+          let verifyConvId = convId;
+          if (!verifyConvId && reservationId) {
+            try {
+              verifyConvId = await hospitableClient.getConversationIdForReservation(reservationId);
+            } catch (e) {
+              console.warn('[Handler] Could not resolve conversation_id from reservation for verification:', e.message);
+            }
+          }
+
+          if (!verifyConvId) {
+            console.warn('⚠️ No conversation_id available for post-send verification (send itself succeeded).');
+          } else {
+            const recentMessages = await hospitableClient.getConversationMessages(verifyConvId, 5);
             const latestMessage = recentMessages[0];
 
             if (latestMessage && latestMessage.body && latestMessage.body.includes(sentPreview)) {
               console.log('✅ Verification successful: The reply appears as one of the most recent messages in the conversation.');
             } else {
-              console.warn('⚠️ Verification warning: Could not confirm the sent reply in the latest messages.');
-              console.warn('   Sent preview:', sentPreview);
-              console.warn('   Latest messages:', recentMessages.map(m => ({
+              const recentPreviews = recentMessages.map(m => ({
                 sender_type: m.sender_type,
-                body_preview: m.body?.substring(0, 80)
-              })));
+                body_preview: m.body?.substring(0, 100)
+              }));
+              console.error('❌ VERIFICATION FAILED after send: Reply not found in recent messages.');
+              console.error('   Sent preview:', sentPreview);
+              console.error('   Recent messages:', JSON.stringify(recentPreviews, null, 2));
+
+              throw new Error(`Send verification failed for ${targetType} ${targetId}. Message may not have been delivered to guest.`);
             }
-          } catch (verifyError) {
-            console.warn('⚠️ Verification step failed (non-critical):', verifyError.message);
           }
 
         } catch (sendError) {
-          console.error('❌ Failed to send reply to guest:', sendError.message);
-          // We still return 200 so the SQS message is deleted (avoid infinite retries on send failure).
-          // In a future iteration we could push to a DLQ or retry queue for sending.
+          console.error('❌ HARD FAILURE: Failed to send reply to guest or verify delivery:', sendError.message);
+          // Re-throw so the Lambda fails (status 500). This makes send failures visible and actionable.
+          throw new Error(`Failed to send/verify guest message: ${sendError.message}`);
         }
       } else {
-        console.warn('⚠️ No conversation_id found in context — cannot send reply. Message will be lost.');
+        const errMsg = 'Cannot send reply: no reservationId or conversation_id present in message context.';
+        console.error('❌ HARD FAILURE:', errMsg);
+        throw new Error(errMsg);
       }
     } else if (result.shouldReply === false && !result.escalated) {
       console.log('ℹ️ Decision was to not reply (no message sent).');
