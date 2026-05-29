@@ -520,6 +520,32 @@ export class GuestMessagingAgent {
       unitReadiness: enrichedContext.unitReadiness || null,
     };
 
+    // === Urgent Access Escalation (SMS) ===
+    // If the guest is having trouble getting into the property, this is time-sensitive.
+    // Send an immediate SMS to the configured urgent number (646 204 3958).
+    const accessIssueCategories = [
+      'DOOR_CODE_ISSUE',
+      'APT3_LOCKBOX_ISSUE',
+      'WRONG_ENTRANCE_LOCKBOX',
+      'DOOR_LOCKING_ISSUE',
+      'LOCKBOX_KEY_TAKEN',
+    ];
+
+    const isAccessIssue = accessIssueCategories.includes(category);
+
+    if (isAccessIssue) {
+      console.log('[Agent] → Urgent access issue detected — sending SMS alert');
+      try {
+        const urgentResult = await this.notification.notifyUrgentAccessIssue({
+          guestMessage,
+          context: enrichedContext,
+        });
+        finalResult.urgentAccessNotified = urgentResult;
+      } catch (err) {
+        console.error('[Agent] Failed to send urgent access SMS:', err.message);
+      }
+    }
+
     // === Lightweight Reflection Pass (for high-risk categories) ===
     if (this.enableReflection) {
       const toolResults = {

@@ -60,6 +60,7 @@ This document tracks the concrete next steps for the harness. We will grow it it
 - [x] Cheap early UnitReadiness trace added for check-in day messages
 - [x] Explicit escalation forcing for risky cancellations (prior host statements, exception requests, or recent host activity + cancellation talk)
   - Any cancellation conversation with risk signals now triggers an email to jerome.ans@gmail.com with the direct Airbnb conversation URL
+- [x] New urgent access escalation path: When a guest cannot get in (door code, lockbox, wrong entrance, etc.), an immediate SMS is sent to 646-204-3958 via SNS (separate from regular email escalations)
 - Tool results and safety traces (pre-approval, recent host activity, unit readiness) available earlier in the pipeline
 - Next: Continue moving remaining old production safety logic (full duplicate checks, more pre-approval details) into the tool layer
 - Goal: Highest quality responses by ensuring every pass (main + reflection + judge) has the best possible traces and tool outputs

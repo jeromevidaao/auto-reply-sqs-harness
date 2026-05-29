@@ -127,6 +127,11 @@ export const handler = async (event, context) => {
       console.log('🎉 EVENT REQUEST INFO:', JSON.stringify(result.eventInfo, null, 2));
     }
 
+    // Log urgent access SMS escalations (very high priority)
+    if (result.urgentAccessNotified) {
+      console.log('🚨🚨 URGENT ACCESS SMS SENT:', JSON.stringify(result.urgentAccessNotified, null, 2));
+    }
+
     // Log reflection result if it ran
     if (result.reflection) {
       console.log('🔍 REFLECTION RESULT:', JSON.stringify(result.reflection, null, 2));
