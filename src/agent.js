@@ -371,6 +371,19 @@ export class GuestMessagingAgent {
    * testing real scenarios.
    */
   async handleMessage(guestMessage, context = {}) {
+    // Defense-in-depth: if the caller provides clear evidence this is a host message, bail out early.
+    const senderType = (context.sender_type || context.sender?.type || '').toLowerCase();
+    if (senderType && senderType !== 'guest') {
+      console.log('[Agent] handleMessage aborted — message is from host, not guest.');
+      return {
+        typeOfMessageReceived: 'OTHER_MESSAGE',
+        proposedResponse: 'none',
+        shouldReply: false,
+        escalated: false,
+        skippedAsHostMessage: true
+      };
+    }
+
     const normalizedName = normalizeGuestName(context.guestName);
 
     // Enrich context with natural name handling to avoid robotic "Menghang(David)" repetition

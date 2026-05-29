@@ -521,6 +521,19 @@ export class MockLLMAdapter {
       });
     }
 
+    // Host reply being incorrectly fed as a "guest message" (e.g. previous parking advice)
+    // The system should not treat this as a new guest question.
+    if (lower.includes('vaughan street') || (lower.includes('spothero') || lower.includes('spot hero')) && lower.includes('parking')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'OTHER_MESSAGE',
+        proposedResponse: 'none',
+        shouldReply: false,
+        escalated: false,
+        confidence: 0.9,
+        notes: 'Detected likely host reply text being re-ingested as guest message — suppressing escalation'
+      });
+    }
+
     // Default safe response (anything not yet ported from the old 65-category set)
     return JSON.stringify({
       typeOfMessageReceived: 'OTHER_MESSAGE',

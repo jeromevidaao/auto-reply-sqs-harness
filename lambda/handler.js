@@ -158,6 +158,24 @@ export const handler = async (event, context) => {
     };
   }
 
+  // Heuristic fallback when sender info is missing from the payload (common problem)
+  // These phrases strongly indicate the message was written by the host, not the guest.
+  const lowerMsg = (guestMessage || '').toLowerCase();
+  const hostVoiceIndicators = [
+    'we have', 'i recommend', 'hope this helps', 'thank you', 
+    'you can book', 'nearby', 'in the area', 'application', 'spot hero', 'spothero'
+  ];
+
+  const looksLikeHostMessage = hostVoiceIndicators.some(phrase => lowerMsg.includes(phrase));
+
+  if (!senderType && looksLikeHostMessage) {
+    console.log(`[Handler] ⛔ Heuristic skip: Message looks like a host reply (no sender_type present). Content: "${guestMessage.substring(0, 80)}..."`);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ skipped: true, reason: 'Likely host message (heuristic)' })
+    };
+  }
+
   console.log('\n📋 RESERVATION / INQUIRY DETAILS:');
   console.log(JSON.stringify({
     guestName: msgContext.guestName || msgContext.guest?.first_name,

@@ -1,0 +1,18 @@
+{
+  "id": "host-parking-reply-ingested-as-guest",
+  "description": "A host's previous parking advice message somehow lands in the queue as if it were a new guest message. The system must not treat host replies as guest questions and must not escalate them.",
+  "guestMessage": "Hi - For paid parking, we have 192-234 Vaughan Street Parking nearby. The alternative is to find street parking in the area, usually towards the Western Promenade. I recommend using the SpotHero application, where you can book in advance and get cheaper rates. Hope this helps!",
+  "context": {
+    "guestName": "Emi",
+    "propertyName": "Sunny Apt 2",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "conversation_id": "some-real-conv-id"
+  },
+  "rubric": {
+    "expectedCategory": null,
+    "shouldReply": false,
+    "mustEscalate": false,
+    "forbiddenPhrases": ["parking", "SpotHero", "Vaughan"],
+    "notes": "This is clearly a host reply. The system must detect it is not a guest question and must NOT escalate it. This was a regression from the old system."
+  }
+}
