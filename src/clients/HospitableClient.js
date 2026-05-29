@@ -21,14 +21,31 @@ async function _getHospitableToken() {
     return _hospitableTokenCache;
   }
 
-  const command = new GetParameterCommand({
-    Name: '/hospitable/bearer-token',
-    WithDecryption: true
-  });
+  // Retry SSM token fetch (can be occasionally flaky)
+  const maxAttempts = 3;
+  const delays = [2000, 4000, 8000];
 
-  const response = await ssm.send(command);
-  _hospitableTokenCache = response.Parameter.Value;
-  return _hospitableTokenCache;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const command = new GetParameterCommand({
+        Name: '/hospitable/bearer-token',
+        WithDecryption: true
+      });
+      const response = await ssm.send(command);
+      _hospitableTokenCache = response.Parameter.Value;
+      return _hospitableTokenCache;
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        const criticalErr = new Error(`CRITICAL: Failed to fetch Hospitable token from SSM after ${maxAttempts} attempts. ${err.message}`);
+        criticalErr.name = 'CriticalHospitableError';
+        criticalErr.originalError = err;
+        throw criticalErr;
+      }
+      const delay = delays[attempt - 1];
+      console.warn(`[HospitableClient] SSM token fetch failed (attempt ${attempt}). Retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
 }
 
 export class HospitableClient {
@@ -38,6 +55,53 @@ export class HospitableClient {
 
   async getToken() {
     return _getHospitableToken();
+  }
+
+  /**
+   * Retry wrapper for critical Hospitable API calls.
+   * - Up to 3 attempts
+   * - Exponential backoff: ~5s, 10s, 15s (total ~30s window)
+   * - Only retries transient errors (5xx, 429, network/timeout)
+   * - On final failure: throws a clear error that will cause hard Lambda failure
+   */
+  async _withRetry(operation, fn) {
+    const maxAttempts = 3;
+    const delays = [5000, 10000, 15000]; // 5s, 10s, 15s
+
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastError = err;
+
+        const status = err.response?.status;
+        const isTransient =
+          !status ||
+          status >= 500 ||
+          status === 429 ||
+          err.code === 'ECONNRESET' ||
+          err.code === 'ETIMEDOUT' ||
+          err.code === 'ECONNABORTED';
+
+        if (!isTransient || attempt === maxAttempts) {
+          const message = `CRITICAL HOSPITABLE API FAILURE: ${operation} failed after ${attempt} attempt(s). ` +
+            `Last error: ${err.message}${err.response ? ` (status ${err.response.status})` : ''}`;
+          const criticalError = new Error(message);
+          criticalError.name = 'CriticalHospitableError';
+          criticalError.operation = operation;
+          criticalError.attempts = attempt;
+          criticalError.originalError = err;
+          criticalError.isTransient = isTransient;
+          throw criticalError;
+        }
+
+        const delay = delays[attempt - 1] || 15000;
+        console.warn(`[HospitableClient] Transient error on ${operation} (attempt ${attempt}/${maxAttempts}). Retrying in ${delay}ms... Error: ${err.message}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
 
   /**
@@ -107,43 +171,45 @@ export class HospitableClient {
    * @returns {Promise<Array>} reservation objects (each includes conversation_id)
    */
   async getReservations(options = {}) {
-    const token = await this.getToken();
-    const {
-      properties,
-      limit = 20,
-      status,
-      sort = '-arrival_date',
-      ...otherParams
-    } = options;
+    return this._withRetry('getReservations', async () => {
+      const token = await this.getToken();
+      const {
+        properties,
+        limit = 20,
+        status,
+        sort = '-arrival_date',
+        ...otherParams
+      } = options;
 
-    const params = {
-      limit,
-      sort,
-      ...otherParams
-    };
+      const params = {
+        limit,
+        sort,
+        ...otherParams
+      };
 
-    if (properties) {
-      // Support single string or array
-      const props = Array.isArray(properties) ? properties : [properties];
-      props.forEach(p => {
-        // Axios will repeat the key for arrays
+      if (properties) {
+        // Support single string or array
+        const props = Array.isArray(properties) ? properties : [properties];
+        props.forEach(p => {
+          // Axios will repeat the key for arrays
+        });
+        params['properties[]'] = props;
+      }
+
+      if (status) params.status = status;
+
+      const response = await axios.get(`${this.baseUrl}/reservations`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        params,
+        timeout: 10000
       });
-      params['properties[]'] = props;
-    }
 
-    if (status) params.status = status;
-
-    const response = await axios.get(`${this.baseUrl}/reservations`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      params,
-      timeout: 10000
+      return response.data?.data || [];
     });
-
-    return response.data?.data || [];
   }
 
   /**
@@ -151,19 +217,21 @@ export class HospitableClient {
    * (the value you actually want for Airbnb message URLs).
    */
   async getConversationIdForReservation(reservationId) {
-    const token = await this.getToken();
+    return this._withRetry('getConversationIdForReservation', async () => {
+      const token = await this.getToken();
 
-    const response = await axios.get(`${this.baseUrl}/reservations/${reservationId}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      timeout: 8000
+      const response = await axios.get(`${this.baseUrl}/reservations/${reservationId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        timeout: 8000
+      });
+
+      const res = response.data?.data;
+      return res?.conversation_id || null;
     });
-
-    const res = response.data?.data;
-    return res?.conversation_id || null;
   }
 
   /**
@@ -174,22 +242,24 @@ export class HospitableClient {
     if (!reservationId) throw new Error('reservationId is required to send a message');
     if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
 
-    const token = await this.getToken();
+    return this._withRetry('sendMessageToReservation', async () => {
+      const token = await this.getToken();
 
-    const response = await axios.post(
-      `${this.baseUrl}/reservations/${reservationId}/messages`,
-      { body },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        timeout: 15000
-      }
-    );
+      const response = await axios.post(
+        `${this.baseUrl}/reservations/${reservationId}/messages`,
+        { body },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          timeout: 15000
+        }
+      );
 
-    return response.data?.data || response.data;
+      return response.data?.data || response.data;
+    });
   }
 
   /**
@@ -201,40 +271,44 @@ export class HospitableClient {
     if (!conversationId) throw new Error('conversationId is required to send a message');
     if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
 
-    const token = await this.getToken();
+    return this._withRetry('sendMessage', async () => {
+      const token = await this.getToken();
 
-    const response = await axios.post(
-      `${this.baseUrl}/conversations/${conversationId}/messages`,
-      { body },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        timeout: 15000
-      }
-    );
+      const response = await axios.post(
+        `${this.baseUrl}/conversations/${conversationId}/messages`,
+        { body },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          timeout: 15000
+        }
+      );
 
-    return response.data?.data || response.data;
+      return response.data?.data || response.data;
+    });
   }
 
   /**
    * Get full details for an inquiry (used for pre-approval detection).
    */
   async getInquiryDetails(inquiryId) {
-    const token = await this.getToken();
+    return this._withRetry('getInquiryDetails', async () => {
+      const token = await this.getToken();
 
-    const response = await axios.get(`${this.baseUrl}/inquiries/${inquiryId}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      timeout: 8000
+      const response = await axios.get(`${this.baseUrl}/inquiries/${inquiryId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        timeout: 8000
+      });
+
+      return response.data?.data || null;
     });
-
-    return response.data?.data || null;
   }
 
   /**
@@ -242,20 +316,22 @@ export class HospitableClient {
    * Useful for pre-approval detection and recent host message checks.
    */
   async getConversationMessages(conversationId, limit = 10) {
-    const token = await this.getToken();
+    return this._withRetry('getConversationMessages', async () => {
+      const token = await this.getToken();
 
-    const response = await axios.get(`${this.baseUrl}/conversations/${conversationId}/messages`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      params: {
-        limit
-      },
-      timeout: 8000
+      const response = await axios.get(`${this.baseUrl}/conversations/${conversationId}/messages`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        params: {
+          limit
+        },
+        timeout: 8000
+      });
+
+      return response.data?.data || [];
     });
-
-    return response.data?.data || [];
   }
 }

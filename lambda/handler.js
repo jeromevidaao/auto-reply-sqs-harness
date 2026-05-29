@@ -417,6 +417,21 @@ export const handler = async (event, context) => {
     };
   } catch (error) {
     const duration = Date.now() - startTime;
+
+    // Critical Hospitable failures (after retries) must cause a hard Lambda failure
+    // so SQS can retry or send to DLQ, and alarms can trigger.
+    if (error.name === 'CriticalHospitableError' || error.message.includes('CRITICAL HOSPITABLE')) {
+      console.error('\n🚨🚨 CRITICAL HOSPITABLE FAILURE (after retries) — HARD LAMBDA FAILURE');
+      console.error('Operation:', error.operation);
+      console.error('Attempts:', error.attempts);
+      console.error('Error:', error.message);
+      console.error('Stack:', error.stack);
+      console.error('Failed Context:', JSON.stringify(msgContext, null, 2));
+
+      // Re-throw so the Lambda invocation is marked as failed (important for SQS + DLQ)
+      throw error;
+    }
+
     console.error('\n❌ [${requestId}] HARNESS CRITICAL ERROR after', duration, 'ms');
     console.error('Error:', error);
     console.error('Stack:', error.stack);
