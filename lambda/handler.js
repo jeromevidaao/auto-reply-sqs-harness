@@ -176,9 +176,24 @@ export const handler = async (event, context) => {
   // matching production behavior from the old auto-reply-sqs Lambda.
   await getGrokApiKey();
 
+  // Reflection is now enabled in production (via ENABLE_REFLECTION=true)
+  // so we exercise the complete pipeline: Main LLM → Tools → (optional) Reflection → Judge on every message.
   const agent = new GuestMessagingAgent({
     llm: process.env.GROK_API_KEY ? 'auto' : 'mock',
     notification: 'auto',
+
+    // Reflection (second-pass critique for high-risk decisions)
+    // Now enabled in production so we exercise the full multipass pipeline.
+    // For verification on generic "other" messages we temporarily include OTHER_MESSAGE.
+    enableReflection: process.env.ENABLE_REFLECTION === 'true' || true,  // TODO: switch to env-only after verification
+    reflectionCategories: [
+      'CANCELLATION_POLICY',
+      'CANCELLATION_NOTIFICATION',
+      'CANCELLATION_POLICY_EXCEPTION',
+      'NEW_RESERVATION_WELCOME',
+      'NEW_INQUIRY_WELCOME',
+      'OTHER_MESSAGE'   // allow reflection on generic messages for full pipeline testing
+    ],
 
     // Conversation Judge (anti-repetition, consistency, and policy enforcement)
     // With only 4-5 messages per day, we run the judge on every message by default.
