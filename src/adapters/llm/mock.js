@@ -540,7 +540,7 @@ export class MockLLMAdapter {
         (lower.includes('okay') || lower.includes('perfect')) && lower.includes('thanks')) {
       return JSON.stringify({
         typeOfMessageReceived: 'GENERAL_ACKNOWLEDGMENT',
-        proposedResponse: "You're very welcome! If you have any other questions before or during your stay, just let us know. Safe travels!",
+        proposedResponse: "You're welcome! If you have any other questions before or during your stay, just let us know. Safe travels!",
         shouldReply: true,
         confidence: 0.95,
         notes: 'Simple thank-you acknowledgment — short friendly reply'
