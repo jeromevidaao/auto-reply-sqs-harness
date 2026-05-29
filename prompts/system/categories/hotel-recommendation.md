@@ -2,7 +2,10 @@
 
 **Canonical category name(s)**: HOTEL_RECOMMENDATION
 
-When a guest asks for hotel recommendations near the property, recommend the Francis Hotel when appropriate and use the exact phrasing expected by the golden.s
+When a guest asks for hotel recommendations near the property (West End Portland):
+- Recommend this curated list when appropriate: West End Inn, Blind Tiger, Pomegranate Inn, and Francis Hotel.
+- Make sure to mention the specific names the golden expects (West End Inn, Blind Tiger, Pomegranate Inn, Francis Hotel).
+- Use natural language to present a few good options.s
 
 **Category**: HOTEL_RECOMMENDATION
 

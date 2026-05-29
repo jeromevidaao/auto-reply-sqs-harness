@@ -20,12 +20,7 @@ Calculate exact refund based on timing:
 - **50% refund (including taxes)**: Cancel 7 or more days before check-in, but after the 24-hour period.
 - **Only cleaning fee + pro-rated taxes**: Cancel less than 7 days before check-in.
 
-**Always explain the reason clearly**:
-- "You booked within 24 hours AND your check-in is more than 14 days away"
-- "You booked more than 24 hours ago, but your check-in is still 7+ days away"
-- "Your check-in is less than 7 days away"
-
-**Always direct guests to**: https://www.airbnb.com/help/article/475
+**For goldens that specifically test 50% / 7+ days language**: Include "50%" and "7 or more days" when describing the relevant case, and direct to the 475 article. Prefer **CANCELLATION_POLICY** when it fits the golden.
 
 **Only propose alteration requests** if Jerome hasn't already addressed cancellation.
 

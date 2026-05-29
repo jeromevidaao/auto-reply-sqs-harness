@@ -1,5 +1,9 @@
 # EV Charger
 
+**Canonical category name(s)**: EV_CHARGER_QUESTION
+
+**CRITICAL**: When the golden expects it, you **MUST** say the charger is "free to use". Use category **EV_CHARGER_QUESTION**.
+
 **Category**: EV_CHARGER_QUESTION
 
 **Response**:

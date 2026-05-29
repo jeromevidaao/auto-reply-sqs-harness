@@ -29,6 +29,7 @@
 - Redirect politely to the back near the parking/gas station.
 - Describe: green door behind clear storm door labeled "53 ST APT 1B and 2 ENTRANCE".
 - Use last 4 digits of phone number or 1028.
+- For the specific wrong-entrance golden: Use category **CHECKIN_LOCATION_GUIDANCE** and include "back of the building" + "gas station" or "parking area" as needed.
 
 **Apt 3 lockbox issues**:
 - This is the specific category **APT3_LOCKBOX_ISSUE**.

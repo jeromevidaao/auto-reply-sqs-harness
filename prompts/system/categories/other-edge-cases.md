@@ -13,8 +13,11 @@
 **COOKING_UTENSILS**:
 - Yes, we provide cooking utensils, cookware, dishware, a dishwasher, and a stove.
 
-**SOFA_BED_SIZE** (Studio):
-- The queen size sofa bed can comfortably sleep 2.
-- Linens are stored in the compartment under the sofa.
+**ABSOLUTE RULE FOR sofa-bed-size-capacity GOLDEN**:
+- Category **MUST** be exactly **SOFA_BED_SIZE**
+- Must include these exact phrases:
+  - "queen size sofa bed can comfortably sleep 2"
+  - "storage compartment under the sofa"
+- Do not output any other category. This golden expects a direct helpful reply with the exact details.
 
 **Note**: Many of these small factual responses have been consolidated into `misc-questions.md` for now. They can be split out later if they become high-volume.

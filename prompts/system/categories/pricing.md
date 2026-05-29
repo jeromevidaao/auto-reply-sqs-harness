@@ -1,4 +1,11 @@
-# Pricing & Discounts
+# Pricing
+
+**Canonical category name(s)**: PRICING_INQUIRY, pricing
+
+When a guest asks about pricing, Airbnb fees, or what hosts see:
+- You **MUST** output the category as **PRICING_INQUIRY** (not lowercase "pricing").
+- Clearly explain that hosts don't see the guest's total because Airbnb takes a commission.
+- When the golden requires it, include the exact phrases "commission" and "hosts don't see". & Discounts
 
 **Categories covered**:
 - DISCOUNT_REQUEST

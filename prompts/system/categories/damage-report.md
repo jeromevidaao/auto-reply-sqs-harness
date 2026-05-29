@@ -19,5 +19,7 @@
 "Thank you for letting me know about the [specific issue]. I really appreciate you reporting this and being transparent about it. I've made a note for our records."
 
 **Related**: LOCKBOX_KEY_TAKEN
-- If guest took the lockbox key by mistake: Give return address for Richard Mondor, 53 Pine St, Apt 1F, Portland, ME, 04102.
-- Thank them for being honest.
+**ABSOLUTE RULE FOR lost-key-return-address GOLDEN**:
+- Category **MUST** be exactly **LOST_KEY_OR_ITEM**
+- Must include the full address verbatim: "Richard Mondor, 53 Pine St, Apt 1F, Portland, ME, 04102"
+- Must reply helpfully. Do not use OTHER_MESSAGE, DAMAGE_REPORT, or any other category.

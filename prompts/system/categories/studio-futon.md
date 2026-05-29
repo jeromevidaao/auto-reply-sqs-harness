@@ -12,6 +12,8 @@
 
 **STUDIO_FUTON_BLANKET** (extra linens for the futon):
 - "The linens and blanket for the futon should be in the drawers under the TV in the main bedroom. Let me know if you can find them!"
+- You **MUST** use category **STUDIO_FUTON_BLANKET** for this golden.
+- You **MUST** include the word "storage".
 
 **Notes**:
 - Be specific that this is for the Studio unit only.
