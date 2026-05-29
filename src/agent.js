@@ -259,6 +259,14 @@ export class GuestMessagingAgent {
       }
     }
 
+    // Early decision signals from pre-processing (these strongly influence the first LLM pass)
+    if (context.preApprovedInquiry) {
+      lines.push('- IMPORTANT: This is a pre-approved inquiry with no recent host activity. A warm, welcoming response is appropriate and safe.');
+    }
+    if (context.recentHostActivity) {
+      lines.push('- IMPORTANT: A host message was sent very recently. Be extremely conservative — consider not replying to avoid duplication.');
+    }
+
     lines.push('');
     lines.push('Respond with the required JSON only.');
 
@@ -368,16 +376,42 @@ export class GuestMessagingAgent {
     // This is the dedicated early enrichment phase for highest-quality multipass responses.
     await this._enrichTracesEarly(enrichedContext, guestMessage);
 
+    // === Apply early safety decisions from traces (old production fast paths) ===
+    const traces = enrichedContext.conversationTraces || {};
+
+    if (traces.preApprovalDetected && !traces.hasRecentHostMessage) {
+      enrichedContext.preApprovedInquiry = true;
+      console.log('[Agent] → Pre-approved inquiry detected with no recent host activity — enabling fast path signals for first pass');
+    }
+
+    if (traces.hasRecentHostMessage) {
+      enrichedContext.recentHostActivity = true;
+      console.log('[Agent] → Recent host message detected — first pass will be biased toward suppression to avoid duplicates');
+    }
+
     const decision = await this.processMessage(guestMessage, enrichedContext);
 
+    // Post-first-pass safety net from early traces
+    let finalDecision = decision;
+
+    if (enrichedContext.recentHostActivity && decision.shouldReply) {
+      console.log('[Agent] → Recent host activity detected after first pass — forcing suppression to prevent duplicate reply');
+      finalDecision = {
+        ...decision,
+        shouldReply: false,
+        proposedResponse: 'none',
+        suppressedDueToRecentHost: true,
+      };
+    }
+
     const shouldEscalate =
-      decision.shouldReply === false ||
-      (decision.typeOfMessageReceived === 'OTHER_MESSAGE' && decision.proposedResponse === 'none');
+      finalDecision.shouldReply === false ||
+      (finalDecision.typeOfMessageReceived === 'OTHER_MESSAGE' && finalDecision.proposedResponse === 'none');
 
     if (shouldEscalate) {
       console.log('[Agent] → Escalation required (no auto-reply)');
       await this.notification.notifyEscalation({
-        decision,
+        decision: finalDecision,
         guestMessage,
         context: enrichedContext,
       });
@@ -438,12 +472,12 @@ export class GuestMessagingAgent {
       }
     }
 
-    const category = Array.isArray(decision.typeOfMessageReceived)
-      ? decision.typeOfMessageReceived[0]
-      : decision.typeOfMessageReceived;
+    const category = Array.isArray(finalDecision.typeOfMessageReceived)
+      ? finalDecision.typeOfMessageReceived[0]
+      : finalDecision.typeOfMessageReceived;
 
     const finalResult = {
-      ...decision,
+      ...finalDecision,
       escalated: shouldEscalate,
       cleaningIssueDetected: cleaningIssue.detected,
       thermostatInfo,
@@ -469,13 +503,13 @@ export class GuestMessagingAgent {
         conversationHistory: context.conversationHistory || [],
       };
 
-      const reflection = await this.reflectOnDecision(decision, toolResults, reflectionContext);
+      const reflection = await this.reflectOnDecision(finalDecision, toolResults, reflectionContext);
 
       finalResult.reflection = reflection;
 
       if (reflection.decision === 'REVISE' && reflection.revisedResponse) {
         console.log('[Agent] Reflection requested revision');
-        finalResult.typeOfMessageReceived = reflection.revisedType || decision.typeOfMessageReceived;
+        finalResult.typeOfMessageReceived = reflection.revisedType || finalDecision.typeOfMessageReceived;
         finalResult.proposedResponse = reflection.revisedResponse;
         finalResult.reflectionNotes = reflection.notes;
       } else {
@@ -513,13 +547,13 @@ export class GuestMessagingAgent {
         conversationHistory: context.conversationHistory || [],
       };
 
-      const judgeResult = await this.runConversationJudge(decision, toolResults, judgeContext);
+      const judgeResult = await this.runConversationJudge(finalDecision, toolResults, judgeContext);
 
       finalResult.conversationJudge = judgeResult;
 
       if (judgeResult.verdict === 'REVISE' && judgeResult.revisedResponse) {
         console.log('[Agent] Conversation Judge requested revision');
-        finalResult.typeOfMessageReceived = decision.typeOfMessageReceived;
+        finalResult.typeOfMessageReceived = finalDecision.typeOfMessageReceived;
         finalResult.proposedResponse = judgeResult.revisedResponse;
         finalResult.judgeNotes = judgeResult.notes;
       } else if (judgeResult.verdict === 'REJECT') {

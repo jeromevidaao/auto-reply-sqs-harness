@@ -62,7 +62,8 @@ This document tracks the concrete next steps for the harness. We will grow it it
 - Next: Continue moving remaining old production safety logic (full duplicate checks, more pre-approval details) into the tool layer
 - Goal: Highest quality responses by ensuring every pass (main + reflection + judge) has the best possible traces and tool outputs
 - Improve _buildUserPrompt and reflection/judge prompts to leverage the new traces more effectively
-- Add eval goldens specifically testing multipass revision behavior when traces indicate risk
+- [x] Added preapproved-inquiry-fastpath golden that exercises early pre-approval trace injection into the first LLM pass
+- Add more goldens specifically testing multipass behavior (recent host suppression, judge forcing revisions based on traces)
 
 ### D. Welcome Message Logic
 - [x] Basic NEW_RESERVATION_WELCOME + pet mismatch golden added and passing

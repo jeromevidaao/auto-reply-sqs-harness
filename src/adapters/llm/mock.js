@@ -34,6 +34,17 @@ export class MockLLMAdapter {
       });
     }
 
+    // Pre-approved inquiry fast path (must be early to win over other heuristics)
+    if (lower.includes('pre-approved') || lower.includes('preapproved')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'NEW_INQUIRY_WELCOME',
+        proposedResponse: "Wonderful news, Elena! We're delighted that your inquiry has been pre-approved. Welcome and looking forward to hosting you!",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for pre-approved inquiry fast path golden'
+      });
+    }
+
     // Outdoor trash (real rule) - must come very early
     if (lower.includes('put our trash') || (lower.includes('trash') && lower.includes('when we leave'))) {
       return JSON.stringify({

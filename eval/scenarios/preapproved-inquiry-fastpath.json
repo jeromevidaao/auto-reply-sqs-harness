@@ -1,0 +1,22 @@
+{
+  "id": "preapproved-inquiry-no-recent-host",
+  "description": "Inquiry that has been pre-approved by the host, with no recent host message. The multipass should recognize the pre-approval trace and produce an appropriate warm welcome without hesitation.",
+  "guestMessage": "Great news! My inquiry has been pre-approved. Looking forward to staying with you!",
+  "context": {
+    "guestName": "Elena",
+    "checkIn": "2026-08-10",
+    "checkOut": "2026-08-13",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-07-20T10:00:00Z",
+    "conversationHistory": [],
+    "inquiryId": "preapproved-001"
+  },
+  "rubric": {
+    "expectedCategory": "NEW_INQUIRY_WELCOME",
+    "shouldReply": true,
+    "forbiddenPhrases": ["I need to check with the host", "let me get back to you"],
+    "requiredPhrases": ["pre-approved", "welcome"]
+  },
+  "notes": "Tests that pre-approval trace is properly surfaced to the first pass and leads to confident, positive responses."
+}
