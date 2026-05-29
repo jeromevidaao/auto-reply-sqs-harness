@@ -21,7 +21,7 @@ export class SnsNotificationAdapter {
   }
 
   async notifyEscalation({ decision, guestMessage, context, timestamp = new Date() }) {
-    const guestName = context.guestName || 'Guest';
+    const guestName = context.guestDisplayName || context.guestName || 'Guest';
     const property = context.propertyName || context.listingId || 'Unknown property';
     const dates = (context.checkIn && context.checkOut)
       ? `${context.checkIn} → ${context.checkOut}`
@@ -96,13 +96,14 @@ export class SnsNotificationAdapter {
     }
 
     const res = cleaningIssue.reservation || context || {};
-    const subject = `[CLEANING ALERT] ${res.guestName || 'Guest'} - ${res.propertyName || 'Property'}`;
+    const guestName = res.guestDisplayName || res.guestName || context?.guestDisplayName || context?.guestName || 'Guest';
+    const subject = `[CLEANING ALERT] ${guestName} - ${res.propertyName || 'Property'}`;
 
     const message = [
       `CLEANING ISSUE DETECTED`,
       `Time: ${timestamp.toISOString()}`,
       '',
-      `Guest: ${res.guestName || 'Unknown'}`,
+      `Guest: ${guestName}`,
       `Reservation: ${res.id || res.reservationId || 'N/A'}`,
       `Property: ${res.propertyName || 'N/A'}`,
       `Check-in:  ${res.checkIn || 'N/A'}`,

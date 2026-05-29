@@ -27,8 +27,9 @@ export class ConsoleEscalationAdapter {
     lines.push(`Confidence: ${decision.confidence ?? 'n/a'}`);
     lines.push('');
 
-    if (context.guestName) {
-      lines.push(`Guest: ${context.guestName}`);
+    const guestName = context.guestDisplayName || context.guestName || 'Guest';
+    if (guestName) {
+      lines.push(`Guest: ${guestName}`);
     }
     if (context.checkIn && context.checkOut) {
       lines.push(`Stay: ${context.checkIn} → ${context.checkOut}`);
@@ -110,8 +111,9 @@ export class ConsoleEscalationAdapter {
     lines.push(`Detected at: ${timestamp.toISOString()}`);
     lines.push('');
 
-    if (res.guestName) {
-      lines.push(`Guest: ${res.guestName}`);
+    const guestName = res.guestDisplayName || res.guestName || context?.guestDisplayName || context?.guestName || 'Guest';
+    if (guestName) {
+      lines.push(`Guest: ${guestName}`);
     }
     if (res.id || res.reservationId) {
       lines.push(`Reservation ID: ${res.id || res.reservationId}`);

@@ -22,7 +22,7 @@
 
 4. **Detect Overly Robotic or Formulaic Responses**
    - The agent should not sound like it is using the same template repeatedly.
-   - Pay special attention to guest names in the format "ChineseName(EnglishName)". The agent should **not** repeat the full "Menghang(David)" form in every message. Prefer using just "David" or the first name after the initial greeting.
+   - Pay special attention to guest names in the format "ChineseName(EnglishName)" (this is uncommon but does occur). The agent should avoid repeatedly using the full "Menghang(David)" form. Prefer using just the English name or the first name after the initial greeting.
 
 5. **Overall Conversation Quality**
    - Is the proposed response appropriate given the recent back-and-forth?
