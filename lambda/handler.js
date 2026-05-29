@@ -30,6 +30,12 @@ export const handler = async (event, context) => {
   // Log full incoming event for deep debugging (CloudWatch searchable)
   console.log('RAW EVENT:', JSON.stringify(event, null, 2));
 
+  // Print the raw SQS message body explicitly for easy reference when debugging
+  // extraction / parsing issues (very useful during cutover and when real webhooks arrive).
+  if (event?.Records?.[0]?.body) {
+    console.log('RAW SQS MESSAGE BODY (exact string received from queue):', event.Records[0].body);
+  }
+
   // === Robust extraction for both direct invokes and real SQS traffic ===
   // Real production messages (from the old system / Hospitable webhooks) often arrive
   // with shapes like:
