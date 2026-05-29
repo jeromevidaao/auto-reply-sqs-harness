@@ -22,18 +22,65 @@ export class ConversationContextTool extends BaseTool {
   async execute(input, context = {}) {
     const reservationId = context.reservationId || context.airbnb_conversation_id;
     const inquiryId = context.inquiryId || (context.reservationId === null ? context.airbnb_conversation_id : null);
+    const conversationId = inquiryId || reservationId;
     const isInquiry = !context.reservationId && !!inquiryId;
 
     const result = {
       hasRecentHostMessage: false,
+      minutesSinceLastHostMessage: null,
+      lastHostMessagePreview: null,
       preApprovalDetected: false,
       preApprovalMessage: null,
+      duplicateRisk: false,
+      duplicateReason: null,
       traces: [],
     };
 
-    // Recent host message check (10 minute window, important for pre-approval races)
-    // In production this used Hospitable message history
-    if (context.conversationHistory && context.conversationHistory.length > 0) {
+    // === Recent host message + duplicate risk check ===
+    // Try to use live Hospitable data when available (preferred, like old production)
+    let recentHostMessages = [];
+
+    if (this.hospitableClient && conversationId) {
+      try {
+        const messages = await this.hospitableClient.getConversationMessages(conversationId, 10);
+        recentHostMessages = messages
+          .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        if (recentHostMessages.length > 0) {
+          const lastHost = recentHostMessages[0];
+          const msgTime = new Date(lastHost.created_at);
+          const minutesAgo = (Date.now() - msgTime.getTime()) / (1000 * 60);
+
+          result.hasRecentHostMessage = minutesAgo < 15; // Slightly wider window than before
+          result.minutesSinceLastHostMessage = Math.round(minutesAgo * 10) / 10;
+          result.lastHostMessagePreview = (lastHost.body || '').substring(0, 180);
+
+          if (result.hasRecentHostMessage) {
+            result.traces.push(`Recent host message ${result.minutesSinceLastHostMessage.toFixed(1)} min ago (duplicate risk)`);
+          }
+
+          // Simple duplicate risk heuristic (similar to old hasDuplicateMessage)
+          const currentMsgLower = (input || '').toLowerCase();
+          const similarRecent = recentHostMessages.some(m => {
+            const hostMsg = (m.body || '').toLowerCase();
+            return currentMsgLower.length > 20 &&
+                   hostMsg.includes(currentMsgLower.substring(0, 30));
+          });
+
+          if (similarRecent) {
+            result.duplicateRisk = true;
+            result.duplicateReason = 'Recent host reply appears to address a very similar question';
+            result.traces.push('High duplicate risk detected based on recent host reply content');
+          }
+        }
+      } catch (e) {
+        result.traces.push('Live message history fetch failed (using fallback)');
+      }
+    }
+
+    // Fallback to provided conversationHistory if live fetch wasn't possible or failed
+    if (!result.hasRecentHostMessage && context.conversationHistory && context.conversationHistory.length > 0) {
       const recentHost = context.conversationHistory
         .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
         .find(m => {
@@ -44,7 +91,9 @@ export class ConversationContextTool extends BaseTool {
 
       if (recentHost) {
         result.hasRecentHostMessage = true;
-        result.traces.push('Recent host message within 10 minutes (possible pre-approval or manual reply)');
+        result.minutesSinceLastHostMessage = Math.round(((Date.now() - new Date(recentHost.created_at || Date.now()).getTime()) / (1000 * 60)) * 10) / 10;
+        result.lastHostMessagePreview = (recentHost.body || '').substring(0, 180);
+        result.traces.push(`Recent host message within ~10 min (fallback from history) - duplicate risk`);
       }
     }
 
@@ -81,6 +130,10 @@ export class ConversationContextTool extends BaseTool {
       } catch (e) {
         result.traces.push('Pre-approval check failed (fail safe)');
       }
+    }
+
+    if (result.duplicateRisk) {
+      result.traces.push(result.duplicateReason);
     }
 
     return {

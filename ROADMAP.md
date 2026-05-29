@@ -63,6 +63,7 @@ This document tracks the concrete next steps for the harness. We will grow it it
 - Goal: Highest quality responses by ensuring every pass (main + reflection + judge) has the best possible traces and tool outputs
 - Improve _buildUserPrompt and reflection/judge prompts to leverage the new traces more effectively
 - [x] Added preapproved-inquiry-fastpath golden that exercises early pre-approval trace injection into the first LLM pass
+- [x] Significantly enhanced ConversationContextTool with stronger live duplicate/recent host message checking (actively fetches via Hospitable when possible + content similarity heuristic)
 - Add more goldens specifically testing multipass behavior (recent host suppression, judge forcing revisions based on traces)
 
 ### D. Welcome Message Logic

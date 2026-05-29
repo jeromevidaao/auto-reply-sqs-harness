@@ -249,7 +249,15 @@ export class GuestMessagingAgent {
     if (context.conversationTraces) {
       lines.push('- Conversation safety traces:');
       if (context.conversationTraces.hasRecentHostMessage) {
-        lines.push('  • Recent host message detected (within ~10 min window)');
+        const mins = context.conversationTraces.minutesSinceLastHostMessage 
+          ? ` (${context.conversationTraces.minutesSinceLastHostMessage}m ago)` : '';
+        lines.push(`  • Recent host message detected${mins}`);
+        if (context.conversationTraces.lastHostMessagePreview) {
+          lines.push(`  • Last host message: "${context.conversationTraces.lastHostMessagePreview.substring(0, 120)}..."`);
+        }
+      }
+      if (context.conversationTraces.duplicateRisk) {
+        lines.push(`  • DUPLICATE RISK: ${context.conversationTraces.duplicateReason || 'Similar recent host reply detected'}`);
       }
       if (context.conversationTraces.preApprovalDetected) {
         lines.push('  • Pre-approval detected for this inquiry');
@@ -265,6 +273,9 @@ export class GuestMessagingAgent {
     }
     if (context.recentHostActivity) {
       lines.push('- IMPORTANT: A host message was sent very recently. Be extremely conservative — consider not replying to avoid duplication.');
+    }
+    if (context.conversationTraces?.duplicateRisk) {
+      lines.push('- HIGH DUPLICATE RISK: A very similar question appears to have been answered by the host recently. Strongly prefer not replying or escalating.');
     }
 
     lines.push('');
@@ -292,7 +303,11 @@ export class GuestMessagingAgent {
           enrichedContext.conversationTraces = traces;
 
           const summary = [];
-          if (traces.hasRecentHostMessage) summary.push('recent host message');
+          if (traces.hasRecentHostMessage) {
+            const mins = traces.minutesSinceLastHostMessage ? ` (${traces.minutesSinceLastHostMessage}m ago)` : '';
+            summary.push(`recent host message${mins}`);
+          }
+          if (traces.duplicateRisk) summary.push('duplicate risk');
           if (traces.preApprovalDetected) summary.push('pre-approval detected');
           if (traces.traces?.length) summary.push(...traces.traces);
 
