@@ -59,6 +59,9 @@ export class CancellationTool extends BaseTool {
       priorStatements: priorHostStatements,
       recommendedAction,
       needsEscalation: hasPriorCommitment || isExceptionRequest,
+      // Always surface the official live Airbnb policy link
+      officialPolicyUrl: 'https://www.airbnb.com/help/article/475',
+      policyNote: 'Our cancellation policy is strict. Always direct guests to review the current official policy at the link above. Do not make exceptions or soften the policy.',
     };
   }
 

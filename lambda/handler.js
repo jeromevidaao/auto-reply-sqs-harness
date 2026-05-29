@@ -68,6 +68,18 @@ export const handler = async (event, context) => {
   const agent = new GuestMessagingAgent({
     llm: process.env.GROK_API_KEY ? 'auto' : 'mock',
     notification: 'auto',
+
+    // Conversation Judge (anti-repetition & consistency)
+    // Enable via environment variable when ready to test in production
+    enableConversationJudge: process.env.ENABLE_CONVERSATION_JUDGE === 'true',
+    judgeCategories: [
+      'CANCELLATION_POLICY',
+      'CANCELLATION_NOTIFICATION',
+      'CANCELLATION_POLICY_EXCEPTION',
+      'NEW_RESERVATION_WELCOME',
+      'NEW_INQUIRY_WELCOME',
+      'OTHER_MESSAGE'
+    ]
   });
 
   try {
@@ -99,6 +111,12 @@ export const handler = async (event, context) => {
     }
     if (result.cancellationInfo) {
       console.log('📋 CANCELLATION INFO:', JSON.stringify(result.cancellationInfo, null, 2));
+      if (result.cancellationInfo.officialPolicyUrl) {
+        console.log('🔗 Official Airbnb Policy Link:', result.cancellationInfo.officialPolicyUrl);
+      }
+      if (result.cancellationInfo.policy?.officialUrl) {
+        console.log('🔗 Policy snapshot used:', result.cancellationInfo.policy.officialUrl);
+      }
     }
     if (result.eventInfo) {
       console.log('🎉 EVENT REQUEST INFO:', JSON.stringify(result.eventInfo, null, 2));
@@ -109,6 +127,14 @@ export const handler = async (event, context) => {
       console.log('🔍 REFLECTION RESULT:', JSON.stringify(result.reflection, null, 2));
       if (result.reflectionNotes) {
         console.log('🔍 Reflection notes:', result.reflectionNotes);
+      }
+    }
+
+    // Log Conversation Judge result (new anti-repetition system)
+    if (result.conversationJudge) {
+      console.log('🧠 CONVERSATION JUDGE RESULT:', JSON.stringify(result.conversationJudge, null, 2));
+      if (result.judgeNotes) {
+        console.log('🧠 Judge notes:', result.judgeNotes);
       }
     }
 
@@ -146,6 +172,7 @@ export const handler = async (event, context) => {
           event: result.eventInfo,
         },
         reflection: result.reflection || null,
+        conversationJudge: result.conversationJudge || null,
         fullResult: result, // Keep full object for deep debugging
       }),
     };

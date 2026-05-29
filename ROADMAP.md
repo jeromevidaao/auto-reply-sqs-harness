@@ -30,7 +30,8 @@ This document tracks the concrete next steps for the harness. We will grow it it
 - [x] Created `categories/cancellation.md`
 - [x] Implemented `CancellationTool` with history-aware escalation detection
 - [x] Wired into `GuestMessagingAgent.handleMessage`
-- [x] Basic reflection / second-pass capability implemented (lightweight critique for high-risk categories)
+- [x] Basic reflection / second-pass capability implemented
+- [x] Conversation Judge implemented (stronger anti-repetition & consistency reviewer)
 - [ ] Full refund timing logic + stronger anti-contradiction in reflection pass (next)
 
 ### C. EventRequestTool

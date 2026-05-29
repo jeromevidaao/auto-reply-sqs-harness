@@ -89,6 +89,29 @@ describe('GuestMessagingAgent (mock mode)', () => {
     assert.ok(result.reflection === undefined || typeof result.reflection.decision === 'string');
   });
 
+  it('supports Conversation Judge mode without crashing', async () => {
+    const agent = new GuestMessagingAgent({
+      llm: 'mock',
+      projectRoot: projectRootForTests,
+      enableConversationJudge: true,
+      judgeCategories: ['NEW_INQUIRY_WELCOME', 'OTHER_MESSAGE']
+    });
+
+    const result = await agent.handleMessage(
+      "Hi, I'm excited for the weekend!",
+      {
+        guestName: 'TestUser',
+        listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d'
+      }
+    );
+
+    assert.ok(result);
+    assert.ok(
+      result.conversationJudge === undefined ||
+      ['APPROVE', 'REVISE', 'REJECT'].includes(result.conversationJudge.verdict)
+    );
+  });
+
   it('detects cleaning issues using the unified Tool (CleaningIssueTool) in handleMessage', async () => {
     const agent = new GuestMessagingAgent({
       llm: 'mock',

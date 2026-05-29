@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { ToolRegistry, CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool } from './tools/index.js';
+import { ToolRegistry, CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool, AirbnbPolicyTool } from './tools/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -37,6 +37,17 @@ export class GuestMessagingAgent {
       'NEW_INQUIRY_WELCOME'
     ];
 
+    // Conversation Judge (anti-repetition & consistency) - higher level than basic reflection
+    this.enableConversationJudge = options.enableConversationJudge === true;
+    this.judgeCategories = options.judgeCategories || [
+      'CANCELLATION_POLICY',
+      'CANCELLATION_NOTIFICATION',
+      'CANCELLATION_POLICY_EXCEPTION',
+      'NEW_RESERVATION_WELCOME',
+      'NEW_INQUIRY_WELCOME',
+      'OTHER_MESSAGE'
+    ];
+
     this.systemPrompt = null;
 
     // Tools registry (unified interface for capabilities like cleaning detection, future tools)
@@ -56,6 +67,9 @@ export class GuestMessagingAgent {
       }
       if (!this.tools.has('handle_event_request')) {
         this.tools.register(new EventRequestTool());
+      }
+      if (!this.tools.has('get_airbnb_cancellation_policy')) {
+        this.tools.register(new AirbnbPolicyTool());
       }
     }
   }
@@ -286,9 +300,19 @@ export class GuestMessagingAgent {
     // === Cancellation handling (high-risk policy area) ===
     const cancellationTool = this.tools.get('handle_cancellation');
     let cancellationInfo = null;
+
+    const policyTool = this.tools.get('get_airbnb_cancellation_policy');
+
     if (cancellationTool && /cancel|refund|policy/i.test(guestMessage)) {
       cancellationInfo = await cancellationTool.execute(guestMessage, context);
       console.log('[Agent] → Cancellation analysis performed');
+
+      // Automatically fetch the latest policy snapshot when cancellation is involved
+      if (policyTool) {
+        const policyInfo = await policyTool.execute(guestMessage, context);
+        cancellationInfo.policy = policyInfo;   // Attach structured policy data
+        console.log('[Agent] → Latest Airbnb policy snapshot attached');
+      }
     }
 
     // === Event / party requests ===
@@ -301,6 +325,10 @@ export class GuestMessagingAgent {
         console.log('[Agent] → Event request detected');
       }
     }
+
+    const category = Array.isArray(decision.typeOfMessageReceived)
+      ? decision.typeOfMessageReceived[0]
+      : decision.typeOfMessageReceived;
 
     const finalResult = {
       ...decision,
@@ -337,6 +365,54 @@ export class GuestMessagingAgent {
         finalResult.reflectionNotes = reflection.notes;
       } else {
         console.log('[Agent] Reflection approved original decision');
+      }
+    }
+
+    // === Conversation Judge (stronger anti-repetition & consistency) ===
+    // Force the judge on ANY cancellation-related message (as requested by user)
+    const isCancellationRelated = cancellationInfo ||
+      ['CANCELLATION_POLICY', 'CANCELLATION_NOTIFICATION', 'CANCELLATION_POLICY_EXCEPTION'].includes(category);
+
+    // Always run judge for cancellations, even if the global flag is off
+    const shouldRunJudge = this.enableConversationJudge || isCancellationRelated;
+
+    if (shouldRunJudge) {
+      const toolResults = {
+        cleaning: cleaningIssue.detected ? cleaningIssue : null,
+        thermostat: thermostatInfo,
+        cancellation: cancellationInfo,
+        event: eventInfo,
+        airbnbPolicy: cancellationInfo?.policy || null,
+      };
+
+      // Make policy data more prominent for the judge
+      if (toolResults.airbnbPolicy) {
+        toolResults.policyDataForReview = toolResults.airbnbPolicy;
+      }
+
+      const judgeContext = {
+        ...context,
+        originalMessage: guestMessage,
+        conversationHistory: context.conversationHistory || [],
+      };
+
+      const judgeResult = await this.runConversationJudge(decision, toolResults, judgeContext);
+
+      finalResult.conversationJudge = judgeResult;
+
+      if (judgeResult.verdict === 'REVISE' && judgeResult.revisedResponse) {
+        console.log('[Agent] Conversation Judge requested revision');
+        finalResult.typeOfMessageReceived = decision.typeOfMessageReceived;
+        finalResult.proposedResponse = judgeResult.revisedResponse;
+        finalResult.judgeNotes = judgeResult.notes;
+      } else if (judgeResult.verdict === 'REJECT') {
+        console.log('[Agent] Conversation Judge rejected the response');
+        finalResult.shouldReply = false;
+        finalResult.proposedResponse = 'none';
+        finalResult.escalated = true;
+        finalResult.judgeNotes = judgeResult.notes;
+      } else {
+        console.log('[Agent] Conversation Judge approved original decision');
       }
     }
 
@@ -434,6 +510,103 @@ export class GuestMessagingAgent {
     }
 
     lines.push('Return ONLY valid JSON. No other text.');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Runs a dedicated Conversation Judge focused on anti-repetition and consistency.
+   * This is more powerful than basic reflection for catching the agent repeating itself.
+   */
+  async runConversationJudge(firstDecision, toolResults = {}, context = {}) {
+    if (!this.enableConversationJudge) {
+      return { verdict: 'APPROVE', notes: 'Conversation Judge disabled' };
+    }
+
+    const category = Array.isArray(firstDecision.typeOfMessageReceived)
+      ? firstDecision.typeOfMessageReceived[0]
+      : firstDecision.typeOfMessageReceived;
+
+    if (!this.judgeCategories.includes(category)) {
+      return { verdict: 'APPROVE', notes: 'Category not configured for Conversation Judge' };
+    }
+
+    console.log('[Agent] Running Conversation Judge for category:', category);
+
+    const judgePrompt = await this._buildConversationJudgePrompt(firstDecision, toolResults, context);
+
+    try {
+      const raw = await this.llm.complete(
+        'You are an expert conversation quality reviewer. Your only job is to catch repetitive or inconsistent responses from an AI host.',
+        judgePrompt
+      );
+
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]);
+      }
+
+      if (!parsed || !parsed.verdict) {
+        console.warn('[Agent] Conversation Judge returned invalid output. Approving original.');
+        return { verdict: 'APPROVE', notes: 'Invalid judge output' };
+      }
+
+      console.log('[Agent] Conversation Judge verdict:', parsed.verdict);
+
+      return parsed;
+
+    } catch (err) {
+      console.error('[Agent] Conversation Judge call failed:', err.message);
+      return { verdict: 'APPROVE', notes: 'Judge call failed - using original decision' };
+    }
+  }
+
+  async _buildConversationJudgePrompt(firstDecision, toolResults, context) {
+    const lines = [];
+
+    try {
+      const judgePath = path.join(this.categoriesDir, 'conversation-judge.md');
+      const judgeRules = await fs.readFile(judgePath, 'utf8');
+      lines.push(judgeRules);
+      lines.push('\n---\n');
+    } catch {
+      lines.push('You are an expert at detecting repetitive AI behavior and contradictions in conversations. Be strict.');
+    }
+
+    lines.push('=== ORIGINAL GUEST MESSAGE ===');
+    lines.push(context.originalMessage || 'Not provided');
+    lines.push('');
+
+    lines.push('=== FIRST DRAFT DECISION ===');
+    lines.push(JSON.stringify(firstDecision, null, 2));
+    lines.push('');
+
+    if (Object.keys(toolResults).length > 0) {
+      lines.push('=== TOOL RESULTS ===');
+      lines.push(JSON.stringify(toolResults, null, 2));
+      lines.push('');
+
+      // Give the live policy data extra visibility when present (important for cancellation cases)
+      if (toolResults.airbnbPolicy) {
+        lines.push('=== LIVE AIRBNB CANCELLATION POLICY DATA (treat as source of truth) ===');
+        lines.push(JSON.stringify(toolResults.airbnbPolicy, null, 2));
+        lines.push('');
+      }
+    }
+
+    if (context.conversationHistory?.length) {
+      lines.push('=== RECENT CONVERSATION HISTORY ===');
+      context.conversationHistory.slice(-8).forEach(m => {
+        const who = m.sender_type === 'guest' ? 'Guest' : 'Host';
+        lines.push(`${who}: ${m.body}`);
+      });
+      lines.push('');
+    }
+
+    lines.push('Return ONLY valid JSON matching the required schema. No other text.');
 
     return lines.join('\n');
   }
