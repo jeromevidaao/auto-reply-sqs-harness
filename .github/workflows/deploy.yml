@@ -25,6 +25,10 @@ jobs:
   deploy:
     name: Deploy guest-messaging-agent-harness
     runs-on: ubuntu-latest
+    env:
+      # Force Node 24 runtime for actions that still declare node20 internally.
+      # See: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     # Required for OIDC
     permissions:
