@@ -534,6 +534,19 @@ export class MockLLMAdapter {
       });
     }
 
+    // Simple guest acknowledgment / thank you at end of conversation
+    // Very common polite closing. Should get a short warm reply, not escalation.
+    if (lower.includes('thanks so much') || lower.includes('thank you') || 
+        (lower.includes('okay') || lower.includes('perfect')) && lower.includes('thanks')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'GENERAL_ACKNOWLEDGMENT',
+        proposedResponse: "You're very welcome! If you have any other questions before or during your stay, just let us know. Safe travels!",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Simple thank-you acknowledgment — short friendly reply'
+      });
+    }
+
     // Default safe response (anything not yet ported from the old 65-category set)
     return JSON.stringify({
       typeOfMessageReceived: 'OTHER_MESSAGE',
