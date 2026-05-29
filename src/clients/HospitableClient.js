@@ -167,8 +167,35 @@ export class HospitableClient {
   }
 
   /**
-   * Send a message to a conversation (the main way to reply to a guest).
-   * Uses the conversation_id (preferred over reservation/inquiry id for messaging).
+   * Send a message to a reservation (the method that the original working
+   * auto-reply-sqs Lambda used successfully).
+   */
+  async sendMessageToReservation(reservationId, body) {
+    if (!reservationId) throw new Error('reservationId is required to send a message');
+    if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
+
+    const token = await this.getToken();
+
+    const response = await axios.post(
+      `${this.baseUrl}/reservations/${reservationId}/messages`,
+      { body },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        timeout: 15000
+      }
+    );
+
+    return response.data?.data || response.data;
+  }
+
+  /**
+   * Send a message to a conversation.
+   * Note: The original production system that was sending successfully used
+   * sendMessageToReservation (via reservationUuid) instead.
    */
   async sendMessage(conversationId, body) {
     if (!conversationId) throw new Error('conversationId is required to send a message');

@@ -314,16 +314,26 @@ export const handler = async (event, context) => {
       console.log('\n🚨 ESCALATION TRIGGERED - Manual intervention required');
     }
 
-    // === Actually send the reply to the guest (the missing piece from the cutover) ===
+    // === Actually send the reply to the guest ===
+    // The original working auto-reply-sqs used the reservations endpoint.
+    // We prefer that when we have a reservationId (more reliable with current token).
     if (result.shouldReply && result.proposedResponse && result.proposedResponse !== 'none' && !result.escalated) {
+      const reservationId = msgContext.reservationId || msgContext.reservation_id || msgContext.reservation?.id;
       const convId = msgContext.conversation_id || msgContext.airbnb_conversation_id;
 
-      if (convId) {
+      const targetId = reservationId || convId;
+      const targetType = reservationId ? 'reservation' : 'conversation';
+
+      if (targetId) {
         const sentPreview = result.proposedResponse.substring(0, 80);
-        console.log('📤 SENDING REPLY → conversation_id:', convId, '| preview:', sentPreview);
+        console.log(`📤 SENDING REPLY → ${targetType}:`, targetId, '| preview:', sentPreview);
 
         try {
-          await hospitableClient.sendMessage(convId, result.proposedResponse);
+          if (reservationId) {
+            await hospitableClient.sendMessageToReservation(reservationId, result.proposedResponse);
+          } else {
+            await hospitableClient.sendMessage(convId, result.proposedResponse);
+          }
           console.log('✅ Reply successfully sent to guest via Hospitable');
 
           // === Verification step: Pull latest messages to confirm delivery ===

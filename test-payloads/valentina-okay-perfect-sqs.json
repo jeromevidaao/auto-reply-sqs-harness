@@ -1,0 +1,27 @@
+{
+  "_comment": "Reconstructed SQS event payload for the exact Valentina Booker 'Okay perfect. Thanks so much' message at ~6:49 AM / 13:49 UTC on 2026-05-29. Built from real production webhook structure observed in CloudWatch logs + fresh reservation data fetched via Hospitable API on the same token.",
+  "_source": {
+    "conversation_id": "54a01055-447d-4461-bfe8-5efc76d5dcb2",
+    "reservation_id": "069207c7-7811-4e4b-833c-68226ff4f558",
+    "property_id": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "message_text": "Okay perfect. Thanks so much",
+    "sender_type": "guest",
+    "timestamp_utc": "2026-05-29T13:49:58Z"
+  },
+  "Records": [
+    {
+      "messageId": "reconstructed-for-local-testing",
+      "receiptHandle": "reconstructed",
+      "body": "{\"resource\":\"/helloworld\",\"path\":\"/helloworld\",\"httpMethod\":\"POST\",\"headers\":{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"Host\":\"g32pkusnye.execute-api.us-east-1.amazonaws.com\",\"User-Agent\":\"Hospitable\"},\"queryStringParameters\":{\"act\":\"message\"},\"body\":\"{\\\"id\\\":\\\"a1e55012-69c1-4420-8752-580d478cf10e\\\",\\\"data\\\":{\\\"id\\\":1205267391,\\\"body\\\":\\\"Okay perfect. Thanks so much\\\",\\\"user\\\":{\\\"id\\\":\\\"436eb2ed-5174-5542-926f-5013bae34188\\\",\\\"name\\\":\\\"Jerome Ansia\\\",\\\"email\\\":\\\"jerome.ans@gmail.com\\\"},\\\"sender\\\":{\\\"locale\\\":\\\"en\\\",\\\"location\\\":\\\"Boston, MA\\\",\\\"full_name\\\":\\\"Valentina\\\",\\\"first_name\\\":\\\"Valentina\\\"},\\\"source\\\":\\\"platform\\\",\\\"listing\\\":{\\\"platform\\\":\\\"airbnb\\\",\\\"platform_id\\\":\\\"24259977\\\"},\\\"platform\\\":\\\"airbnb\\\",\\\"property\\\":{\\\"id\\\":\\\"60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd\\\",\\\"name\\\":\\\"Cozy, Central 2 Bd Apt, Parking\\\"},\\\"created_at\\\":\\\"2026-05-29T13:49:58Z\\\",\\\"sender_type\\\":\\\"guest\\\",\\\"content_type\\\":\\\"text/plain\\\",\\\"reservation_id\\\":\\\"069207c7-7811-4e4b-833c-68226ff4f558\\\",\\\"conversation_id\\\":\\\"54a01055-447d-4461-bfe8-5efc76d5dcb2\\\"},\\\"action\\\":\\\"message.created\\\",\\\"created\\\":\\\"2026-05-29T13:50:29Z\\\",\\\"version\\\":\\\"v2\\\"}\",\"isBase64Encoded\":false}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1780062630724",
+        "SenderId": "manual-reconstruction",
+        "ApproximateFirstReceiveTimestamp": "1780062630739"
+      },
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:834917996497:grok_message",
+      "awsRegion": "us-east-1"
+    }
+  ]
+}
