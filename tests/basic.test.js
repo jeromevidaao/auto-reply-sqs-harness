@@ -7,17 +7,13 @@ import { GuestMessagingAgent } from '../src/agent.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRootForTests = path.resolve(__dirname, '..');
 
-describe('GuestMessagingAgent', () => {
-  // These tests now require a real GROK_API_KEY.
-  // Mock LLM is no longer supported, even for unit tests.
-  if (!process.env.GROK_API_KEY) {
-    console.warn('⚠️  Skipping GuestMessagingAgent tests: GROK_API_KEY is not set.');
-    // We can still run some non-LLM tests below if any exist.
-  }
+const hasGrokKey = !!process.env.GROK_API_KEY;
+
+describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
+  // These tests require a real GROK_API_KEY.
+  // The mock LLM has been permanently removed (even for unit tests).
 
   it('handles the Michele inquiry scenario without mentioning pet fees', async () => {
-    if (!process.env.GROK_API_KEY) return; // skip
-
     const agent = new GuestMessagingAgent({
       llm: 'auto',
       projectRoot: projectRootForTests
@@ -40,7 +36,7 @@ describe('GuestMessagingAgent', () => {
     assert.ok(!result.proposedResponse.toLowerCase().includes('pet fee'));
   });
 
-  it('returns OTHER_MESSAGE + none for unclear input by default (mock)', async () => {
+  it('returns OTHER_MESSAGE + none for unclear input by default', async () => {
     const agent = new GuestMessagingAgent({
       llm: 'auto',
       projectRoot: projectRootForTests
@@ -82,7 +78,7 @@ describe('GuestMessagingAgent', () => {
       reflectionCategories: ['CANCELLATION_POLICY']
     });
 
-    // This should not throw even though the mock LLM may return garbage
+    // This should not throw even with real Grok responses
     const result = await agent.handleMessage(
       "I need to cancel my reservation due to an emergency.",
       {
@@ -138,7 +134,7 @@ describe('GuestMessagingAgent', () => {
     );
 
     assert.equal(result.cleaningIssueDetected, true);
-    // Mock treats unknown messages as OTHER_MESSAGE + none → escalates
+    // When the agent doesn't know how to answer, it escalates
     assert.equal(result.escalated, true);
   });
 
