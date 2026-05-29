@@ -313,6 +313,26 @@ export const handler = async (event, context) => {
       console.log('\n🚨 ESCALATION TRIGGERED - Manual intervention required');
     }
 
+    // === Actually send the reply to the guest (the missing piece from the cutover) ===
+    if (result.shouldReply && result.proposedResponse && result.proposedResponse !== 'none' && !result.escalated) {
+      const convId = msgContext.conversation_id || msgContext.airbnb_conversation_id;
+
+      if (convId) {
+        try {
+          await hospitableClient.sendMessage(convId, result.proposedResponse);
+          console.log('✅ Reply successfully sent to guest via Hospitable');
+        } catch (sendError) {
+          console.error('❌ Failed to send reply to guest:', sendError.message);
+          // We still return 200 so the SQS message is deleted (avoid infinite retries on send failure).
+          // In a future iteration we could push to a DLQ or retry queue for sending.
+        }
+      } else {
+        console.warn('⚠️ No conversation_id found in context — cannot send reply. Message will be lost.');
+      }
+    } else if (result.shouldReply === false && !result.escalated) {
+      console.log('ℹ️ Decision was to not reply (no message sent).');
+    }
+
     console.log('\n⏱️  Total handler duration:', duration, 'ms');
     console.log('═══════════════════════════════════════════════════════════════\n');
 
