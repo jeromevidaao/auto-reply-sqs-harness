@@ -14,6 +14,40 @@ import { GuestMessagingAgent } from '../src/agent.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { HospitableClient } from '../src/clients/HospitableClient.js';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+
+const ssm = new SSMClient({ region: 'us-east-1' });
+
+let _grokKeyCache = null;
+
+/**
+ * Fetches the real xAI Grok API key.
+ * Priority: process.env.GROK_API_KEY → SSM /grok/api-key (SecureString)
+ *
+ * This mirrors how the original auto-reply-sqs Lambda sourced its key
+ * (env var at runtime, value stored in SSM as discovered from the old codebase).
+ */
+async function getGrokApiKey() {
+  if (process.env.GROK_API_KEY) {
+    return process.env.GROK_API_KEY;
+  }
+  if (_grokKeyCache) return _grokKeyCache;
+
+  try {
+    const command = new GetParameterCommand({
+      Name: '/grok/api-key',
+      WithDecryption: true
+    });
+    const response = await ssm.send(command);
+    _grokKeyCache = response.Parameter.Value;
+    // Also set it in process.env so the existing LLM adapter logic picks it up
+    process.env.GROK_API_KEY = _grokKeyCache;
+    return _grokKeyCache;
+  } catch (err) {
+    console.warn('[Handler] Could not fetch GROK_API_KEY from SSM /grok/api-key:', err.message);
+    return null;
+  }
+}
 
 export const handler = async (event, context) => {
   const requestId = context?.awsRequestId || 'local-' + Date.now();
@@ -136,6 +170,11 @@ export const handler = async (event, context) => {
   // === Clients for UnitReadinessTool ===
   const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
   const hospitableClient = new HospitableClient();
+
+  // Ensure we have the real Grok key (fetch from SSM /grok/api-key if not already in env)
+  // This allows the harness to use the full multipass + Judge with real Grok,
+  // matching production behavior from the old auto-reply-sqs Lambda.
+  await getGrokApiKey();
 
   const agent = new GuestMessagingAgent({
     llm: process.env.GROK_API_KEY ? 'auto' : 'mock',
