@@ -212,6 +212,72 @@ export class MockLLMAdapter {
       });
     }
 
+    // 18. Apt 3 lockbox issue (property-specific)
+    if (lower.includes('morgan') && lower.includes('lockbox') && lower.includes('trouble')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'APT3_LOCKBOX_ISSUE',
+        proposedResponse: "Good morning Morgan, I'm sorry you're having trouble with the lock box. Let me know what exactly is happening and I'll help troubleshoot.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real Apt 3 lockbox issue'
+      });
+    }
+
+    // 19. Lockbox key taken (return instructions)
+    if (lower.includes('taylor') && lower.includes('took the lockbox key')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'LOCKBOX_KEY_TAKEN',
+        proposedResponse: "Hi Taylor, thank you for letting us know! Please send the key back to: Richard Mondor, 53 Pine St, Apt 1F, Portland, ME, 04102.",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real lockbox key taken scenario'
+      });
+    }
+
+    // 20. Door locking issue (auto-lock reassurance)
+    if (lower.includes('jordan') && lower.includes('forgot to lock the door')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'DOOR_LOCKING_ISSUE',
+        proposedResponse: "Hi Jordan, no worries! Even if you forget to lock the door, it will automatically lock within 5 minutes. You can also press the lock button from inside before closing it.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real door locking concern'
+      });
+    }
+
+    // 21. Event request - no parties
+    if (lower.includes('casey') && lower.includes('get-together')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'EVENT_REQUEST',
+        proposedResponse: "Thank you for thinking of our place for your event! Unfortunately, we're not able to accommodate events or gatherings at the apartment.",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real event request denial'
+      });
+    }
+
+    // 22. Damage report / pre-existing issue
+    if (lower.includes('morgan') && lower.includes('cracked')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'DAMAGE_REPORT',
+        proposedResponse: "Hi Morgan, thank you for letting us know. I've made a note of this for our records.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real damage report handling'
+      });
+    }
+
+    // 23. Late checkout request
+    if (lower.includes('riley') && lower.includes('check out a bit later')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'LATE_CHECKOUT',
+        proposedResponse: "I'm sorry, but checkout time is 10AM so the cleaning team can prepare the unit for the next guests.",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real late checkout constraint'
+      });
+    }
+
     // Default safe response (anything not yet ported from the old 65-category set)
     return JSON.stringify({
       typeOfMessageReceived: 'OTHER_MESSAGE',

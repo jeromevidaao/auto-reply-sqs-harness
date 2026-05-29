@@ -1,0 +1,21 @@
+{
+  "id": "lockbox-key-taken",
+  "description": "Guest accidentally took the lockbox key with them when leaving. Real operational case with specific return instructions.",
+  "guestMessage": "I think I accidentally took the lockbox key with me. What should I do?",
+  "context": {
+    "guestName": "Taylor",
+    "checkIn": "2026-05-05",
+    "checkOut": "2026-05-08",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-04-15T09:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "LOCKBOX_KEY_TAKEN",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["53 Pine St, Apt 1F", "Richard Mondor"]
+  },
+  "notes": "Real operational scenario from old code. Specific handling when guests take the physical lockbox key."
+}

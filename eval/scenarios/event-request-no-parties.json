@@ -1,0 +1,21 @@
+{
+  "id": "event-request-no-parties",
+  "description": "Guest asks about hosting a party, gathering, or event at the property. Real firm 'no events' policy response.",
+  "guestMessage": "We're thinking of having a small get-together with some friends while we're there. Is that okay?",
+  "context": {
+    "guestName": "Casey",
+    "checkIn": "2026-06-15",
+    "checkOut": "2026-06-18",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-28T11:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "EVENT_REQUEST",
+    "shouldReply": true,
+    "forbiddenPhrases": ["sure", "that should be fine", "small gathering is okay"],
+    "requiredPhrases": ["not able to accommodate events or gatherings"]
+  },
+  "notes": "Real policy enforcement scenario from old code. Clear, polite but firm no to events/parties."
+}

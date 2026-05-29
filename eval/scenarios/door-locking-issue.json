@@ -1,0 +1,21 @@
+{
+  "id": "door-locking-issue",
+  "description": "Guest is worried they didn't lock the door properly or asks about locking from outside. Real common concern with auto-lock behavior.",
+  "guestMessage": "I think I forgot to lock the door when I left. Is that a problem?",
+  "context": {
+    "guestName": "Jordan",
+    "checkIn": "2026-06-01",
+    "checkOut": "2026-06-04",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-20T15:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "DOOR_LOCKING_ISSUE",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["automatically lock within 5 minutes"]
+  },
+  "notes": "Real recurring guest anxiety scenario. Old code had reassuring language about auto-lock in 5 minutes + manual lock button option."
+}

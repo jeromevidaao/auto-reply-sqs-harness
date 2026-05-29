@@ -1,0 +1,21 @@
+{
+  "id": "apt3-lockbox-issue",
+  "description": "Guest at Apt 3 reports issues with the lockbox (can't open, etc.). Real specific handling for Apt 3 which actually has a lockbox (unlike 1B and Apt 2).",
+  "guestMessage": "I'm having trouble opening the lockbox. The code isn't working.",
+  "context": {
+    "guestName": "Morgan",
+    "checkIn": "2026-06-10",
+    "checkOut": "2026-06-13",
+    "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "propertyName": "Apt 3",
+    "bookingTimestamp": "2026-05-25T12:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "APT3_LOCKBOX_ISSUE",
+    "shouldReply": true,
+    "forbiddenPhrases": ["you may be at the front of the building"],
+    "requiredPhrases": ["lock box", "sorry you're having trouble"]
+  },
+  "notes": "Real property-specific scenario. Only for Apt 3 (the one unit that has a lockbox). Old code had dedicated APT3_LOCKBOX_ISSUE category with apologetic, helpful response."
+}

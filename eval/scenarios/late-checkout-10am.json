@@ -1,0 +1,21 @@
+{
+  "id": "late-checkout-10am-cleaning",
+  "description": "Guest requests late checkout. Real firm response tied to 10AM checkout and cleaning team needs.",
+  "guestMessage": "Is it possible to check out a bit later, maybe 12 or 1pm?",
+  "context": {
+    "guestName": "Riley",
+    "checkIn": "2026-06-05",
+    "checkOut": "2026-06-08",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-20T14:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "LATE_CHECKOUT",
+    "shouldReply": true,
+    "forbiddenPhrases": ["we can probably do that", "no problem"],
+    "requiredPhrases": ["10AM", "cleaning team"]
+  },
+  "notes": "Real operational constraint. Old code had consistent 10AM checkout language with explanation about cleaning team preparing for next guests."
+}
