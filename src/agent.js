@@ -266,6 +266,47 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Dedicated early pre-processing / trace enrichment step.
+   * Runs before the first LLM call (processMessage) so the entire multipass pipeline
+   * (main generation + reflection + judge) benefits from the best possible signals.
+   *
+   * Currently includes:
+   * - Conversation safety traces (pre-approval, recent host messages)
+   * - (Future) Unit readiness quick check, duplicate prevention signals, etc.
+   */
+  async _enrichTracesEarly(enrichedContext, guestMessage) {
+    const conversationContextTool = this.tools.get('get_conversation_context');
+
+    if (conversationContextTool) {
+      try {
+        const traces = await conversationContextTool.execute(guestMessage, enrichedContext);
+        if (traces) {
+          enrichedContext.conversationTraces = traces;
+
+          const summary = [];
+          if (traces.hasRecentHostMessage) summary.push('recent host message');
+          if (traces.preApprovalDetected) summary.push('pre-approval detected');
+          if (traces.traces?.length) summary.push(...traces.traces);
+
+          if (summary.length > 0) {
+            console.log('[Agent] → Early trace enrichment complete:', summary.join(' | '));
+          } else {
+            console.log('[Agent] → Early trace enrichment complete (no special signals)');
+          }
+        }
+      } catch (err) {
+        console.warn('[Agent] Early trace enrichment failed (non-fatal):', err.message);
+        // Fail open — we still want the main pass to run
+      }
+    }
+
+    // Future cheap traces can be added here easily:
+    // - Quick unit readiness check (if we decide it's worth the cost before first LLM)
+    // - Basic duplicate/recent message heuristics
+    // - etc.
+  }
+
+  /**
    * Higher-level entry point that mimics production behavior.
    * Calls processMessage and automatically triggers escalation
    * (notification) when the agent decides not to send an auto-reply.
@@ -287,17 +328,12 @@ export class GuestMessagingAgent {
 
     console.log('[Agent] handleMessage started for guest:', enrichedContext.guestDisplayName || enrichedContext.guestName || 'Unknown');
 
-    // === Early trace enrichment (pre-approval, recent host messages, etc.) ===
-    // This gives the main LLM, reflection, and judge much richer context — critical for quality.
-    const conversationContextTool = this.tools.get('get_conversation_context');
-    let conversationTraces = null;
-    if (conversationContextTool) {
-      conversationTraces = await conversationContextTool.execute(guestMessage, enrichedContext);
-      if (conversationTraces) {
-        enrichedContext.conversationTraces = conversationTraces;
-        console.log('[Agent] → Conversation traces enriched (pre-approval / recent host checks)');
-      }
-    }
+    // === Pre-processing / Trace Enrichment Step ===
+    // Run lightweight tools and safety checks *before* the first LLM pass.
+    // This ensures the main generation, reflection, and judge all start with the richest possible signals
+    // (pre-approval status, recent host activity, unit readiness hints, etc.).
+    // This is the dedicated early enrichment phase for highest-quality multipass responses.
+    await this._enrichTracesEarly(enrichedContext, guestMessage);
 
     const decision = await this.processMessage(guestMessage, enrichedContext);
 

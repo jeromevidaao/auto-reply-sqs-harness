@@ -53,7 +53,10 @@ This document tracks the concrete next steps for the harness. We will grow it it
 ### Phase 2 — Solid Multipass System (Current Focus)
 - [x] ConversationContextTool added for early trace enrichment (pre-approval detection, recent host messages)
 - [x] Richer traces now injected into main LLM prompt, Reflection, and Conversation Judge
-- [x] Tool results and safety traces (pre-approval, recent host activity) available earlier in the pipeline
+- [x] **Dedicated early "Pre-processing / Trace Enrichment" step** added at the very start of `handleMessage`
+  - Runs lightweight safety/trace tools *before* the first LLM call (`processMessage`)
+  - Ensures the main generation pass already benefits from the best possible signals
+- Tool results and safety traces (pre-approval, recent host activity) available earlier in the pipeline
 - Next: Move more old production safety logic (full pre-approval fast path, duplicate checks) into dedicated tools or context enrichers
 - Goal: Highest quality responses by ensuring every pass (main + reflection + judge) has the best possible traces and tool outputs
 - Improve _buildUserPrompt and reflection/judge prompts to leverage the new traces more effectively
