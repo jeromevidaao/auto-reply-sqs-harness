@@ -12,7 +12,7 @@
     "expectedCategory": "GENERAL_ACKNOWLEDGMENT",
     "shouldReply": true,
     "mustEscalate": false,
-    "requiredPhrases": ["welcome", "you're welcome", "glad", "happy to help"],
+    "requiredPhrases": ["welcome", "you're welcome", "Safe travels"],
     "forbiddenPhrases": [],
     "notes": "Simple thank you / acknowledgment messages should receive a short, friendly reply. Escalating these is unnecessary noise. This was handled well in the old system."
   }
