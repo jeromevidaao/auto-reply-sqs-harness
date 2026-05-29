@@ -1,0 +1,21 @@
+{
+  "id": "self-checkin-flexibility",
+  "description": "Guest mentions they will arrive at a different time. Real reassurance about self-check-in flexibility.",
+  "guestMessage": "We won't arrive until very late. Will that be a problem for check-in?",
+  "context": {
+    "guestName": "Riley",
+    "checkIn": "2026-08-15",
+    "checkOut": "2026-08-18",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-07-10T09:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "SELF_CHECKIN_QUESTION",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["self-check-in", "anytime"]
+  },
+  "notes": "Real self-check-in flexibility reassurance from old code."
+}

@@ -47,8 +47,8 @@ This document tracks the concrete next steps for the harness. We will grow it it
   - Wrong entrance / gas station path (recurring real guest confusion for Apt 2)
   - Snow plowing service (real winter operational question)
   - Cleaning team using parking on same-day turnover (real operational case)
-- [x] Eval now at 23 scenarios / 114/114 rubric score — all pass locally with mock LLM (npm test + npm run eval both fully green)
-- Very strong emphasis on porting real historical / operational scenarios directly mined from the old monolithic production code (significantly higher long-term value)
+- [x] Eval now at 42 scenarios / 214/214 rubric score — all pass locally with mock LLM (npm test + npm run eval both fully green)
+- Extremely strong emphasis on porting real historical / operational scenarios directly mined from the old monolithic production code (the vast majority of valuable real production scenarios have now been converted to goldens)
 
 ### D. Welcome Message Logic
 - [x] Basic NEW_RESERVATION_WELCOME + pet mismatch golden added and passing

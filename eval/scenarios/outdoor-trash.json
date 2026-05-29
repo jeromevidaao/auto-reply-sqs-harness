@@ -1,0 +1,21 @@
+{
+  "id": "outdoor-trash-disposal",
+  "description": "Guest asks where to put trash. Real rule: outdoor trash can behind building near parking, may be locked.",
+  "guestMessage": "Where should we put our trash when we leave?",
+  "context": {
+    "guestName": "Casey",
+    "checkIn": "2026-06-12",
+    "checkOut": "2026-06-15",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-25T11:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "OUTDOOR_TRASH_QUESTION",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["outdoor trash"]
+  },
+  "notes": "Real trash disposal rule from old code."
+}

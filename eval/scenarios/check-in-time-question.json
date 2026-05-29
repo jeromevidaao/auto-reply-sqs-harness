@@ -1,0 +1,21 @@
+{
+  "id": "check-in-time-question",
+  "description": "Guest asks about standard check-in time. Real response with nuance based on whether early check-in was already offered.",
+  "guestMessage": "What time is check-in?",
+  "context": {
+    "guestName": "Alex",
+    "checkIn": "2026-08-20",
+    "checkOut": "2026-08-23",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-07-15T10:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "CHECK_IN_TIME_QUESTION",
+    "shouldReply": true,
+    "forbiddenPhrases": ["4PM", "standard check-in is 4pm"],
+    "requiredPhrases": ["self-check-in", "anytime"]
+  },
+  "notes": "Real check-in time response with early check-in already offered nuance."
+}

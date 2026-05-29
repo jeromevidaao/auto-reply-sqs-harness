@@ -1,0 +1,21 @@
+{
+  "id": "luggage-drop-off-richard",
+  "description": "Guest wants to drop off luggage before check-in. Real operational handoff to Richard with specific phone number.",
+  "guestMessage": "Can we drop our luggage off early before check-in?",
+  "context": {
+    "guestName": "Sam",
+    "checkIn": "2026-06-20",
+    "checkOut": "2026-06-23",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-28T09:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "LUGGAGE_DROP_OFF",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["Richard", "807-8071"]
+  },
+  "notes": "Real operational scenario with specific contact from old code."
+}

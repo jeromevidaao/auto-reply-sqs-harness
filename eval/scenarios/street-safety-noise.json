@@ -1,0 +1,21 @@
+{
+  "id": "street-safety-noise-downtown",
+  "description": "Guest asks about street safety or noise. Real honest response about city noise in downtown location.",
+  "guestMessage": "Is the area noisy at night? We're light sleepers.",
+  "context": {
+    "guestName": "Morgan",
+    "checkIn": "2026-06-25",
+    "checkOut": "2026-06-28",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-06-01T12:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "STREET_SAFETY_NOISE",
+    "shouldReply": true,
+    "forbiddenPhrases": ["super quiet", "no noise at all"],
+    "requiredPhrases": ["city noise", "downtown area"]
+  },
+  "notes": "Real honest location advice from old code."
+}

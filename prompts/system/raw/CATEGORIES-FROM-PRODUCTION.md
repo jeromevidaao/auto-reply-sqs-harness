@@ -93,18 +93,9 @@ Plus the fallback:
 - Several location / parking edge cases
 
 **Eval coverage (as of latest):**
-- 23 golden scenarios (heavy emphasis on real production scenarios mined directly from the old monolithic code)
-  - Many high-value real recurring scenarios extracted from old production logic, including:
-    - Wrong entrance / gas station path
-    - Multiple parking variants (snow plowing, temporary use by cleaning team, additional vehicles at Vaughan St)
-    - Thermostat quirks ("ignore the Nest", wall remotes, per-unit)
-    - Lockbox / door code variants (Apt 3 specific, keypad vs lockbox, auto-lock behavior, key taken)
-    - Lost/damaged items (specific return address for keys)
-    - Studio-specific (futon blanket)
-    - Furniture details (sofa bed size)
-    - Firm policy responses (no events/parties, late checkout constraints, damage reporting)
-    - Plus strong prior coverage of cancellations with history, unit readiness, early check-in, etc.
-- All 23 scenarios + 8 unit tests pass locally (114/114 rubric score)
+- 42 golden scenarios (very heavy emphasis on real production scenarios mined directly from the old monolithic code)
+  - Extensive high-value real recurring scenarios extracted from old production logic covering EV charger, luggage contacts, WiFi credentials, outdoor trash, pricing, street safety, bath amenities, floor/stairs, water quality, food recommendations, review links, cancellation notifications, guest count changes, condo comparisons, hotel recommendations, July 4th fireworks, off-platform declines, self-checkin flexibility, and many more operational and amenity-specific cases.
+- All 42 scenarios + 8 unit tests pass locally (214/214 rubric score)
 - CI runs full test + eval on every PR (see .github/workflows/ci.yml)
 
 ## Recommended Next Actions (from "let's do all" plan)

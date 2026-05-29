@@ -1,0 +1,21 @@
+{
+  "id": "hotel-recommendation-west-end",
+  "description": "Guest asks for hotel alternatives. Real specific West End B&B and hotel recommendations from old code.",
+  "guestMessage": "Do you have any hotel recommendations in the area?",
+  "context": {
+    "guestName": "Jamie",
+    "checkIn": "2026-08-10",
+    "checkOut": "2026-08-13",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-07-01T09:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "HOTEL_RECOMMENDATION",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["West End Inn", "Blind Tiger", "Pomegranate Inn", "Francis Hotel"]
+  },
+  "notes": "Real hotel recommendation list from old code."
+}

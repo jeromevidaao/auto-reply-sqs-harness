@@ -1,0 +1,21 @@
+{
+  "id": "cancellation-notification-announce",
+  "description": "Guest announces they need to cancel due to circumstances. Real handling with history check for prior commitments.",
+  "guestMessage": "Unfortunately we won't be able to make it due to a family emergency.",
+  "context": {
+    "guestName": "Jordan",
+    "checkIn": "2026-07-10",
+    "checkOut": "2026-07-13",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-06-01T09:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "CANCELLATION_NOTIFICATION",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["sorry to hear", "Airbnb", "475"]
+  },
+  "notes": "Real cancellation announcement handling from old code (different from policy questions)."
+}

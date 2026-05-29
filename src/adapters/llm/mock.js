@@ -34,8 +34,20 @@ export class MockLLMAdapter {
       });
     }
 
-    // 2. Josh cleaning complaint (very specific phrases)
-    if (lower.includes('trash') || lower.includes('linen') || lower.includes('checkout')) {
+    // Outdoor trash (real rule) - must come very early
+    if (lower.includes('put our trash') || (lower.includes('trash') && lower.includes('when we leave'))) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'OUTDOOR_TRASH_QUESTION',
+        proposedResponse: "Yes, there's an outdoor trash can available behind the building near the parking spot for your convenience.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real outdoor trash rule'
+      });
+    }
+
+    // 2. Josh cleaning complaint (very specific phrases) - only if not outdoor trash question
+    if ((lower.includes('trash') || lower.includes('linen') || lower.includes('checkout')) && 
+        !lower.includes('outdoor trash') && !lower.includes('where.*trash')) {
       return JSON.stringify({
         typeOfMessageReceived: 'CHECKOUT_TRASH_LINEN',
         proposedResponse: "Thank you for asking! For checkout:\n• Trash — no need to take it outside, just leave it in the unit and our cleaning team will take care of it!\n• Dirty linen (bed sheets and towels) — please leave them on the bathroom floor.",
@@ -275,6 +287,226 @@ export class MockLLMAdapter {
         shouldReply: true,
         confidence: 0.85,
         notes: 'Mock for real late checkout constraint'
+      });
+    }
+
+    // 24. EV Charger (real amenity)
+    if (lower.includes('alex') && lower.includes('tesla')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'EV_CHARGER_QUESTION',
+        proposedResponse: "Yes, we do have an EV charger that is free to use! It's specifically connected to our assigned parking spot. The connection is NACS and works with all Teslas.",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real EV charger scenario'
+      });
+    }
+
+    // 25. Luggage drop-off (real operational)
+    if (lower.includes('sam') && lower.includes('drop our luggage')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'LUGGAGE_DROP_OFF',
+        proposedResponse: "We have Richard our on-site property manager who could help. Please reach out to him at (207) 807-8071 to coordinate a potential luggage drop-off.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real luggage drop-off'
+      });
+    }
+
+    // 26. Luggage storage after checkout
+    if (lower.includes('jordan') && lower.includes('late flight') && lower.includes('bags')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'LUGGAGE_STORAGE',
+        proposedResponse: "Richard, our property manager, can help arrange luggage storage for you after checkout. Please reach out to him by text or call at 207-518-3417.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real luggage storage'
+      });
+    }
+
+    // 27. Outdoor trash
+    if ((lower.includes('casey') || lower.includes('trash')) && (lower.includes('put our trash') || lower.includes('where.*trash'))) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'OUTDOOR_TRASH_QUESTION',
+        proposedResponse: "Yes, there's an outdoor trash can available behind the building near the parking spot for your convenience. The trash bags might be locked—if they are, you can leave the bag next to it and message us.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real outdoor trash rule'
+      });
+    }
+
+    // 28. WiFi credentials (exact production)
+    if (lower.includes('morgan') && lower.includes('wifi password')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'WIFI_PASSWORD',
+        proposedResponse: "The WiFi network is 'Pineland' and the password is 'lobsterbake'. You should be able to connect with these credentials.",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real WiFi credentials'
+      });
+    }
+
+    // 29. Pricing inquiry
+    if (lower.includes('taylor') && lower.includes('price jumped')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'PRICING_INQUIRY',
+        proposedResponse: "Airbnb controls how pricing is displayed to guests due to their commission structure. Hosts don't see the exact view you're seeing.",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real pricing inquiry explanation'
+      });
+    }
+
+    // 30. Street safety / noise
+    if (lower.includes('morgan') && lower.includes('noisy at night')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'STREET_SAFETY_NOISE',
+        proposedResponse: "Since we're in the downtown area, there is some city noise that comes with being centrally located.",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real street noise advice'
+      });
+    }
+
+    // 31. Bath amenities
+    if (lower.includes('jamie') && lower.includes('towels and toiletries')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'BATH_AMENITIES_QUESTION',
+        proposedResponse: "Yes, we provide bath towels, soap, and shampoo for your stay!",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real bath amenities confirmation'
+      });
+    }
+
+    // 32. Floor / stairs for elderly
+    if (lower.includes('riley') && lower.includes('trouble with stairs')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'FLOOR_STAIRS_QUESTION',
+        proposedResponse: "Unit 1B is on the first floor, but there is one short flight of about 5 steps outside to access the building entrance.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real floor/stairs information'
+      });
+    }
+
+    // 33. Water quality
+    if (lower.includes('casey') && lower.includes('tap water okay')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'WATER_QUALITY_QUESTION',
+        proposedResponse: "Yes, the water from the faucet is totally okay to drink! The water in Maine actually tastes very good.",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real water quality reassurance'
+      });
+    }
+
+    // 34. Dinner recommendation
+    if (lower.includes('alex') && lower.includes('dinner')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'DINNER_RECOMMENDATION',
+        proposedResponse: "I should add Fore Street as well - it's actually my favorite place too! Just make sure you have a reservation as it's very popular. And if you like seafood, Scales is another great option.",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real dinner recommendation'
+      });
+    }
+
+    // 35. Review link request
+    if (lower.includes('sam') && lower.includes('leave a review')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'REVIEW_LINK_REQUEST',
+        proposedResponse: "Thank you! You should receive an email from Airbnb with the review link. Please check your spam folder if you don't see it. I'll leave a 5-star review for you as excellent guests.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real review link request'
+      });
+    }
+
+    // 36. Cancellation notification (guest announces)
+    if (lower.includes('jordan') && lower.includes('family emergency')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'CANCELLATION_NOTIFICATION',
+        proposedResponse: "I'm truly sorry to hear about your family emergency. Please cancel directly through Airbnb. For the official policy, see https://www.airbnb.com/help/article/475.",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real cancellation announcement'
+      });
+    }
+
+    // 37. Guest count change
+    if (lower.includes('taylor') && lower.includes('add one more person')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'GUEST_COUNT_CHANGE_REQUEST',
+        proposedResponse: "Apt 2 base rate covers up to 4 guests. Adding one more may affect pricing depending on your current capacity.",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real guest count change'
+      });
+    }
+
+    // 38. Condo comparison (2BR only)
+    if (lower.includes('morgan') && lower.includes('difference between your two 2-bedroom')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'CONDO_COMPARISON',
+        proposedResponse: "They are the same building and very similar for our 2-bedroom units.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real condo comparison'
+      });
+    }
+
+    // 39. Hotel recommendation
+    if (lower.includes('jamie') && lower.includes('hotel recommendations')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'HOTEL_RECOMMENDATION',
+        proposedResponse: "For the West End area, I'd recommend West End Inn (cozy B&B), Blind Tiger Portland (stylish historic hotel), Pomegranate Inn (artsy), and The Francis Hotel (modern wellness).",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real hotel recommendations'
+      });
+    }
+
+    // 40. July 4th fireworks
+    if ((lower.includes('morgan') || lower.includes('fireworks')) && lower.includes('July 4th')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'JULY_4TH_FIREWORKS',
+        proposedResponse: "Portland usually hosts a fireworks display on July 4th at the Eastern Promenade around 9:15 PM but I am not certain if they are hosting one this year. Please double check on Go.",
+        shouldReply: true,
+        confidence: 0.8,
+        notes: 'Mock for real July 4th fireworks info'
+      });
+    }
+
+    // 41. Off-platform booking
+    if (lower.includes('jamie') && lower.includes('book directly')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'OFF_PLATFORM_BOOKING',
+        proposedResponse: "We only book through Airbnb as it provides important protections for both guests and hosts.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real off-platform decline'
+      });
+    }
+
+    // 42. Self checkin flexibility
+    if (lower.includes('riley') && lower.includes('very late')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'SELF_CHECKIN_QUESTION',
+        proposedResponse: "No problem at all. We have a self-check-in process so you can arrive anytime.",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real self-checkin flexibility'
+      });
+    }
+
+    // 43. Check in time question (early already offered)
+    if (lower.includes('alex') && lower.includes('what time is check-in')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'CHECK_IN_TIME_QUESTION',
+        proposedResponse: "No problem at all. We have a self-check-in process so you can arrive anytime.",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real check-in time (early offered nuance)'
       });
     }
 

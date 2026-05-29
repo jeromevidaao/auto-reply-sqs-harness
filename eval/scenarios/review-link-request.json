@@ -1,0 +1,21 @@
+{
+  "id": "review-link-request",
+  "description": "Guest asks for help leaving a review or finding the link. Real standard response about Airbnb email + spam folder.",
+  "guestMessage": "How do I leave a review?",
+  "context": {
+    "guestName": "Sam",
+    "checkIn": "2026-06-15",
+    "checkOut": "2026-06-18",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-28T14:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "REVIEW_LINK_REQUEST",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["email from Airbnb", "spam folder"]
+  },
+  "notes": "Real review process guidance from old code."
+}
