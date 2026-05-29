@@ -106,6 +106,8 @@ export const handler = async (event, context) => {
               ...inner.data,
               reservationId: inner.data.reservation_id || inner.data.id,
               conversation_id: inner.data.conversation_id || inner.data.airbnb_conversation_id,
+              sender_type: inner.data.sender_type || inner.data.sender?.type,
+              sender: inner.data.sender || { type: inner.data.sender_type },
             }
           };
         }
@@ -126,6 +128,8 @@ export const handler = async (event, context) => {
           ...outer.data,
           reservationId: outer.data.reservation_id || outer.data.id,
           conversation_id: outer.data.conversation_id || outer.data.airbnb_conversation_id,
+          sender_type: outer.data.sender_type || outer.data.sender?.type,
+          sender: outer.data.sender || { type: outer.data.sender_type },
         }
       };
     }
@@ -141,6 +145,19 @@ export const handler = async (event, context) => {
   const guestMessage = extracted.message;
   const msgContext = { ...extracted.context, ...(event?.context || {}), ...(event?.payload?.context || {}) };
 
+  // === Important safety check: only process messages that came from the guest ===
+  // Host replies (including our own messages) sometimes land in the same queue.
+  // We must never auto-reply or escalate on host messages.
+  const senderType = (msgContext.sender_type || msgContext.sender?.type || msgContext.from?.type || '').toLowerCase();
+
+  if (senderType && senderType !== 'guest') {
+    console.log(`[Handler] ⛔ Ignoring non-guest message (sender_type: ${senderType || 'unknown'}). This prevents escalating host replies.`);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ skipped: true, reason: 'Message not from guest' })
+    };
+  }
+
   console.log('\n📋 RESERVATION / INQUIRY DETAILS:');
   console.log(JSON.stringify({
     guestName: msgContext.guestName || msgContext.guest?.first_name,
@@ -154,6 +171,7 @@ export const handler = async (event, context) => {
     conversation_id: msgContext.conversation_id,
     airbnb_conversation_id: msgContext.airbnb_conversation_id,
     reservationId: msgContext.reservationId || msgContext.reservation_id,
+    sender_type: msgContext.sender_type || msgContext.sender?.type,
   }, null, 2));
 
   console.log('\n💬 GUEST MESSAGE:');
