@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
 import { ToolRegistry, CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool } from './tools/index.js';
+import { normalizeGuestName } from './utils/normalizeGuestName.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -254,9 +255,20 @@ export class GuestMessagingAgent {
    * testing real scenarios.
    */
   async handleMessage(guestMessage, context = {}) {
-    console.log('[Agent] handleMessage started for guest:', context.guestName || 'Unknown');
+    const normalizedName = normalizeGuestName(context.guestName);
 
-    const decision = await this.processMessage(guestMessage, context);
+    // Enrich context with natural name handling to avoid robotic "Menghang(David)" repetition
+    const enrichedContext = {
+      ...context,
+      guestName: context.guestName,                    // raw name from reservation
+      guestDisplayName: normalizedName.displayName,    // preferred natural name
+      guestHasAlternativeName: normalizedName.hasAlternativeName,
+      guestAlternativeName: normalizedName.alternativeName || null
+    };
+
+    console.log('[Agent] handleMessage started for guest:', enrichedContext.guestDisplayName || enrichedContext.guestName || 'Unknown');
+
+    const decision = await this.processMessage(guestMessage, enrichedContext);
 
     const shouldEscalate =
       decision.shouldReply === false ||
@@ -267,14 +279,14 @@ export class GuestMessagingAgent {
       await this.notification.notifyEscalation({
         decision,
         guestMessage,
-        context,
+        context: enrichedContext,
       });
     }
 
     // === Cleaning issue detection (separate high-priority alert) ===
     const cleaningTool = this.tools.get('detect_cleaning_issue');
     const cleaningIssue = cleaningTool
-      ? await cleaningTool.execute(guestMessage, context)
+      ? await cleaningTool.execute(guestMessage, enrichedContext)
       : { detected: false };
 
     if (cleaningIssue.detected) {
@@ -282,7 +294,7 @@ export class GuestMessagingAgent {
       await this.notification.notifyCleaningIssue({
         cleaningIssue,
         guestMessage,
-        context,
+        context: enrichedContext,
       });
     }
 
@@ -290,7 +302,7 @@ export class GuestMessagingAgent {
     const thermostatTool = this.tools.get('get_thermostat_instructions');
     let thermostatInfo = null;
     if (thermostatTool) {
-      const info = await thermostatTool.execute(guestMessage, context);
+      const info = await thermostatTool.execute(guestMessage, enrichedContext);
       if (info && info.detected) {
         thermostatInfo = info;
         console.log('[Agent] → Thermostat info generated');
@@ -304,12 +316,12 @@ export class GuestMessagingAgent {
     const policyTool = this.tools.get('get_airbnb_cancellation_policy');
 
     if (cancellationTool && /cancel|refund|policy/i.test(guestMessage)) {
-      cancellationInfo = await cancellationTool.execute(guestMessage, context);
+      cancellationInfo = await cancellationTool.execute(guestMessage, enrichedContext);
       console.log('[Agent] → Cancellation analysis performed');
 
       // Automatically fetch the latest policy snapshot when cancellation is involved
       if (policyTool) {
-        const policyInfo = await policyTool.execute(guestMessage, context);
+        const policyInfo = await policyTool.execute(guestMessage, enrichedContext);
         cancellationInfo.policy = policyInfo;   // Attach structured policy data
         console.log('[Agent] → Latest Airbnb policy snapshot attached');
       }
@@ -319,7 +331,7 @@ export class GuestMessagingAgent {
     const eventTool = this.tools.get('handle_event_request');
     let eventInfo = null;
     if (eventTool) {
-      const info = await eventTool.execute(guestMessage, context);
+      const info = await eventTool.execute(guestMessage, enrichedContext);
       if (info && info.detected) {
         eventInfo = info;
         console.log('[Agent] → Event request detected');
@@ -349,7 +361,7 @@ export class GuestMessagingAgent {
       };
 
       const reflectionContext = {
-        ...context,
+        ...enrichedContext,
         originalMessage: guestMessage,
         conversationHistory: context.conversationHistory || [],
       };
@@ -391,7 +403,7 @@ export class GuestMessagingAgent {
       }
 
       const judgeContext = {
-        ...context,
+        ...enrichedContext,
         originalMessage: guestMessage,
         conversationHistory: context.conversationHistory || [],
       };
