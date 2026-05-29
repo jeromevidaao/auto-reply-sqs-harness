@@ -1,26 +1,13 @@
 /**
  * AWS Lambda handler for the Guest Messaging Agent Harness.
  *
- * This is the production entrypoint for the harness logic.
- * It can be invoked manually for testing (no trigger attached yet).
+ * Production entrypoint. Supports:
+ * - Direct/manual invoke: { message, context }
+ * - Real SQS traffic from grok_message (the shapes the old monolithic system actually sends):
+ *     { body: "<json-string>" }                 → often contains nested { data: { body, conversation_id, ... } }
+ *     { data: { body, reservation_id, conversation_id, ... } }
  *
- * Expected event shape for manual testing:
- * {
- *   "message": "the guest message text",
- *   "context": {
- *     "guestName": "Josh",
- *     "checkIn": "2026-05-25",
- *     "checkOut": "2026-05-27",
- *     "listingId": "...",
- *     "propertyName": "...",
- *     "airbnb_conversation_id": "2492335251",
- *     ...
- *   }
- * }
- *
- * Environment variables for urgent access (guest cannot get in):
- *   URGENT_ACCESS_SNS_TOPIC_ARN     (preferred - supports multiple SMS recipients)
- *   URGENT_ACCESS_PHONE_NUMBER      (comma-separated, e.g. +16462043958,+15086676477)
+ * The extraction logic below is intentionally tolerant so we don't drop messages during the cutover.
  */
 
 import { GuestMessagingAgent } from '../src/agent.js';
@@ -43,22 +30,90 @@ export const handler = async (event, context) => {
   // Log full incoming event for deep debugging (CloudWatch searchable)
   console.log('RAW EVENT:', JSON.stringify(event, null, 2));
 
-  // Extract key context for easy filtering in CloudWatch Logs Insights
-  const guestMessage = event?.message || event?.body || (event?.Records?.[0]?.body ? JSON.parse(event.Records[0].body).data?.body : '');
-  const msgContext = event?.context || event?.payload?.context || {};
+  // === Robust extraction for both direct invokes and real SQS traffic ===
+  // Real production messages (from the old system / Hospitable webhooks) often arrive
+  // with shapes like:
+  //   { body: "<json-string>" }                          → inner may contain .data.body
+  //   { data: { body: "...", reservation_id, conversation_id, ... } }
+  // This helper tries the most common shapes so we don't lose messages during cutover.
+  function extractMessageAndContext(evt) {
+    // Direct / simulator style
+    if (evt?.message) return { message: evt.message, context: evt.context || {} };
+    if (evt?.body && typeof evt.body === 'string' && !evt.Records) {
+      return { message: evt.body, context: evt.context || {} };
+    }
+
+    const record = evt?.Records?.[0];
+    if (!record?.body) {
+      return { message: '', context: {} };
+    }
+
+    let outer;
+    try {
+      outer = JSON.parse(record.body);
+    } catch {
+      return { message: record.body, context: {} };
+    }
+
+    // Shape used by the old monolithic Lambda: { body: "<json-string-of-webhook>" }
+    if (typeof outer.body === 'string') {
+      try {
+        const inner = JSON.parse(outer.body);
+        if (inner?.data) {
+          return {
+            message: inner.data.body || inner.data.message || '',
+            context: {
+              ...inner.data,
+              reservationId: inner.data.reservation_id || inner.data.id,
+              conversation_id: inner.data.conversation_id || inner.data.airbnb_conversation_id,
+            }
+          };
+        }
+        return {
+          message: inner.body || inner.message || '',
+          context: inner
+        };
+      } catch {
+        // fall through
+      }
+    }
+
+    // Cleaner shape we also support: top-level { data: { body, ... } }
+    if (outer.data) {
+      return {
+        message: outer.data.body || outer.data.message || '',
+        context: {
+          ...outer.data,
+          reservationId: outer.data.reservation_id || outer.data.id,
+          conversation_id: outer.data.conversation_id || outer.data.airbnb_conversation_id,
+        }
+      };
+    }
+
+    // Fallback
+    return {
+      message: outer.body || outer.message || '',
+      context: outer
+    };
+  }
+
+  const extracted = extractMessageAndContext(event);
+  const guestMessage = extracted.message;
+  const msgContext = { ...extracted.context, ...(event?.context || {}), ...(event?.payload?.context || {}) };
 
   console.log('\n📋 RESERVATION / INQUIRY DETAILS:');
   console.log(JSON.stringify({
-    guestName: msgContext.guestName,
-    listingId: msgContext.listingId,
-    propertyName: msgContext.propertyName,
-    checkIn: msgContext.checkIn,
-    checkOut: msgContext.checkOut,
+    guestName: msgContext.guestName || msgContext.guest?.first_name,
+    listingId: msgContext.listingId || msgContext.properties?.[0]?.id,
+    propertyName: msgContext.propertyName || msgContext.properties?.[0]?.name,
+    checkIn: msgContext.checkIn || msgContext.check_in,
+    checkOut: msgContext.checkOut || msgContext.check_out,
     bookingDate: msgContext.bookingDate,
     hasPets: msgContext.hasPets,
     petCount: msgContext.petCount,
+    conversation_id: msgContext.conversation_id,
     airbnb_conversation_id: msgContext.airbnb_conversation_id,
-    reservationId: msgContext.reservationId || event?.Records?.[0]?.body ? JSON.parse(event.Records[0].body).data?.reservation_id : null,
+    reservationId: msgContext.reservationId || msgContext.reservation_id,
   }, null, 2));
 
   console.log('\n💬 GUEST MESSAGE:');
