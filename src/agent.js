@@ -300,10 +300,43 @@ export class GuestMessagingAgent {
       }
     }
 
-    // Future cheap traces can be added here easily:
-    // - Quick unit readiness check (if we decide it's worth the cost before first LLM)
-    // - Basic duplicate/recent message heuristics
-    // - etc.
+    // === Optional cheap Unit Readiness trace (for check-in day messages) ===
+    // This is a "quick peek" — we only do it when it is likely relevant (check-in day)
+    // so we don't burn unnecessary Hospitable/DDB calls on every message.
+    const isCheckInDay = this._looksLikeCheckInDay(enrichedContext);
+    if (isCheckInDay) {
+      const unitReadinessTool = this.tools.get('get_unit_readiness');
+      if (unitReadinessTool) {
+        try {
+          const readiness = await unitReadinessTool.execute({}, enrichedContext);
+          if (readiness) {
+            enrichedContext.unitReadiness = readiness;
+            const readyMsg = readiness.isUnitReady
+              ? 'unit expected to be ready'
+              : 'unit likely needs cleaning (same-day turnover or previous guests)';
+            console.log('[Agent] → Early unit readiness trace:', readyMsg);
+          }
+        } catch (err) {
+          // Non-fatal — UnitReadiness is best-effort for traces
+        }
+      }
+    }
+  }
+
+  /**
+   * Lightweight heuristic to decide if we should run an early UnitReadiness check.
+   */
+  _looksLikeCheckInDay(ctx = {}) {
+    if (!ctx.checkIn) return false;
+
+    const today = new Date().toISOString().split('T')[0];
+    const checkIn = ctx.checkIn;
+
+    // If check-in is today or the context already marks it as current stay
+    if (checkIn === today) return true;
+    if (ctx.stayTiming === 'current') return true;
+
+    return false;
   }
 
   /**
@@ -416,6 +449,7 @@ export class GuestMessagingAgent {
       thermostatInfo,
       cancellationInfo,
       eventInfo,
+      unitReadiness: enrichedContext.unitReadiness || null,
     };
 
     // === Lightweight Reflection Pass (for high-risk categories) ===
@@ -426,6 +460,7 @@ export class GuestMessagingAgent {
         cancellation: cancellationInfo,
         event: eventInfo,
         conversationContext: enrichedContext.conversationTraces || null,
+        unitReadiness: enrichedContext.unitReadiness || null,
       };
 
       const reflectionContext = {
@@ -464,6 +499,7 @@ export class GuestMessagingAgent {
         event: eventInfo,
         airbnbPolicy: cancellationInfo?.policy || null,
         conversationContext: enrichedContext.conversationTraces || null,
+        unitReadiness: enrichedContext.unitReadiness || null,
       };
 
       // Make policy data more prominent for the judge

@@ -79,4 +79,44 @@ export class HospitableClient {
 
     return response.data?.data || [];
   }
+
+  /**
+   * Get full details for an inquiry (used for pre-approval detection).
+   */
+  async getInquiryDetails(inquiryId) {
+    const token = await this.getToken();
+
+    const response = await axios.get(`${this.baseUrl}/inquiries/${inquiryId}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      timeout: 8000
+    });
+
+    return response.data?.data || null;
+  }
+
+  /**
+   * Get recent messages for a conversation (inquiry or reservation).
+   * Useful for pre-approval detection and recent host message checks.
+   */
+  async getConversationMessages(conversationId, limit = 10) {
+    const token = await this.getToken();
+
+    const response = await axios.get(`${this.baseUrl}/conversations/${conversationId}/messages`, {
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      params: {
+        limit
+      },
+      timeout: 8000
+    });
+
+    return response.data?.data || [];
+  }
 }

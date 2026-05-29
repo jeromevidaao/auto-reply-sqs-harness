@@ -48,12 +48,36 @@ export class ConversationContextTool extends BaseTool {
       }
     }
 
-    // Pre-approval detection for inquiries (high value from old system)
-    if (isInquiry && this.hospitableClient) {
+    // Pre-approval detection for inquiries (high value from old production system)
+    if (isInquiry && this.hospitableClient && inquiryId) {
       try {
-        // In a real implementation this would call getInquiryDetails or similar
-        // For now we surface the intent so the multipass can act conservatively
-        result.traces.push('Inquiry detected — pre-approval fast path should be considered');
+        const inquiry = await this.hospitableClient.getInquiryDetails(inquiryId);
+
+        if (inquiry) {
+          const status = inquiry.status;
+          const isPreApproved = status === 'pre_approved' || status === 'pre-approved' || status === 'approved';
+
+          if (isPreApproved) {
+            result.preApprovalDetected = true;
+            result.traces.push('Pre-approval detected on inquiry (fast path should be used)');
+          }
+
+          // Also try to fetch recent messages to look for explicit pre-approval language
+          try {
+            const messages = await this.hospitableClient.getConversationMessages(inquiryId, 8);
+            const recentHostPreApproval = messages
+              .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
+              .find(m => /pre.?approv|approved your request/i.test(m.body || ''));
+
+            if (recentHostPreApproval) {
+              result.preApprovalDetected = true;
+              result.preApprovalMessage = recentHostPreApproval.body?.substring(0, 200);
+              result.traces.push('Explicit pre-approval message found in conversation history');
+            }
+          } catch (msgErr) {
+            // Non-fatal
+          }
+        }
       } catch (e) {
         result.traces.push('Pre-approval check failed (fail safe)');
       }
