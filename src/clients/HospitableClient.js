@@ -5,8 +5,21 @@ const ssm = new SSMClient({ region: 'us-east-1' });
 
 let _hospitableTokenCache = null;
 
+/**
+ * Get Hospitable bearer token.
+ * Priority:
+ *   1. HOSPITABLE_BEARER_TOKEN env var (for local dev / manual testing)
+ *   2. SSM Parameter Store /hospitable/bearer-token (production / Lambda)
+ */
 async function _getHospitableToken() {
   if (_hospitableTokenCache) return _hospitableTokenCache;
+
+  // Local dev convenience (matches the comment in .env.example)
+  const envToken = process.env.HOSPITABLE_BEARER_TOKEN;
+  if (envToken) {
+    _hospitableTokenCache = envToken;
+    return _hospitableTokenCache;
+  }
 
   const command = new GetParameterCommand({
     Name: '/hospitable/bearer-token',
@@ -78,6 +91,79 @@ export class HospitableClient {
     });
 
     return response.data?.data || [];
+  }
+
+  /**
+   * Fetch reservations from Hospitable (the endpoint documented at
+   * https://developer.hospitable.com/docs/public-api-docs/ih7nc1ovefrcs-get-reservations).
+   *
+   * The API requires at least one 'properties[]' filter in almost all cases.
+   *
+   * @param {Object} options
+   * @param {string|string[]} options.properties - Listing UUID(s) (required by the API)
+   * @param {number} [options.limit=20]
+   * @param {string} [options.status] - e.g. 'accepted', 'confirmed'
+   * @param {string} [options.sort='-arrival_date']
+   * @returns {Promise<Array>} reservation objects (each includes conversation_id)
+   */
+  async getReservations(options = {}) {
+    const token = await this.getToken();
+    const {
+      properties,
+      limit = 20,
+      status,
+      sort = '-arrival_date',
+      ...otherParams
+    } = options;
+
+    const params = {
+      limit,
+      sort,
+      ...otherParams
+    };
+
+    if (properties) {
+      // Support single string or array
+      const props = Array.isArray(properties) ? properties : [properties];
+      props.forEach(p => {
+        // Axios will repeat the key for arrays
+      });
+      params['properties[]'] = props;
+    }
+
+    if (status) params.status = status;
+
+    const response = await axios.get(`${this.baseUrl}/reservations`, {
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      params,
+      timeout: 10000
+    });
+
+    return response.data?.data || [];
+  }
+
+  /**
+   * Convenience: given a Hospitable reservation id, return its conversation_id
+   * (the value you actually want for Airbnb message URLs).
+   */
+  async getConversationIdForReservation(reservationId) {
+    const token = await this.getToken();
+
+    const response = await axios.get(`${this.baseUrl}/reservations/${reservationId}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      timeout: 8000
+    });
+
+    const res = response.data?.data;
+    return res?.conversation_id || null;
   }
 
   /**

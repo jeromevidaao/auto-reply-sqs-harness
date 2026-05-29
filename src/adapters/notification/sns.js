@@ -28,10 +28,13 @@ export class SnsNotificationAdapter {
       ? `${context.checkIn} → ${context.checkOut}`
       : '';
 
-    // Build direct Airbnb link if possible
+    // Build direct Airbnb link if possible.
+    // Prefer real conversation_id returned by Hospitable (see getReservations).
     let airbnbLink = '';
     if (context.airbnb_message_url) {
       airbnbLink = context.airbnb_message_url;
+    } else if (context.conversation_id) {
+      airbnbLink = `https://www.airbnb.com/hosting/messages/${context.conversation_id}`;
     } else if (context.airbnb_conversation_id) {
       airbnbLink = `https://www.airbnb.com/hosting/messages/${context.airbnb_conversation_id}`;
     }
@@ -157,10 +160,12 @@ export class SnsNotificationAdapter {
       ? ` (${context.checkIn} → ${context.checkOut})`
       : '';
 
-    // Build direct Airbnb link
+    // Build direct Airbnb link (prefer real conversation_id from Hospitable)
     let airbnbLink = '';
     if (context.airbnb_message_url) {
       airbnbLink = context.airbnb_message_url;
+    } else if (context.conversation_id) {
+      airbnbLink = `https://www.airbnb.com/hosting/messages/${context.conversation_id}`;
     } else if (context.airbnb_conversation_id) {
       airbnbLink = `https://www.airbnb.com/hosting/messages/${context.airbnb_conversation_id}`;
     }

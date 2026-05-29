@@ -20,8 +20,8 @@ export class ConversationContextTool extends BaseTool {
   }
 
   async execute(input, context = {}) {
-    const reservationId = context.reservationId || context.airbnb_conversation_id;
-    const inquiryId = context.inquiryId || (context.reservationId === null ? context.airbnb_conversation_id : null);
+    const reservationId = context.reservationId || context.conversation_id || context.airbnb_conversation_id;
+    const inquiryId = context.inquiryId || (context.reservationId === null ? (context.conversation_id || context.airbnb_conversation_id) : null);
     const conversationId = inquiryId || reservationId;
     const isInquiry = !context.reservationId && !!inquiryId;
 
