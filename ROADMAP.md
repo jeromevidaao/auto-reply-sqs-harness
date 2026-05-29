@@ -42,13 +42,13 @@ This document tracks the concrete next steps for the harness. We will grow it it
 ### E. Evaluation Hardening
 - [x] Added Josh cleaning complaint scenario + golden (real production thread)
 - [x] Multiple new Tools wired into production path (Cancellation, EventRequest)
-- [x] Added 5 new goldens exercising advanced old production behaviors:
-  - Cancellation full refund + prior host commitment (anti-contradiction)
-  - Cancellation exception after previous policy answer (multi-turn safety)
-  - Same-day turnover welcome (unit readiness accuracy)
-  - Early check-in on future booking where unit is ready
-  - Multi-turn cancellation thread (anti-repetition via Judge)
-- [x] Eval now at 9 scenarios / 41/41 rubric score — all pass locally with mock LLM (npm test + npm run eval both fully green)
+- [x] Added 5 new goldens exercising advanced old production behaviors
+- [x] Added 3 high-value **real** production scenarios directly extracted from the old monolithic code:
+  - Wrong entrance / gas station path (recurring real guest confusion for Apt 2)
+  - Snow plowing service (real winter operational question)
+  - Cleaning team using parking on same-day turnover (real operational case)
+- [x] Eval now at 12 scenarios / 58/58 rubric score — all pass locally with mock LLM (npm test + npm run eval both fully green)
+- Emphasis shifting toward porting real historical scenarios from the old production code (higher value than purely synthetic ones)
 
 ### D. Welcome Message Logic
 - [x] Basic NEW_RESERVATION_WELCOME + pet mismatch golden added and passing

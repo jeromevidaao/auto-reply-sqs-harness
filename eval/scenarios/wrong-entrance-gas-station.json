@@ -1,0 +1,21 @@
+{
+  "id": "wrong-entrance-gas-station-apt2",
+  "description": "Guest is at the wrong entrance (front of building) for Sunny Apt 2. Real production scenario - entrance is at the back near the parking area and gas station path. Old code had specific directions for this.",
+  "guestMessage": "Hi, I think I'm at the right place but I don't see the lockbox. I'm at the front of the building.",
+  "context": {
+    "guestName": "Alex",
+    "checkIn": "2026-06-05",
+    "checkOut": "2026-06-08",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-10T12:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "CHECKIN_LOCATION_GUIDANCE",
+    "shouldReply": true,
+    "forbiddenPhrases": ["the front entrance", "lockbox at the front"],
+    "requiredPhrases": ["back of the building", "parking area", "gas station"]
+  },
+  "notes": "Real production edge case. Guests frequently arrive at the wrong side of the building for Apt 2. Old code had very specific directions involving the gas station path."
+}

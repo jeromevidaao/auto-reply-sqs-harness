@@ -1,0 +1,21 @@
+{
+  "id": "parking-snow-plowing-service",
+  "description": "Guest asks during winter whether there is snow plowing service for the parking area. This was a real recurring seasonal question in production.",
+  "guestMessage": "Do you plow the parking area when it snows? We're coming in January.",
+  "context": {
+    "guestName": "Jordan",
+    "checkIn": "2026-01-15",
+    "checkOut": "2026-01-18",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2025-12-01T10:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "PARKING_PLOWING_SERVICE",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["snow plowing", "parking"]
+  },
+  "notes": "Real seasonal production scenario. Old code had dedicated handling for PARKING_PLOWING_SERVICE."
+}

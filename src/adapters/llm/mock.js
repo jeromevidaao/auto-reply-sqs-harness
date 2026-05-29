@@ -124,6 +124,39 @@ export class MockLLMAdapter {
       });
     }
 
+    // 10. Wrong entrance - Gas station path (real recurring production issue for Apt 2)
+    if (lower.includes('alex') && lower.includes('front of the building')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'CHECKIN_LOCATION_GUIDANCE',
+        proposedResponse: "Hi Alex, it looks like you may be at the front of the building. Units don't have a lockbox there - the entrance is at the back of the building near the parking area. Look for the path between the gas station and the building.",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real wrong-entrance gas station scenario'
+      });
+    }
+
+    // 11. Snow plowing service (real winter question)
+    if (lower.includes('jordan') && lower.includes('plow')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'PARKING_PLOWING_SERVICE',
+        proposedResponse: "Yes, we do have a snow plowing service for the parking area during winter weather. Your dedicated spot will be cleared.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real snow plowing production scenario'
+      });
+    }
+
+    // 12. Parking occupied by cleaning team on same-day turnover (real operational case)
+    if (lower.includes('taylor') && lower.includes("we're here")) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'PARKING',
+        proposedResponse: "Hi Taylor, welcome! The cleaning team is currently using the parking spot while preparing the unit after today's turnover. They'll move as soon as they're done and we'll message you right away.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real cleaning team parking on turnover day'
+      });
+    }
+
     // Default safe response (anything not yet ported from the old 65-category set)
     return JSON.stringify({
       typeOfMessageReceived: 'OTHER_MESSAGE',

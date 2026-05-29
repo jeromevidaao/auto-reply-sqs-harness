@@ -93,10 +93,13 @@ Plus the fallback:
 - Several location / parking edge cases
 
 **Eval coverage (as of latest):**
-- 9 golden scenarios exercising old production behaviors
-  - Original: Michele inquiry, Josh cleaning, 50% cancellation policy, new-reservation welcome with pet mismatch
-  - New (this commit): Full refund + prior host commitment, Cancellation exception after prior policy answer, Same-day turnover welcome, Early check-in on ready unit, Multi-turn cancellation repetition risk
-- All 9 scenarios + 8 unit tests pass locally (41/41 rubric score)
+- 12 golden scenarios (increasing focus on real production scenarios from old code)
+  - Includes high-value real scenarios directly mined from the old monolithic production logic:
+    - Wrong entrance / gas station path for Apt 2 (recurring real guest issue)
+    - Snow plowing service for parking (real winter question)
+    - Cleaning team occupying parking spot on same-day turnover (real operational case)
+  - Plus previous strong coverage of cancellations with history, unit readiness, early check-in, repetition risks, etc.
+- All 12 scenarios + 8 unit tests pass locally (58/58 rubric score)
 - CI runs full test + eval on every PR (see .github/workflows/ci.yml)
 
 ## Recommended Next Actions (from "let's do all" plan)
