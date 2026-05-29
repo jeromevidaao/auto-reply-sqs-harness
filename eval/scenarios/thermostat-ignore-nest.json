@@ -1,0 +1,21 @@
+{
+  "id": "thermostat-ignore-nest-remotes",
+  "description": "Guest asks about thermostat or wants to change temperature. Real per-unit logic: tell them NOT to use the Nest thermostat, use wall remotes instead. Especially important for certain units.",
+  "guestMessage": "How do I turn up the heat? It's cold in here.",
+  "context": {
+    "guestName": "Casey",
+    "checkIn": "2026-06-02",
+    "checkOut": "2026-06-05",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-15T11:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "THERMOSTAT_HEATPUMP",
+    "shouldReply": true,
+    "forbiddenPhrases": ["Nest thermostat controls"],
+    "requiredPhrases": ["remotes on the wall", "don't use the Nest"]
+  },
+  "notes": "High value real scenario. Old code had strong 'ignore the Nest' instruction + use heat pump remotes on the wall. Per-unit differences existed."
+}

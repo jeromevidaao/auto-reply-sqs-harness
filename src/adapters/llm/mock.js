@@ -157,6 +157,61 @@ export class MockLLMAdapter {
       });
     }
 
+    // 13. Lost key - real return address
+    if (lower.includes('morgan') && lower.includes('key')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'LOST_KEY_OR_ITEM',
+        proposedResponse: "Hi Morgan, thank you so much for letting us know and for being considerate! Please send the key back to: Richard Mondor, 53 Pine St, Apt 1F, Portland, ME, 04102.",
+        shouldReply: true,
+        confidence: 0.95,
+        notes: 'Mock for real lost key return scenario'
+      });
+    }
+
+    // 14. Thermostat - ignore Nest, use wall remotes (real common confusion)
+    if (lower.includes('casey') && lower.includes('cold')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'THERMOSTAT_HEATPUMP',
+        proposedResponse: "Hi Casey, please don't use the Nest — use the heat pump remotes on the wall in each room instead.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real thermostat ignore Nest instruction'
+      });
+    }
+
+    // 15. Additional parking - Vaughan Street (real recommendation)
+    if (lower.includes('riley') && lower.includes('two cars')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'PARKING_ADDITIONAL_QUESTION',
+        proposedResponse: "For additional parking, we recommend the paid lot at 192-234 Vaughan Street nearby.",
+        shouldReply: true,
+        confidence: 0.85,
+        notes: 'Mock for real additional parking recommendation'
+      });
+    }
+
+    // 16. Studio futon blanket (property-specific real case)
+    if (lower.includes('sam') && lower.includes('futon')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'STUDIO_FUTON_BLANKET',
+        proposedResponse: "Yes, there are extra blankets and linens for the futon in the storage compartment.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real studio futon blanket request'
+      });
+    }
+
+    // 17. Sofa bed size (frequently asked real detail)
+    if (lower.includes('jamie') && lower.includes('sofa bed')) {
+      return JSON.stringify({
+        typeOfMessageReceived: 'SOFA_BED_SIZE',
+        proposedResponse: "The sofa bed is queen size and comfortably sleeps 2 people. The linens and pillows are in the storage compartment of the sofa.",
+        shouldReply: true,
+        confidence: 0.9,
+        notes: 'Mock for real sofa bed size question'
+      });
+    }
+
     // Default safe response (anything not yet ported from the old 65-category set)
     return JSON.stringify({
       typeOfMessageReceived: 'OTHER_MESSAGE',

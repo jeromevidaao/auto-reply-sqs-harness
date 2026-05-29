@@ -93,13 +93,18 @@ Plus the fallback:
 - Several location / parking edge cases
 
 **Eval coverage (as of latest):**
-- 12 golden scenarios (increasing focus on real production scenarios from old code)
-  - Includes high-value real scenarios directly mined from the old monolithic production logic:
-    - Wrong entrance / gas station path for Apt 2 (recurring real guest issue)
-    - Snow plowing service for parking (real winter question)
-    - Cleaning team occupying parking spot on same-day turnover (real operational case)
-  - Plus previous strong coverage of cancellations with history, unit readiness, early check-in, repetition risks, etc.
-- All 12 scenarios + 8 unit tests pass locally (58/58 rubric score)
+- 17 golden scenarios (strong shift toward real production scenarios mined from old code)
+  - High-value real scenarios directly extracted from the old monolithic production logic:
+    - Wrong entrance / gas station path (recurring Apt 2 issue)
+    - Snow plowing service + status
+    - Cleaning team using parking on turnover days
+    - Thermostat "ignore the Nest" + wall remotes (per-unit)
+    - Lost key return with specific address (Richard Mondor, 53 Pine St, Apt 1F)
+    - Studio futon blanket (property-specific)
+    - Sofa bed size & capacity details
+    - Additional parking at Vaughan Street
+  - Plus previous strong coverage across cancellations (with history/anti-contradiction), unit readiness, early check-in, repetition risks, etc.
+- All 17 scenarios + 8 unit tests pass locally (86/86 rubric score)
 - CI runs full test + eval on every PR (see .github/workflows/ci.yml)
 
 ## Recommended Next Actions (from "let's do all" plan)

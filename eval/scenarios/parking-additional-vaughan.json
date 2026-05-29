@@ -1,0 +1,21 @@
+{
+  "id": "parking-additional-vaughan-street",
+  "description": "Guest asks for parking for more than one car or additional parking. Real response directs to paid parking at 192-234 Vaughan Street.",
+  "guestMessage": "We have two cars. Is there anywhere else we can park nearby?",
+  "context": {
+    "guestName": "Riley",
+    "checkIn": "2026-06-12",
+    "checkOut": "2026-06-15",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-25T09:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "PARKING_ADDITIONAL_QUESTION",
+    "shouldReply": true,
+    "forbiddenPhrases": [],
+    "requiredPhrases": ["Vaughan Street", "192-234"]
+  },
+  "notes": "Real specific parking recommendation from old code for additional vehicles."
+}
