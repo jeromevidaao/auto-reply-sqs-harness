@@ -430,8 +430,20 @@ export class GuestMessagingAgent {
   async handleMessage(guestMessage, context = {}) {
     // Defense-in-depth: if the caller provides clear evidence this is a host message, bail out early.
     const senderType = (context.sender_type || context.sender?.type || '').toLowerCase();
-    if (senderType && senderType !== 'guest') {
-      console.log('[Agent] handleMessage aborted — message is from host, not guest.');
+    const senderRole = (context.sender_role || context.sender?.role || '').toLowerCase();
+    const userName = (context.user?.name || '').toLowerCase();
+    const senderFull = (context.sender?.full_name || '').toLowerCase();
+    const bodyLower = (guestMessage || '').toLowerCase();
+    const hasHostSig = bodyLower.includes('jerome & ruby') || bodyLower.includes('guidebook') || bodyLower.includes('settled in after your travel');
+
+    const isHost = (senderType && senderType !== 'guest') ||
+                   senderRole === 'host' ||
+                   userName.includes('jerome') || userName.includes('ruby') ||
+                   senderFull.includes('jerome') || senderFull.includes('ruby') ||
+                   (hasHostSig && !senderType);
+
+    if (isHost) {
+      console.log('[Agent] handleMessage aborted — message is from host (robust detection), not guest.');
       return {
         typeOfMessageReceived: 'OTHER_MESSAGE',
         proposedResponse: 'none',

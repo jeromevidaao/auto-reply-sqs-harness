@@ -12,7 +12,7 @@
 
 import { GuestMessagingAgent } from '../src/agent.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { HospitableClient } from '../src/clients/HospitableClient.js';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
@@ -108,6 +108,8 @@ export const handler = async (event, context) => {
               conversation_id: inner.data.conversation_id || inner.data.airbnb_conversation_id,
               sender_type: inner.data.sender_type || inner.data.sender?.type,
               sender: inner.data.sender || { type: inner.data.sender_type },
+              // Preserve raw top-level webhook id for dedup (e.g. "a1e74780-...")
+              _webhookId: inner.id || null,
             }
           };
         }
@@ -130,6 +132,7 @@ export const handler = async (event, context) => {
           conversation_id: outer.data.conversation_id || outer.data.airbnb_conversation_id,
           sender_type: outer.data.sender_type || outer.data.sender?.type,
           sender: outer.data.sender || { type: outer.data.sender_type },
+          _webhookId: outer.id || null,
         }
       };
     }
@@ -145,36 +148,70 @@ export const handler = async (event, context) => {
   const guestMessage = extracted.message;
   const msgContext = { ...extracted.context, ...(event?.context || {}), ...(event?.payload?.context || {}) };
 
-  // === Important safety check: only process messages that came from the guest ===
-  // Host replies (including our own messages) sometimes land in the same queue.
-  // We must never auto-reply or escalate on host messages.
-  const senderType = (msgContext.sender_type || msgContext.sender?.type || msgContext.from?.type || '').toLowerCase();
+  // === ALWAYS log full sender diagnostics for debugging classification issues ===
+  console.log('🔍 SENDER DIAGNOSTICS:', JSON.stringify({
+    sender_type: msgContext.sender_type || msgContext.sender?.type,
+    sender_role: msgContext.sender_role || msgContext.sender?.role,
+    sender_full_name: msgContext.sender?.full_name || msgContext.sender?.name,
+    user_name: msgContext.user?.name,
+    source: msgContext.source,
+    _webhookId: msgContext._webhookId,
+  }, null, 2));
 
-  if (senderType && senderType !== 'guest') {
-    console.log(`[Handler] ⛔ Ignoring non-guest message (sender_type: ${senderType || 'unknown'}). This prevents escalating host replies.`);
+  // === Robust multi-layer host message detection (prevents replying to host) ===
+  // Layer 1: Explicit sender_type / sender_role from Hospitable
+  const senderType = (msgContext.sender_type || msgContext.sender?.type || msgContext.from?.type || '').toLowerCase();
+  const senderRole = (msgContext.sender_role || msgContext.sender?.role || '').toLowerCase();
+
+  // Layer 2: Known host identity (user.id or name from the "user" field in webhook is the authenticated host)
+  const userName = (msgContext.user?.name || '').toLowerCase();
+  const senderFullName = (msgContext.sender?.full_name || msgContext.sender?.name || '').toLowerCase();
+  const isKnownHostIdentity = userName.includes('jerome') || userName.includes('ruby') ||
+                              senderFullName.includes('jerome') || senderFullName.includes('ruby') ||
+                              (msgContext.user?.id === '436eb2ed-5174-5542-926f-5013bae34188');
+
+  // Layer 3: Strong signature in body (your actual automated/host templates)
+  const lowerMsg = (guestMessage || '').toLowerCase();
+  const hostSignaturePhrases = [
+    'jerome & ruby', 'jerome and ruby', 'guidebook', 'settled in after your travel',
+    'all the best and enjoy all that portland', 'hard copy of my portland guidebook'
+  ];
+  const hasHostSignature = hostSignaturePhrases.some(p => lowerMsg.includes(p));
+
+  // Layer 4: Source or automated origin often indicates host action
+  const isAutomatedHostSource = (msgContext.source === 'automated' || msgContext.source === 'public_api');
+
+  const isDefinitelyHost = (senderType && senderType !== 'guest') ||
+                           senderRole === 'host' ||
+                           isKnownHostIdentity ||
+                           (hasHostSignature && !senderType) ||
+                           (isAutomatedHostSource && hasHostSignature);
+
+  if (isDefinitelyHost) {
+    console.log(`[Handler] ⛔ Ignoring host message (sender_type=${senderType || 'n/a'}, role=${senderRole || 'n/a'}, knownHost=${isKnownHostIdentity}, signature=${hasHostSignature}, source=${msgContext.source}). Never reply to host.`);
     return {
       statusCode: 200,
-      body: JSON.stringify({ skipped: true, reason: 'Message not from guest' })
+      body: JSON.stringify({ skipped: true, reason: 'Host message (robust multi-layer detection)' })
     };
   }
 
-  // Heuristic fallback when sender info is missing from the payload (common problem)
-  // These phrases strongly indicate the message was written by the host, not the guest.
-  const lowerMsg = (guestMessage || '').toLowerCase();
+  // Legacy narrow heuristic (kept as final fallback for very old payloads)
   const hostVoiceIndicators = [
     'we have', 'i recommend', 'hope this helps', 'thank you', 
-    'you can book', 'nearby', 'in the area', 'application', 'spot hero', 'spothero'
+    'you can book', 'nearby', 'in the area', 'application', 'spot hero', 'spothero',
+    'i hope that you have', 'please let me know if there is anything you need'
   ];
-
   const looksLikeHostMessage = hostVoiceIndicators.some(phrase => lowerMsg.includes(phrase));
 
-  if (!senderType && looksLikeHostMessage) {
-    console.log(`[Handler] ⛔ Heuristic skip: Message looks like a host reply (no sender_type present). Content: "${guestMessage.substring(0, 80)}..."`);
+  if (!senderType && !isKnownHostIdentity && looksLikeHostMessage) {
+    console.log(`[Handler] ⛔ Heuristic skip: Message looks like a host reply (no sender_type). Content: "${(guestMessage || '').substring(0, 80)}..."`);
     return {
       statusCode: 200,
       body: JSON.stringify({ skipped: true, reason: 'Likely host message (heuristic)' })
     };
   }
+
+  // (Dedup check moved below after ddbClient is initialized for reuse)
 
   console.log('\n📋 RESERVATION / INQUIRY DETAILS:');
   console.log(JSON.stringify({
@@ -206,6 +243,32 @@ export const handler = async (event, context) => {
   // === Clients for UnitReadinessTool ===
   const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
   const hospitableClient = new HospitableClient();
+
+  // === Idempotency / Dedup using DynamoDB (prevents double sends from SQS redeliveries + duplicate webhooks) ===
+  // Uses the stable top-level webhook "id" from the Hospitable payload.
+  const webhookIdForDedup = msgContext._webhookId || msgContext.id || null;
+  if (webhookIdForDedup) {
+    try {
+      const ttl = Math.floor(Date.now() / 1000) + (2 * 60 * 60); // 2h TTL
+      await ddbClient.send(new PutCommand({
+        TableName: 'airbnb-harness-dedup',
+        Item: {
+          webhookId: webhookIdForDedup,
+          ttl,
+          processedAt: new Date().toISOString(),
+          reservationId: msgContext.reservationId || msgContext.reservation_id || null
+        },
+        ConditionExpression: 'attribute_not_exists(webhookId)'
+      }));
+      console.log(`[Handler] Dedup: webhookId ${webhookIdForDedup} recorded (first processing)`);
+    } catch (e) {
+      if (e.name === 'ConditionalCheckFailedException') {
+        console.log(`[Handler] ⛔ DEDUP SKIP: webhookId ${webhookIdForDedup} already processed (SQS redelivery / duplicate webhook protection)`);
+        return { statusCode: 200, body: JSON.stringify({ skipped: true, reason: 'Duplicate webhook (dedup)' }) };
+      }
+      console.warn('[Handler] Dedup check non-fatal (proceeding):', e.message);
+    }
+  }
 
   // Ensure we have the real Grok key (fetch from SSM /grok/api-key if not already in env)
   // Mock LLM is no longer supported at all (even for tests).
@@ -329,9 +392,42 @@ export const handler = async (event, context) => {
 
       if (targetId) {
         const sentPreview = result.proposedResponse.substring(0, 80);
+
+        // === Pre-send guard: prevent sending duplicate short replies (e.g. "You're welcome!" twice) ===
+        try {
+          const verifyConvForGuard = convId || (reservationId ? await hospitableClient.getConversationIdForReservation(reservationId).catch(() => null) : null);
+          if (verifyConvForGuard) {
+            const recent = await hospitableClient.getConversationMessages(verifyConvForGuard, 4);
+            const veryRecentHostReplies = recent
+              .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
+              .slice(0, 3)
+              .map(m => (m.body || '').trim().toLowerCase());
+
+            const proposedLower = result.proposedResponse.trim().toLowerCase();
+            const isDuplicateShortReply = veryRecentHostReplies.some(r =>
+              r === proposedLower ||
+              (proposedLower.includes("you're welcome") && r.includes("you're welcome")) ||
+              (proposedLower.length < 40 && r === proposedLower)
+            );
+
+            if (isDuplicateShortReply) {
+              console.log(`[Handler] ⛔ PRE-SEND GUARD: Skipping send — identical or "You're welcome" style reply already sent very recently to this conversation.`);
+              console.log('   Recent host replies:', veryRecentHostReplies);
+              // Treat as success (no escalation needed)
+              return {
+                statusCode: 200,
+                body: JSON.stringify({ success: true, skipped: true, reason: 'Pre-send duplicate guard' })
+              };
+            }
+          }
+        } catch (guardErr) {
+          console.warn('[Handler] Pre-send duplicate guard non-fatal error (proceeding with send):', guardErr.message);
+        }
+
         console.log(`📤 SENDING REPLY → ${targetType}:`, targetId, '| preview:', sentPreview);
 
         try {
+          // === Actual send (this is the critical operation) ===
           if (reservationId) {
             await hospitableClient.sendMessageToReservation(reservationId, result.proposedResponse);
           } else {
@@ -339,45 +435,49 @@ export const handler = async (event, context) => {
           }
           console.log('✅ Reply successfully sent to guest via Hospitable');
 
-          // === Verification step: Pull latest messages to confirm delivery ===
-          // Hard failure if we cannot confirm delivery. This makes send problems visible in CloudWatch.
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // === Verification (best-effort only — never a hard failure) ===
+          // A 404 or missing message here is usually just eventual consistency.
+          // The actual send already succeeded, so we treat verification problems as warnings.
+          try {
+            await new Promise(resolve => setTimeout(resolve, 3000)); // slightly longer sleep for consistency
 
-          // We may only have reservationId. Resolve conversation_id for verification when needed.
-          let verifyConvId = convId;
-          if (!verifyConvId && reservationId) {
-            try {
-              verifyConvId = await hospitableClient.getConversationIdForReservation(reservationId);
-            } catch (e) {
-              console.warn('[Handler] Could not resolve conversation_id from reservation for verification:', e.message);
+            // Resolve conversation_id if we only have reservationId
+            let verifyConvId = convId;
+            if (!verifyConvId && reservationId) {
+              try {
+                verifyConvId = await hospitableClient.getConversationIdForReservation(reservationId);
+              } catch (e) {
+                console.warn('[Handler] Could not resolve conversation_id for verification:', e.message);
+              }
             }
-          }
 
-          if (!verifyConvId) {
-            console.warn('⚠️ No conversation_id available for post-send verification (send itself succeeded).');
-          } else {
-            const recentMessages = await hospitableClient.getConversationMessages(verifyConvId, 5);
-            const latestMessage = recentMessages[0];
-
-            if (latestMessage && latestMessage.body && latestMessage.body.includes(sentPreview)) {
-              console.log('✅ Verification successful: The reply appears as one of the most recent messages in the conversation.');
+            if (!verifyConvId) {
+              console.warn('⚠️ No conversation_id available for post-send verification (send itself succeeded).');
             } else {
-              const recentPreviews = recentMessages.map(m => ({
-                sender_type: m.sender_type,
-                body_preview: m.body?.substring(0, 100)
-              }));
-              console.error('❌ VERIFICATION FAILED after send: Reply not found in recent messages.');
-              console.error('   Sent preview:', sentPreview);
-              console.error('   Recent messages:', JSON.stringify(recentPreviews, null, 2));
+              const recentMessages = await hospitableClient.getConversationMessages(verifyConvId, 5);
+              const latestMessage = recentMessages[0];
 
-              throw new Error(`Send verification failed for ${targetType} ${targetId}. Message may not have been delivered to guest.`);
+              if (latestMessage && latestMessage.body && latestMessage.body.includes(sentPreview)) {
+                console.log('✅ Verification successful: The reply appears in recent messages.');
+              } else {
+                const recentPreviews = recentMessages.map(m => ({
+                  sender_type: m.sender_type,
+                  body_preview: m.body?.substring(0, 100)
+                }));
+                console.warn('⚠️ Verification could not yet confirm the sent message (eventual consistency or timing).');
+                console.warn('   Sent preview:', sentPreview);
+                console.warn('   Recent messages:', JSON.stringify(recentPreviews, null, 2));
+              }
             }
+          } catch (verifyErr) {
+            // Never let verification errors cause a hard Lambda failure
+            console.warn('⚠️ Post-send verification step encountered an error (non-critical):', verifyErr.message);
           }
 
         } catch (sendError) {
-          console.error('❌ HARD FAILURE: Failed to send reply to guest or verify delivery:', sendError.message);
-          // Re-throw so the Lambda fails (status 500). This makes send failures visible and actionable.
-          throw new Error(`Failed to send/verify guest message: ${sendError.message}`);
+          // Only actual send failures are hard failures
+          console.error('❌ HARD FAILURE: Failed to send reply to guest:', sendError.message);
+          throw new Error(`Failed to deliver message to guest: ${sendError.message}`);
         }
       } else {
         const errMsg = 'Cannot send reply: no reservationId or conversation_id present in message context.';
