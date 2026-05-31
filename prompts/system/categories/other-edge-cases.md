@@ -21,3 +21,42 @@
 - Do not output any other category. This golden expects a direct helpful reply with the exact details.
 
 **Note**: Many of these small factual responses have been consolidated into `misc-questions.md` for now. They can be split out later if they become high-volume.
+
+---
+
+## HOST_REPLY_REINGESTED (Critical Regression Protection)
+
+**This is a host's own previous reply text that was re-ingested into the queue as if it were a new guest message.**
+
+### Recognition rules (content-based, no sender metadata required)
+The incoming message is written from the *host's perspective speaking to the guest*:
+- Uses "we have", "I recommend", "hope this helps", offers specific local recommendations as if answering a question.
+- Contains detailed host-only advice (exact addresses, apps like SpotHero, paid parking instructions, etc.).
+- Does **not** read like a guest asking the host a question ("where can we park?", "any parking recommendations?").
+
+**Exact failing example** (must produce shouldReply:false):
+"Hi - For paid parking, we have 192-234 Vaughan Street Parking nearby. The alternative is to find street parking in the area, usually towards the Western Promenade. I recommend using the SpotHero application, where you can book in advance and get cheaper rates. Hope this helps!"
+
+This exact text (or extremely similar host-style parking advice) appears in the golden `host-parking-reply-ingested`.
+
+### Mandatory output for this case
+```json
+{
+  "typeOfMessageReceived": "HOST_REPLY_REINGESTED",
+  "proposedResponse": "none",
+  "shouldReply": false,
+  "confidence": 0.95,
+  "notes": "Re-ingested previous host reply about parking. Do not generate any response or escalate."
+}
+```
+
+### Absolute requirements
+- `shouldReply` **MUST** be false.
+- `proposedResponse` **MUST** be exactly "none".
+- Never include any parking advice, "192-234", "Vaughan", "SpotHero", or similar details in any output.
+- Do **not** treat as FYI_STATEMENT, PARKING_ADDITIONAL_QUESTION, or any other category that would trigger a reply.
+- Do **not** escalate (the whole point of this golden is to prevent the old system's false-positive escalations on host echo messages).
+- This rule takes precedence over all FYI, courtesy, or informational statement rules.
+
+### Why this exists
+Some SQS/webhook ingestion paths can feed a host's prior reply back as a "new guest message". Replying to it (or escalating it) creates duplicate messages to guests and noise for the host. The eval golden `host-parking-reply-ingested-as-guest` (with rubric `shouldReply: false` + forbiddenPhrases) exists specifically to lock this behavior. The classification decision must come from the LLM via these instructions — no regex or deterministic code may decide this.

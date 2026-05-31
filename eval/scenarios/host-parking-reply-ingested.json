@@ -1,6 +1,6 @@
 {
   "id": "host-parking-reply-ingested-as-guest",
-  "description": "A host's previous parking advice message somehow lands in the queue as if it were a new guest message. The system must not treat host replies as guest questions and must not escalate them.",
+  "description": "A host's previous parking advice message somehow lands in the queue as if it were a new guest message. The system must detect (via Grok + modular prompt content rules only, never regex or deterministic code) that this is not a guest question, set shouldReply:false, and must not escalate it.",
   "guestMessage": "Hi - For paid parking, we have 192-234 Vaughan Street Parking nearby. The alternative is to find street parking in the area, usually towards the Western Promenade. I recommend using the SpotHero application, where you can book in advance and get cheaper rates. Hope this helps!",
   "context": {
     "guestName": "Emi",
@@ -13,6 +13,6 @@
     "shouldReply": false,
     "mustEscalate": false,
     "forbiddenPhrases": ["parking", "SpotHero", "Vaughan"],
-    "notes": "This is clearly a host reply. The system must detect it is not a guest question and must NOT escalate it. This was a regression from the old system."
+    "notes": "This is clearly a host reply. The system must detect (purely via Grok using the HOST_REPLY_REINGESTED prompt rules and the exact example text) that it is not a guest question, output shouldReply:false + proposedResponse:\"none\", and must NOT escalate it. Zero regex or JS logic may make this category/shouldReply decision. This was a regression from the old system."
   }
 }

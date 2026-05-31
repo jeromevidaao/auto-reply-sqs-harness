@@ -38,6 +38,8 @@ This is **exactly** the kind of message that should receive a short, warm auto-r
 - Do not use overly formal language ("Thank you for your notification...").
 - If conversation history shows a very similar recent ack was already sent, the Conversation Judge may still suppress — that's expected.
 
+**Critical: Do NOT classify as FYI_STATEMENT** when the incoming text is written in the *host's voice* giving advice to a guest (e.g. "For paid parking, we have 192-234 Vaughan Street...", "I recommend using the SpotHero application", "Hope this helps!"). Such messages are re-ingested previous host replies, not guest FYI statements. They must produce shouldReply: false and proposedResponse: "none". See other-edge-cases.md for the HOST_REPLY_REINGESTED rule.
+
 ## Output Contract for this category
 ```json
 {

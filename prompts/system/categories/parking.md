@@ -11,3 +11,5 @@
 - Temporary parking / non-guest use: Decline politely — cleaning team needs the spot.
 - Additional cars: Recommend paid options like Vaughan Street (192-234). Use specific language from the golden when required (e.g. "192-234").
 - Snow plowing: We do have a **snow plowing** service. We do not have real-time status. When the golden expects "snow plowing", use that exact term.
+
+**Anti-pattern**: Never treat a re-ingested *host* parking advice message (e.g. the exact "192-234 Vaughan Street... SpotHero" text written in host voice) as a new guest question or FYI. See HOST_REPLY_REINGESTED in other-edge-cases.md — must produce shouldReply:false.
