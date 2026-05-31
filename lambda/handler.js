@@ -15,6 +15,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { HospitableClient } from '../src/clients/HospitableClient.js';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { SQSClient, CreateQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 
@@ -63,6 +64,32 @@ export const handler = async (event, context) => {
 
   // Log full incoming event for deep debugging (CloudWatch searchable)
   console.log('RAW EVENT:', JSON.stringify(event, null, 2));
+
+  // === ACT ROUTING ===
+  // When invoked via API Gateway → SQS → Lambda, queryStringParameters are inside the SQS record body.
+  let actPayload = event;
+  if (event?.Records?.[0]?.body) {
+    try { actPayload = JSON.parse(event.Records[0].body); } catch { /* ignore */ }
+  }
+  const act = actPayload?.queryStringParameters?.act || event?.queryStringParameters?.act;
+
+  if (act === 'new_reservation_home_exchange') {
+    const sqs = new SQSClient({ region: 'us-east-1' });
+    const queueName = `home-exchange-reservation-${Date.now()}`;
+
+    const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: queueName }));
+
+    await sqs.send(new SendMessageCommand({
+      QueueUrl,
+      MessageBody: JSON.stringify(actPayload),
+    }));
+
+    console.log(`[act:new_reservation_home_exchange] Created queue ${queueName} and pushed payload`);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ success: true, act, queueName, queueUrl: QueueUrl }),
+    };
+  }
 
   // Print the raw SQS message body explicitly for easy reference when debugging
   // extraction / parsing issues (very useful during cutover and when real webhooks arrive).
@@ -149,66 +176,46 @@ export const handler = async (event, context) => {
   const msgContext = { ...extracted.context, ...(event?.context || {}), ...(event?.payload?.context || {}) };
 
   // === ALWAYS log full sender diagnostics for debugging classification issues ===
+  // Per instruction: host vs guest classification must be based ONLY on sender metadata,
+  // never on message content/body.
   console.log('🔍 SENDER DIAGNOSTICS:', JSON.stringify({
     sender_type: msgContext.sender_type || msgContext.sender?.type,
     sender_role: msgContext.sender_role || msgContext.sender?.role,
     sender_full_name: msgContext.sender?.full_name || msgContext.sender?.name,
-    user_name: msgContext.user?.name,
+    sender_id: msgContext.sender?.id || msgContext.sender?.user_id,
+    user_name: msgContext.user?.name,   // account owner context only (for diagnostics)
     source: msgContext.source,
     _webhookId: msgContext._webhookId,
   }, null, 2));
 
-  // === Robust multi-layer host message detection (prevents replying to host) ===
-  // Layer 1: Explicit sender_type / sender_role from Hospitable
-  const senderType = (msgContext.sender_type || msgContext.sender?.type || msgContext.from?.type || '').toLowerCase();
-  const senderRole = (msgContext.sender_role || msgContext.sender?.role || '').toLowerCase();
+  // === Host / Guest classification for the *current incoming message* ===
+  // RULE: Use ONLY explicit information provided in the sender object itself.
+  //        Never use message body/content, never use the top-level "user" (account owner) as a proxy.
+  //        sender_type / sender.type / sender_role / sender.role are the authoritative signals.
+  const senderType = (msgContext.sender_type || msgContext.sender?.type || msgContext.from?.type || '').toLowerCase().trim();
+  const senderRole = (msgContext.sender_role || msgContext.sender?.role || '').toLowerCase().trim();
 
-  // Layer 2: Known host identity (user.id or name from the "user" field in webhook is the authenticated host)
-  const userName = (msgContext.user?.name || '').toLowerCase();
-  const senderFullName = (msgContext.sender?.full_name || msgContext.sender?.name || '').toLowerCase();
-  const isKnownHostIdentity = userName.includes('jerome') || userName.includes('ruby') ||
-                              senderFullName.includes('jerome') || senderFullName.includes('ruby') ||
-                              (msgContext.user?.id === '436eb2ed-5174-5542-926f-5013bae34188');
+  // Explicit signals from the sender metadata
+  const isSenderExplicitlyHost = senderType === 'host' || senderRole === 'host';
+  const isSenderExplicitlyGuest = senderType === 'guest' || senderRole === 'guest';
 
-  // Layer 3: Strong signature in body (your actual automated/host templates)
-  const lowerMsg = (guestMessage || '').toLowerCase();
-  const hostSignaturePhrases = [
-    'jerome & ruby', 'jerome and ruby', 'guidebook', 'settled in after your travel',
-    'all the best and enjoy all that portland', 'hard copy of my portland guidebook'
-  ];
-  const hasHostSignature = hostSignaturePhrases.some(p => lowerMsg.includes(p));
-
-  // Layer 4: Source or automated origin often indicates host action
-  const isAutomatedHostSource = (msgContext.source === 'automated' || msgContext.source === 'public_api');
-
-  const isDefinitelyHost = (senderType && senderType !== 'guest') ||
-                           senderRole === 'host' ||
-                           isKnownHostIdentity ||
-                           (hasHostSignature && !senderType) ||
-                           (isAutomatedHostSource && hasHostSignature);
+  // Final decision: only treat as host message if the sender metadata itself says it is from the host.
+  // If the sender explicitly says "guest", we must respect that (even if the name happens to look like the host).
+  const isDefinitelyHost = isSenderExplicitlyHost;
 
   if (isDefinitelyHost) {
-    console.log(`[Handler] ⛔ Ignoring host message (sender_type=${senderType || 'n/a'}, role=${senderRole || 'n/a'}, knownHost=${isKnownHostIdentity}, signature=${hasHostSignature}, source=${msgContext.source}). Never reply to host.`);
+    console.log(`[Handler] ⛔ Ignoring host message (sender_type=${senderType || 'n/a'}, role=${senderRole || 'n/a'}, source=${msgContext.source}). Never reply to host.`);
     return {
       statusCode: 200,
-      body: JSON.stringify({ skipped: true, reason: 'Host message (robust multi-layer detection)' })
+      body: JSON.stringify({ skipped: true, reason: 'Host message (sender metadata only)' })
     };
   }
 
-  // Legacy narrow heuristic (kept as final fallback for very old payloads)
-  const hostVoiceIndicators = [
-    'we have', 'i recommend', 'hope this helps', 'thank you', 
-    'you can book', 'nearby', 'in the area', 'application', 'spot hero', 'spothero',
-    'i hope that you have', 'please let me know if there is anything you need'
-  ];
-  const looksLikeHostMessage = hostVoiceIndicators.some(phrase => lowerMsg.includes(phrase));
-
-  if (!senderType && !isKnownHostIdentity && looksLikeHostMessage) {
-    console.log(`[Handler] ⛔ Heuristic skip: Message looks like a host reply (no sender_type). Content: "${(guestMessage || '').substring(0, 80)}..."`);
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ skipped: true, reason: 'Likely host message (heuristic)' })
-    };
+  // Optional: very old payloads with zero sender_type information at all.
+  // In this extremely rare case we log a warning but do NOT use content heuristics.
+  // We let the message proceed to the agent (which has its own lighter defense-in-depth check).
+  if (!senderType && !senderRole) {
+    console.log(`[Handler] ⚠️ No sender_type or sender.role present in payload. Proceeding to agent (no content-based host heuristics are used).`);
   }
 
   // (Dedup check moved below after ddbClient is initialized for reuse)

@@ -4,8 +4,8 @@
 
 **GUEST_CHECKOUT**:
 - Guest announces they have checked out or are leaving.
-- Simple warm response: Thank them for letting you know and for their stay.
-- Wish them safe travels.
+- When the message is purely logistical ("just checked out"), give a simple warm acknowledgment + safe travels.
+- When it includes thanks ("Thanks again...", "thanks for your host", dishwasher mention, etc.), prefer THANK_YOU_MESSAGE category for the "You're welcome" style reply. Do not escalate or use OTHER_MESSAGE.
 
 **PACK_AND_PLAY_BRAND**:
 - "We use the Graco Pack and Play."

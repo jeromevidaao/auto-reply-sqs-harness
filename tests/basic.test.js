@@ -160,4 +160,86 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
     assert.ok(result.thermostatInfo.system.includes('KumoCloud'));
     assert.ok(result.thermostatInfo.howTo.some(step => step.includes('remotes on the wall')));
   });
+
+  it('replies with a short warm acknowledgment to courteous FYI statements that require no information or action from host (real Grok call)', async () => {
+    const agent = new GuestMessagingAgent({
+      llm: 'auto',
+      projectRoot: projectRootForTests
+    });
+
+    // Real production case (Menghang/David, mid-stay courtesy note about a harmless cooking incident).
+    // This used to be incorrectly treated as OTHER_MESSAGE + "none" → escalated with no auto-reply.
+    // The fyi-statements.md category + base.md rule now explicitly requires a brief ack + shouldReply: true.
+    const result = await agent.handleMessage(
+      "Hi Jerome, I think our fried eggs triggers smoke detector broadcast. I want to inform you so no unnecessary fire truck visit.😆",
+      {
+        guestName: 'Menghang(David)',
+        listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd', // Apt 3
+        propertyName: 'Apt 3',
+        // Minimal stay context — this is a mid-stay FYI, not a welcome or question
+        checkIn: '2026-05-20',
+        checkOut: '2026-05-23'
+      }
+    );
+
+    // Core guarantee: we must auto-reply to these thoughtful non-actionable updates
+    assert.equal(result.shouldReply, true, 'FYI courtesy statements must trigger shouldReply=true');
+    assert.ok(
+      result.proposedResponse && result.proposedResponse !== 'none' && result.proposedResponse.length > 15,
+      'Must propose a real acknowledgment response, not empty/none'
+    );
+    assert.equal(result.escalated, false, 'Should not escalate FYI statements that we can politely acknowledge');
+    // The response should feel like a warm, brief host ack (loose check for natural language)
+    const lower = result.proposedResponse.toLowerCase();
+    const hasAckTone = lower.includes('thanks') || lower.includes('thank') || lower.includes('appreciate') ||
+                       lower.includes('glad') || lower.includes('no worries') || lower.includes('heads up') ||
+                       lower.includes('good to know');
+    assert.ok(hasAckTone, 'Response should contain warm acknowledgment language (thanks/appreciate/glad/no worries/etc.)');
+  });
+
+  it('replies with short warm "You are welcome" acknowledgment to post-checkout thank-you messages (real Grok call)', async () => {
+    const agent = new GuestMessagingAgent({
+      llm: 'auto',
+      projectRoot: projectRootForTests
+    });
+
+    // Real production case (Menghang/David on Apt 2, 5:34AM PDT checkout thank-you).
+    // Previously dropped entirely by the handler host-filter bug (user.name="Jerome Ansia" always present).
+    // Even if it reached the agent, THANK_YOU_MESSAGE + GUEST_CHECKOUT overlap needed clear rules.
+    // Exact guest text that must now produce a brief warm "You're welcome, David!" style reply.
+    const result = await agent.handleMessage(
+      "Hi Jerome, we just checked out and started the dishwasher. Thanks again for your host!",
+      {
+        guestName: 'Menghang(David)',
+        listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d', // Sunny Downtown 2 Bed Apt (Apt 2) from the actual CloudWatch payload
+        propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+        checkIn: '2026-05-24',
+        checkOut: '2026-05-31',
+        // Simulate the webhook context.user (host account) + sender that previously triggered the bad filter
+        user: { id: '436eb2ed-5174-5542-926f-5013bae34188', name: 'Jerome Ansia' },
+        sender: { type: 'guest', full_name: 'Menghang(David)', first_name: 'Menghang(David)' },
+        sender_type: 'guest',
+        conversation_id: '3444a0a7-4888-44d3-81cd-5550a585d9c9',
+        reservationId: 'e38f9e75-9f58-4e2e-afff-2a12457fc0c9'
+      }
+    );
+
+    assert.equal(result.shouldReply, true, 'Checkout thank-you must trigger shouldReply=true (You are welcome category)');
+    assert.ok(
+      result.proposedResponse && result.proposedResponse !== 'none' && result.proposedResponse.length > 10,
+      'Must propose a real "You are welcome" / acknowledgment response'
+    );
+    assert.equal(result.escalated, false, 'Must not escalate a simple courteous checkout thank-you');
+    const lower = result.proposedResponse.toLowerCase();
+    const hasWelcomeTone = lower.includes('welcome') || lower.includes('glad') || lower.includes('enjoyed') ||
+                           lower.includes('safe') || lower.includes('travel') || lower.includes('thanks') ||
+                           lower.includes('appreciate');
+    assert.ok(hasWelcomeTone, 'Response should be a warm "You are welcome" / safe travels style ack');
+    // Prefer natural short name "David" (the normalize fix + category rule)
+    const usesNaturalName = result.proposedResponse.includes('David') || result.proposedResponse.includes(', D');
+    // Not a hard assert (model may vary), but log for visibility
+    if (!usesNaturalName) {
+      console.log('[test] Note: proposedResponse did not obviously use short name "David":', result.proposedResponse);
+    }
+  });
 });

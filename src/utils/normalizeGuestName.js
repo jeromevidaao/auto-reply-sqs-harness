@@ -18,7 +18,12 @@ export function normalizeGuestName(rawName) {
     return { displayName: 'Guest', fullName: rawName || '' };
   }
 
-  const trimmed = rawName.trim();
+  // Strip common Unicode bidirectional / directional formatting markers that Hospitable/Airbnb
+  // sometimes wraps around guest names in webhooks (e.g. \u2068Menghang(David)\u2069).
+  // These break the parentheses regex and produce ugly robotic display names.
+  const stripped = rawName.replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').trim();
+
+  const trimmed = stripped;
 
   // Match patterns like "Menghang(David)" or "David (Menghang)"
   const parenMatch = trimmed.match(/^(.+?)\s*\((.+?)\)\s*$/);

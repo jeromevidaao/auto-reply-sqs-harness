@@ -429,21 +429,16 @@ export class GuestMessagingAgent {
    */
   async handleMessage(guestMessage, context = {}) {
     // Defense-in-depth: if the caller provides clear evidence this is a host message, bail out early.
-    const senderType = (context.sender_type || context.sender?.type || '').toLowerCase();
-    const senderRole = (context.sender_role || context.sender?.role || '').toLowerCase();
-    const userName = (context.user?.name || '').toLowerCase();
-    const senderFull = (context.sender?.full_name || '').toLowerCase();
-    const bodyLower = (guestMessage || '').toLowerCase();
-    const hasHostSig = bodyLower.includes('jerome & ruby') || bodyLower.includes('guidebook') || bodyLower.includes('settled in after your travel');
+    // RULE (per explicit requirement): Identify host vs guest using ONLY the sender metadata itself
+    // (sender_type, sender.type, sender_role, sender.role). Never use message content/body.
+    // Never use context.user (account owner) as a proxy for "this particular sender is the host".
+    const senderType = (context.sender_type || context.sender?.type || '').toLowerCase().trim();
+    const senderRole = (context.sender_role || context.sender?.role || '').toLowerCase().trim();
 
-    const isHost = (senderType && senderType !== 'guest') ||
-                   senderRole === 'host' ||
-                   userName.includes('jerome') || userName.includes('ruby') ||
-                   senderFull.includes('jerome') || senderFull.includes('ruby') ||
-                   (hasHostSig && !senderType);
+    const isSenderExplicitlyHost = senderType === 'host' || senderRole === 'host';
 
-    if (isHost) {
-      console.log('[Agent] handleMessage aborted — message is from host (robust detection), not guest.');
+    if (isSenderExplicitlyHost) {
+      console.log('[Agent] handleMessage aborted — message is from host (sender_type/role only), not guest.');
       return {
         typeOfMessageReceived: 'OTHER_MESSAGE',
         proposedResponse: 'none',

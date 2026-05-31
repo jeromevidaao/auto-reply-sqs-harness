@@ -4,7 +4,7 @@ This directory contains modular rule files extracted from the production system 
 
 Each file corresponds to one or more `typeOfMessageReceived` categories used by the agent.
 
-## Current Categories (32 files as of latest extraction)
+## Current Categories (33 files as of latest extraction)
 
 ### High-Priority / Complex
 - `cancellation.md`
@@ -27,6 +27,7 @@ Each file corresponds to one or more `typeOfMessageReceived` categories used by 
 - `ev-charger.md`
 - `event-request.md`
 - `food-recommendations.md`
+- `fyi-statements.md`
 - `guest-count-change.md`
 - `hotel-recommendation.md`
 - `july-4th-fireworks.md`
