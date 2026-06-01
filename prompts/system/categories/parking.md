@@ -2,6 +2,11 @@
 
 **Canonical category name(s)**: PARKING, PARKING_ADDITIONAL_QUESTION, PARKING_PLOWING_SERVICE
 
+**Category selection rules** (use the most specific match):
+- `PARKING_ADDITIONAL_QUESTION` — guest asks about parking for **more than one car**, extra vehicles, or where else to park beyond the included spot. Examples: "we have two cars", "is there additional parking", "where can my second car park".
+- `PARKING_PLOWING_SERVICE` — guest asks about snow plowing or snow removal.
+- `PARKING` — all other parking questions (check-in day spot availability, temporary use, general parking inquiries).
+
 **General rule**:
 - All units have one dedicated off-street parking spot.
 
