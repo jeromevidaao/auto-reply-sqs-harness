@@ -59,14 +59,15 @@ export class HospitableClient {
 
   /**
    * Retry wrapper for critical Hospitable API calls.
-   * - Up to 3 attempts
-   * - Exponential backoff: ~5s, 10s, 15s (total ~30s window)
+   * - Up to 5 attempts
+   * - Exponential backoff: 5s, 10s, 20s, 40s, 45s (total ~2 min window)
+   * - 429 responses use the same exponential backoff
    * - Only retries transient errors (5xx, 429, network/timeout)
    * - On final failure: throws a clear error that will cause hard Lambda failure
    */
   async _withRetry(operation, fn) {
-    const maxAttempts = 3;
-    const delays = [5000, 10000, 15000]; // 5s, 10s, 15s
+    const maxAttempts = 5;
+    const delays = [5000, 10000, 20000, 40000, 45000]; // 5s, 10s, 20s, 40s, 45s (~2 min total)
 
     let lastError;
 
