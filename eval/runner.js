@@ -111,6 +111,24 @@ async function main() {
       });
     }
 
+    // Greeting enforcement for first-host / first-of-day cases
+    if (rubric.mustStartWithGreeting) {
+      maxScore++;
+      const resp = (result.proposedResponse || '').trim();
+      const startsWithGood = /^(Good (morning|afternoon|evening)|Hi |Hey |Hello )/i.test(resp);
+      if (startsWithGood) score++;
+      else notes.push('Must start with time-based greeting (Good morning/afternoon/evening ...)');
+    }
+    if (rubric.greetingMustUseName) {
+      maxScore++;
+      const resp = (result.proposedResponse || '').toLowerCase();
+      const name = String(rubric.greetingMustUseName).toLowerCase();
+      // Name should appear early in the response (after possible greeting)
+      const nameIndex = resp.indexOf(name);
+      if (nameIndex >= 0 && nameIndex < 60) score++;
+      else notes.push(`Greeting must use natural guest name "${rubric.greetingMustUseName}" near the start`);
+    }
+
     const passedScenario = score === maxScore && maxScore > 0;
 
     console.log(`   ${passedScenario ? '✅' : '❌'} Score: ${score}/${maxScore} — ${result.typeOfMessageReceived}`);

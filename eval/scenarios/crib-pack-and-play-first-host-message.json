@@ -1,0 +1,34 @@
+{
+  "id": "crib-pack-and-play-first-host-message",
+  "description": "Guest asks about crib (Pack and Play) availability in first message from host in the thread. All units have Graco Pack and Play pre-placed and ready — do not imply we need to prepare one. Because this is the first host message (conversationHistory empty), greet with time-appropriate greeting + name (Good afternoon Kyrie,). Real production incident case.",
+  "guestMessage": "Hi there!\n\nWe are coming to Portland to celebrate my mom’s birthday. Your place is perfect for us to celebrate together with our new baby!\n\nWould it be possible to have a crib available? We see that one is available upon request.",
+  "context": {
+    "guestName": "Kyrie · Booker",
+    "checkIn": "2026-07-10",
+    "checkOut": "2026-07-13",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-06-20T14:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "PACK_AND_PLAY_BRAND",
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "happy to have one ready",
+      "we can get one ready",
+      "get it ready for you",
+      "just let us know",
+      "upon request"
+    ],
+    "requiredPhrases": [
+      "Graco Pack and Play",
+      "already",
+      "ready",
+      "set up"
+    ],
+    "mustStartWithGreeting": true,
+    "greetingMustUseName": "Kyrie"
+  },
+  "notes": "Real incident: first host/auto-reply message in thread. Must greet with Eastern time greeting + natural name. Must clarify the Pack and Play is pre-placed and ready (no prep language). Name normalization should yield 'Kyrie'."
+}

@@ -265,6 +265,28 @@ export class GuestMessagingAgent {
       if (context.conversationTraces.traces?.length) {
         context.conversationTraces.traces.forEach(t => lines.push(`  • ${t}`));
       }
+
+      // Greeting / first-contact-of-day signals (critical for natural "Good morning Name," style on first host reply or new day)
+      const g = context.conversationTraces.greeting;
+      if (g) {
+        lines.push('- Greeting context (NY/Eastern time):');
+        lines.push(`  • Current time: ${g.currentNYTime}`);
+        lines.push(`  • Time-based greeting: "${g.timeBasedGreeting}"`);
+        if (g.isFirstHostMessage) {
+          lines.push('  • THIS IS THE FIRST MESSAGE FROM HOST in this conversation thread — use greeting + guest name');
+        }
+        if (g.lastHostWasPreviousDay) {
+          lines.push('  • Last host message was on a previous day (NY) — this counts as first-of-the-day, use greeting + name');
+        }
+        if (g.shouldUseGreeting) {
+          lines.push(`  • GREET RECOMMENDED: start with ${g.timeBasedGreeting} + guest natural name (e.g. "${g.timeBasedGreeting}, Kyrie,")`);
+        } else if (g.hasRecentGreeting || (g.minutesSinceLastHost != null && g.minutesSinceLastHost < 90)) {
+          lines.push('  • Recent host activity or greeting detected — DO NOT repeat "Good morning/afternoon" formal greeting; start with name or directly');
+        }
+        if (g.hasRecentGreeting && g.lastGreetingMessage) {
+          lines.push(`  • Recent greeting example: "${g.lastGreetingMessage.substring(0, 80)}..."`);
+        }
+      }
     }
 
     // Early decision signals from pre-processing (these strongly influence the first LLM pass)
@@ -280,6 +302,25 @@ export class GuestMessagingAgent {
 
     lines.push('');
     lines.push('Respond with the required JSON only.');
+
+    // Dynamic greeting instructions (injected every call, like old production system)
+    // The LLM must follow these for natural first-contact or first-of-day greetings on regular replies (not just NEW_*_WELCOME)
+    const g = context.conversationTraces && context.conversationTraces.greeting;
+    const guestDisplay = context.guestDisplayName || context.guestName || 'there';
+    if (g && g.shouldUseGreeting) {
+      lines.push('');
+      lines.push('GREETING INSTRUCTIONS (apply to this reply):');
+      lines.push(`- This appears to be the first host message${g.isFirstHostMessage ? ' in the thread' : ''}${g.lastHostWasPreviousDay ? ' or first-of-the-day (prior host message was yesterday)' : ''}.`);
+      lines.push(`- Start your proposedResponse with the time-based greeting followed by the guest's natural name: e.g. "${g.timeBasedGreeting}, ${guestDisplay}," (or "${g.timeBasedGreeting} ${guestDisplay},").`);
+      lines.push('- Use the guest\'s natural/short name (see normalization rules in base prompt). After the greeting sentence, continue naturally with the substance of the reply.');
+      lines.push('- Only do this when shouldUseGreeting is true per traces. For rapid back-and-forth the same day, skip formal time greeting.');
+    } else if (g && (g.hasRecentGreeting || (g.minutesSinceLastHost != null && g.minutesSinceLastHost < 120))) {
+      lines.push('');
+      lines.push('GREETING INSTRUCTIONS (apply to this reply):');
+      lines.push('- A recent host message or greeting was already sent. DO NOT start with "Good morning", "Good afternoon", or "Good evening".');
+      lines.push(`- Start directly with the guest's name (e.g. "${guestDisplay},") or jump straight into addressing their question/request in a friendly way.`);
+      lines.push('- Keep tone warm and conversational without repeating a formal greeting.');
+    }
 
     return lines.join('\n');
   }

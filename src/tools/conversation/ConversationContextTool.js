@@ -1,4 +1,5 @@
 import { BaseTool } from '../BaseTool.js';
+import { getTimeBasedGreeting, analyzeGreetingContext } from '../../utils/timeGreeting.js';
 
 /**
  * ConversationContextTool
@@ -34,16 +35,20 @@ export class ConversationContextTool extends BaseTool {
       duplicateRisk: false,
       duplicateReason: null,
       traces: [],
+      // Greeting signals (for first-message-of-day / first-host-message greetings)
+      greeting: null,
     };
 
     // === Recent host message + duplicate risk check ===
     // Try to use live Hospitable data when available (preferred, like old production)
     let recentHostMessages = [];
+    let allRecentMessages = [];
 
     if (this.hospitableClient && conversationId) {
       try {
         const messages = await this.hospitableClient.getConversationMessages(conversationId, 10);
-        recentHostMessages = messages
+        allRecentMessages = messages || [];
+        recentHostMessages = allRecentMessages
           .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -90,6 +95,51 @@ export class ConversationContextTool extends BaseTool {
       } catch (e) {
         result.traces.push('Live message history fetch failed (using fallback)');
       }
+    }
+
+    // === Greeting context analysis (first host message, first-of-day, recent greeting for suppression) ===
+    // Uses live messages if fetched, else falls back to provided conversationHistory.
+    // This powers smart "greet only on first message of day / first host reply" behavior.
+    try {
+      const messagesForGreeting = allRecentMessages.length > 0
+        ? allRecentMessages
+        : (context.conversationHistory || []);
+
+      const greetingSignals = analyzeGreetingContext(messagesForGreeting, {
+        recentGreetingWindowMin: 180
+      });
+
+      const timeInfo = getTimeBasedGreeting();
+
+      result.greeting = {
+        timeBasedGreeting: timeInfo.greeting,
+        currentNYTime: timeInfo.currentTime,
+        dayOfWeek: timeInfo.dayOfWeek,
+        isFirstHostMessage: greetingSignals.isFirstHostMessage,
+        lastHostWasPreviousDay: greetingSignals.lastHostWasPreviousDay,
+        minutesSinceLastHost: greetingSignals.minutesSinceLastHost,
+        hasRecentGreeting: greetingSignals.hasRecentGreeting,
+        lastGreetingMessage: greetingSignals.lastGreetingMessage,
+        lastGreetingTime: greetingSignals.lastGreetingTime,
+        shouldUseGreeting: greetingSignals.shouldUseGreeting,
+        lastHostMessagePreview: greetingSignals.lastHostMessagePreview || result.lastHostMessagePreview
+      };
+
+      if (greetingSignals.isFirstHostMessage) {
+        result.traces.push('First host message in this conversation — greeting appropriate');
+      }
+      if (greetingSignals.lastHostWasPreviousDay) {
+        result.traces.push('Last host message was previous day (NY) — treat as first-of-day, greeting recommended');
+      }
+      if (greetingSignals.shouldUseGreeting) {
+        result.traces.push(`Greeting recommended: ${timeInfo.greeting}`);
+      }
+      if (greetingSignals.hasRecentGreeting) {
+        result.traces.push('Recent greeting detected in host history — will suppress repeat formal greeting');
+      }
+    } catch (gErr) {
+      // Non-fatal — greeting signals are best-effort enrichment
+      result.traces.push('Greeting context analysis failed (non-fatal)');
     }
 
     // Fallback to provided conversationHistory if live fetch wasn't possible or failed
