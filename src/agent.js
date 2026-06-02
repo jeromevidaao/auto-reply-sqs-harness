@@ -230,7 +230,11 @@ export class GuestMessagingAgent {
       'Context:'
     ];
 
-    if (context.guestName) lines.push(`- Guest name: ${context.guestName}`);
+    if (context.guestName || context.guestDisplayName) {
+      const raw = context.guestName || '';
+      const disp = context.guestDisplayName || raw;
+      lines.push(`- Guest name: ${raw}${disp && disp !== raw ? ` (display: ${disp})` : ''}`);
+    }
     if (context.checkIn) lines.push(`- Check-in: ${context.checkIn}`);
     if (context.checkOut) lines.push(`- Check-out: ${context.checkOut}`);
     if (context.listingId) lines.push(`- Listing ID: ${context.listingId}`);
@@ -309,17 +313,17 @@ export class GuestMessagingAgent {
     const guestDisplay = context.guestDisplayName || context.guestName || 'there';
     if (g && g.shouldUseGreeting) {
       lines.push('');
-      lines.push('GREETING INSTRUCTIONS (apply to this reply):');
+      lines.push('GREETING INSTRUCTIONS (apply to this reply — MUST FOLLOW EXACTLY):');
       lines.push(`- This appears to be the first host message${g.isFirstHostMessage ? ' in the thread' : ''}${g.lastHostWasPreviousDay ? ' or first-of-the-day (prior host message was yesterday)' : ''}.`);
-      lines.push(`- Start your proposedResponse with the time-based greeting followed by the guest's natural name: e.g. "${g.timeBasedGreeting}, ${guestDisplay}," (or "${g.timeBasedGreeting} ${guestDisplay},").`);
-      lines.push('- Use the guest\'s natural/short name (see normalization rules in base prompt). After the greeting sentence, continue naturally with the substance of the reply.');
-      lines.push('- Only do this when shouldUseGreeting is true per traces. For rapid back-and-forth the same day, skip formal time greeting.');
-    } else if (g && (g.hasRecentGreeting || (g.minutesSinceLastHost != null && g.minutesSinceLastHost < 120))) {
+      lines.push(`- Start your proposedResponse EXACTLY with the time-based greeting + the guest's natural name, e.g. "${g.timeBasedGreeting}, ${guestDisplay}," (comma after name). DO NOT omit the name even if it feels slightly awkward — the guest expects a personal greeting on first contact.`);
+      lines.push('- Use only the guest\'s natural/short name after normalization (see rules in base.md). Never use the raw "Kyrie · Booker" or full legal form here. After the greeting + comma, continue naturally with the substance of the reply (no extra intro sentence).');
+      lines.push('- Only do this when shouldUseGreeting is true per traces. For rapid back-and-forth the same day (or when traces say recent host/greeting), skip the formal time greeting entirely.');
+    } else if (g && (g.hasRecentGreeting || (g.minutesSinceLastHost != null && g.minutesSinceLastHost < 120) || g.suppressedByRecentHost)) {
       lines.push('');
-      lines.push('GREETING INSTRUCTIONS (apply to this reply):');
-      lines.push('- A recent host message or greeting was already sent. DO NOT start with "Good morning", "Good afternoon", or "Good evening".');
-      lines.push(`- Start directly with the guest's name (e.g. "${guestDisplay},") or jump straight into addressing their question/request in a friendly way.`);
-      lines.push('- Keep tone warm and conversational without repeating a formal greeting.');
+      lines.push('GREETING INSTRUCTIONS (apply to this reply — MUST FOLLOW EXACTLY):');
+      lines.push('- A recent host message or greeting was already sent (or rapid same-day back-and-forth). DO NOT start with "Good morning", "Good afternoon", or "Good evening" — not even "Good morning, thanks".');
+      lines.push(`- Start directly with the guest's name (e.g. "${guestDisplay},") or jump straight into the substance in a friendly way.`);
+      lines.push('- Keep tone warm and conversational without repeating a formal greeting. Vary from any prior greeting in the visible history.');
     }
 
     return lines.join('\n');
@@ -508,6 +512,17 @@ export class GuestMessagingAgent {
     // (pre-approval status, recent host activity, unit readiness hints, etc.).
     // This is the dedicated early enrichment phase for highest-quality multipass responses.
     await this._enrichTracesEarly(enrichedContext, guestMessage);
+
+    // If the context tool fetched live messages, surface them as conversationHistory so that
+    // _buildUserPrompt includes the actual recent thread (Host: ..., Guest: ...) for the LLM.
+    // This provides full context for anti-repetition, "never contradict prior host statements",
+    // and lets the model see a just-sent greeting even if greeting trace signals had fetch lag.
+    // (Evals/simulator often pass explicit history; prod relies on this live enrichment.)
+    const tracesForHistory = enrichedContext.conversationTraces || {};
+    if (tracesForHistory.recentConversationMessages && tracesForHistory.recentConversationMessages.length > 0) {
+      enrichedContext.conversationHistory = tracesForHistory.recentConversationMessages;
+      console.log('[Agent] → Populated conversationHistory from live fetch (' + tracesForHistory.recentConversationMessages.length + ' messages) for LLM prompt + judge');
+    }
 
     // === Apply early safety decisions from traces (old production fast paths) ===
     const traces = enrichedContext.conversationTraces || {};

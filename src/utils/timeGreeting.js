@@ -150,6 +150,34 @@ export function analyzeGreetingContext(messages = [], options = {}) {
     shouldUseGreeting = false;
   }
 
+  // Also prepare guest messages for lag defense (filter + time normalize, sort newest first like hosts)
+  const guestMessages = (messages || [])
+    .filter(m => {
+      const st = (m.sender_type || m.sender?.type || '').toLowerCase();
+      return st === 'guest';
+    })
+    .map(m => ({
+      ...m,
+      _time: new Date(m.created_at || m.timestamp || Date.now())
+    }))
+    .sort((a, b) => b._time - a._time);
+
+  // LAG / EVENTUAL CONSISTENCY DEFENSE for own recent sends not yet reflected in /messages list:
+  // If NO host messages are visible yet (isFirstHostMessage), but we see 2+ guest messages clustered
+  // within a short window (<30min span between oldest and newest visible guest), this is likely a
+  // rapid back-and-forth where our intervening host reply (e.g. the first "Good morning") has not
+  // yet appeared in the live history fetch due to propagation lag. Suppress greeting on this
+  // processing to avoid repeating "Good morning" on the 5:52 follow-up after 5:51 send (Amy case).
+  // A true first-host (only a single guest msg seen so far, no prior host) will still greet.
+  if (hostMessages.length === 0 && guestMessages.length >= 2) {
+    const oldestG = guestMessages[guestMessages.length - 1];
+    const newestG = guestMessages[0];
+    const spanMin = (newestG._time - oldestG._time) / (1000 * 60);
+    if (spanMin >= 0 && spanMin < 30) {
+      shouldUseGreeting = false;
+    }
+  }
+
   return {
     isFirstHostMessage,
     lastHostWasPreviousDay,
@@ -160,7 +188,9 @@ export function analyzeGreetingContext(messages = [], options = {}) {
     shouldUseGreeting,
     lastHostDayKey,
     todayKey,
-    lastHostMessagePreview
+    lastHostMessagePreview,
+    numHostMessages: hostMessages.length,
+    numGuestMessages: guestMessages.length
   };
 }
 

@@ -181,6 +181,23 @@ export const handler = async (event, context) => {
   const guestMessage = extracted.message;
   const msgContext = { ...extracted.context, ...(event?.context || {}), ...(event?.payload?.context || {}) };
 
+  // Enrich guest name for greeting + personalization.
+  // Prod webhooks (message.created etc) reliably include sender.first_name / full_name on guest messages.
+  // Reservation/inquiry shapes may have guest or guestName. Ensure we always surface a usable guestName
+  // so that handleMessage can normalize to guestDisplayName and the greeting logic + prompt can use "Amy," etc.
+  const extractedGuestName =
+    msgContext.guestName ||
+    msgContext.guest?.first_name ||
+    msgContext.guest?.full_name ||
+    msgContext.sender?.first_name ||
+    msgContext.sender?.full_name ||
+    (typeof msgContext.sender === 'string' ? msgContext.sender : null) ||
+    msgContext.guest_name ||
+    null;
+  if (extractedGuestName && !msgContext.guestName) {
+    msgContext.guestName = extractedGuestName;
+  }
+
   // === ALWAYS log full sender diagnostics for debugging classification issues ===
   // Per instruction: host vs guest classification must be based ONLY on sender metadata,
   // never on message content/body.

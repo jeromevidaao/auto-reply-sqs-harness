@@ -52,6 +52,13 @@ export class ConversationContextTool extends BaseTool {
           .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+        // Make the live messages available to agent so _buildUserPrompt can include real conversationHistory.
+        // This gives the LLM (and judge/reflection) visibility into prior host messages (e.g. recent "Good morning")
+        // for anti-repetition, context, and better greeting decisions even if trace signals have lag.
+        if (allRecentMessages.length > 0) {
+          result.recentConversationMessages = allRecentMessages;
+        }
+
         if (recentHostMessages.length > 0) {
           const lastHost = recentHostMessages[0];
           const msgTime = new Date(lastHost.created_at);
@@ -143,7 +150,9 @@ export class ConversationContextTool extends BaseTool {
         lastGreetingMessage: greetingSignals.lastGreetingMessage,
         lastGreetingTime: greetingSignals.lastGreetingTime,
         shouldUseGreeting: greetingSignals.shouldUseGreeting,
-        lastHostMessagePreview: greetingSignals.lastHostMessagePreview || result.lastHostMessagePreview
+        lastHostMessagePreview: greetingSignals.lastHostMessagePreview || result.lastHostMessagePreview,
+        numHostMessages: greetingSignals.numHostMessages,
+        numGuestMessages: greetingSignals.numGuestMessages
       };
 
       if (greetingSignals.isFirstHostMessage) {
@@ -157,6 +166,20 @@ export class ConversationContextTool extends BaseTool {
       }
       if (greetingSignals.hasRecentGreeting) {
         result.traces.push('Recent greeting detected in host history — will suppress repeat formal greeting');
+      }
+
+      // Cross-check: if the earlier recent-host block saw a host message within greeting-relevant window (~3h),
+      // force-suppress shouldUseGreeting. This defends against cases where analyzeGreetingContext on the list
+      // computed a "first" because of fetch timing, while the recentHostMessages filter (same data) saw recency.
+      if (result.hasRecentHostMessage &&
+          result.minutesSinceLastHostMessage != null &&
+          result.minutesSinceLastHostMessage > 0 &&
+          result.minutesSinceLastHostMessage < 180) {
+        if (result.greeting) {
+          result.greeting.shouldUseGreeting = false;
+          result.greeting.suppressedByRecentHost = true;
+        }
+        result.traces.push('Greeting suppressed via recent host trace cross-check (<3h host activity)');
       }
     } catch (gErr) {
       // Non-fatal — greeting signals are best-effort enrichment
