@@ -236,6 +236,32 @@ export class HospitableClient {
   }
 
   /**
+   * Fetch full reservation details by ID.
+   * Includes check_in, check_out, guests.pet_count, properties, guest info etc.
+   * Used to reliably populate hasPets/petCount/checkIn for NEW_RESERVATION_WELCOME pet logic and timing.
+   */
+  async getReservation(reservationId) {
+    if (!reservationId) throw new Error('reservationId is required');
+    return this._withRetry('getReservation', async () => {
+      const token = await this.getToken();
+
+      const response = await axios.get(`${this.baseUrl}/reservations/${reservationId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        params: {
+          include: 'properties,guest'
+        },
+        timeout: 8000
+      });
+
+      return response.data?.data || response.data;
+    });
+  }
+
+  /**
    * Send a message to a reservation (the method that the original working
    * auto-reply-sqs Lambda used successfully).
    */

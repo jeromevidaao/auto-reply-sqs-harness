@@ -198,6 +198,38 @@ export const handler = async (event, context) => {
     msgContext.guestName = extractedGuestName;
   }
 
+  // === Early enrichment from full reservation details (for reliable petCount, checkIn/Out, listing on NEW_RESERVATION_WELCOME etc) ===
+  // Message webhooks after booking often lack the full guests.pet_count etc that reservation.created provided in the old system.
+  // Fetching here ensures the agent + welcome logic has accurate hasPets/petCount for the critical pet fee mismatch rules.
+  const reservationIdForEnrich = msgContext.reservationId || msgContext.reservation_id || msgContext.reservation?.id;
+  if (reservationIdForEnrich) {
+    try {
+      const enrichClient = new HospitableClient();
+      const fullRes = await enrichClient.getReservation(reservationIdForEnrich).catch((e) => {
+        console.warn('[Handler] Reservation enrichment fetch failed (non-fatal):', e?.message || e);
+        return null;
+      });
+      if (fullRes) {
+        if (!msgContext.checkIn && fullRes.check_in) msgContext.checkIn = fullRes.check_in;
+        if (!msgContext.checkOut && fullRes.check_out) msgContext.checkOut = fullRes.check_out;
+        if (fullRes.guests) {
+          const pc = Number(fullRes.guests.pet_count || 0);
+          if (msgContext.hasPets == null) msgContext.hasPets = pc > 0;
+          if (msgContext.petCount == null) msgContext.petCount = pc;
+        }
+        if (fullRes.properties?.[0]) {
+          if (!msgContext.listingId) msgContext.listingId = fullRes.properties[0].id;
+          if (!msgContext.propertyName) msgContext.propertyName = fullRes.properties[0].name;
+        }
+        if (fullRes.arrival_date && !msgContext.checkIn) msgContext.checkIn = fullRes.arrival_date; // some shapes
+        if (fullRes.departure_date && !msgContext.checkOut) msgContext.checkOut = fullRes.departure_date;
+        console.log('[Handler] Enriched msgContext from reservation details (pet/dates/listing for welcome & pet logic)');
+      }
+    } catch (e) {
+      console.warn('[Handler] Early reservation enrichment skipped (non-fatal):', e?.message || e);
+    }
+  }
+
   // === ALWAYS log full sender diagnostics for debugging classification issues ===
   // Per instruction: host vs guest classification must be based ONLY on sender metadata,
   // never on message content/body.

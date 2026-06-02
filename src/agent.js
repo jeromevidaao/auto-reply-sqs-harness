@@ -238,8 +238,29 @@ export class GuestMessagingAgent {
     if (context.checkIn) lines.push(`- Check-in: ${context.checkIn}`);
     if (context.checkOut) lines.push(`- Check-out: ${context.checkOut}`);
     if (context.listingId) lines.push(`- Listing ID: ${context.listingId}`);
-    if (context.hasPets) lines.push(`- Pets: ${context.petCount || 'yes'}`);
+    const pc = (context.petCount != null ? context.petCount : (context.hasPets ? 1 : 0));
+    lines.push(`- Pets: ${context.hasPets ? 'yes' : 'no'} (count: ${pc})`);
+    if (context.hasPets != null) lines.push(`- hasPets (from reservation): ${context.hasPets}`);
     if (context.propertyName) lines.push(`- Property: ${context.propertyName}`);
+
+    // Computed stay timing + days (helps NEW_RESERVATION_WELCOME follow exact timing rules for check-in instructions)
+    // Uses NY calendar day for "today" to match greeting / old system behavior.
+    let stayTiming = 'unknown';
+    let daysUntilCheckIn = null;
+    if (context.checkIn) {
+      try {
+        const nyTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+        const today = new Date(nyTodayStr + 'T00:00:00');
+        const ci = new Date((context.checkIn || '').slice(0,10) + 'T00:00:00');
+        daysUntilCheckIn = Math.round((ci - today) / (1000 * 3600 * 24));
+        const todayStr = nyTodayStr;
+        if (context.checkIn <= todayStr && (context.checkOut || '') > todayStr) stayTiming = 'current';
+        else if (context.checkIn > todayStr) stayTiming = 'future';
+        else stayTiming = 'past';
+      } catch (e) {}
+    }
+    if (daysUntilCheckIn !== null) lines.push(`- Days until check-in: ${daysUntilCheckIn}`);
+    lines.push(`- Stay timing: ${stayTiming} (current = check-in day or in-stay; future = upcoming)`);
 
     if (context.conversationHistory?.length) {
       lines.push('- Recent conversation (newest last):');

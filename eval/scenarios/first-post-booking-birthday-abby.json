@@ -1,0 +1,36 @@
+{
+  "id": "first-post-booking-birthday-abby",
+  "description": "First message from guest after confirmed booking: casual intro mentioning birthday trip to Portland. This is the very first auto-reply from host in the thread (empty history). Must treat as NEW_RESERVATION_WELCOME and provide rich informative 'first page' reply similar to old system: time greeting + name, warm welcome, check-in/parking/self-check-in info, 3-days instructions phrasing (future stay), no minimal 'let me know if questions'. No pets in message or res. Real production case where reply was too curt.",
+  "guestMessage": "Hello! We are booking this Airbnb to celebrate my boyfriend and his twin’s 30th birthday! We look forward to exploring Portland! Thanks!",
+  "context": {
+    "guestName": "Abby",
+    "checkIn": "2026-06-10",
+    "checkOut": "2026-06-12",
+    "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "propertyName": "Cozy Central 2 Bd Apt",
+    "bookingTimestamp": "2026-06-02T10:00:00Z",
+    "hasPets": false,
+    "petCount": 0,
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": ["NEW_RESERVATION_WELCOME"],
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "let me know if you have any questions",
+      "happy to hear about the birthday trip",
+      "feel free to book"
+    ],
+    "requiredPhrases": [
+      "self-check-in",
+      "4pm",
+      "parking",
+      "detailed check-in instructions 3 days before"
+    ],
+    "mustStartWithGreeting": true,
+    "greetingMustUseName": "Abby",
+    "mustAcknowledgeBirthday": true,
+    "noPetMention": true
+  },
+  "notes": "Locks rich post-booking first-reply behavior. Must greet + name. Must include core logistics (self-check-in, 4pm, parking spot, 3-day instructions for future stay). Must not be curt/minimal. Pet logic not triggered (no mention, petCount=0). Name is simple 'Abby'."
+}
