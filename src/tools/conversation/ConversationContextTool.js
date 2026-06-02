@@ -97,6 +97,27 @@ export class ConversationContextTool extends BaseTool {
       }
     }
 
+    // Host reactions on the *current* guest message (provided in webhook payload for created/updated events).
+    // If host manually reacted (e.g. thumbs up to a "thank you"), treat as recent host activity to suppress
+    // auto "you're welcome" style replies (avoids double-acknowledgment when host has already engaged manually).
+    const incomingReactions = context.reactions || [];
+    if (Array.isArray(incomingReactions) && incomingReactions.length > 0) {
+      const hasHostReaction = incomingReactions.some(r => {
+        const st = (r.sender_type || (r.sender && r.sender.type) || '').toLowerCase();
+        return st === 'host';
+      });
+      if (hasHostReaction) {
+        result.hasRecentHostMessage = true;
+        result.minutesSinceLastHostMessage = 0.1;
+        result.traces.push('Host reaction (e.g. thumbs up) present on this guest message — recent host activity');
+        if (/thank|thanks|appreciate|amazing|great|cool/i.test(input || '')) {
+          result.duplicateRisk = true;
+          result.duplicateReason = 'Host already reacted manually to this thank-you style message; suppress auto ack';
+          result.traces.push('Host reaction on thank-you/ack message — will bias toward no reply');
+        }
+      }
+    }
+
     // === Greeting context analysis (first host message, first-of-day, recent greeting for suppression) ===
     // Uses live messages if fetched, else falls back to provided conversationHistory.
     // This powers smart "greet only on first message of day / first host reply" behavior.

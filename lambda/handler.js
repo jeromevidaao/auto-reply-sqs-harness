@@ -137,6 +137,9 @@ export const handler = async (event, context) => {
               sender: inner.data.sender || { type: inner.data.sender_type },
               // Preserve raw top-level webhook id for dedup (e.g. "a1e74780-...")
               _webhookId: inner.id || null,
+              // Preserve action/triggers for reaction update detection etc.
+              action: inner.action || null,
+              triggers: inner.triggers || null,
             }
           };
         }
@@ -160,6 +163,9 @@ export const handler = async (event, context) => {
           sender_type: outer.data.sender_type || outer.data.sender?.type,
           sender: outer.data.sender || { type: outer.data.sender_type },
           _webhookId: outer.id || null,
+          // Preserve action/triggers for reaction update detection etc.
+          action: outer.action || null,
+          triggers: outer.triggers || null,
         }
       };
     }
@@ -186,6 +192,8 @@ export const handler = async (event, context) => {
     user_name: msgContext.user?.name,   // account owner context only (for diagnostics)
     source: msgContext.source,
     _webhookId: msgContext._webhookId,
+    action: msgContext.action,
+    triggers: msgContext.triggers,
   }, null, 2));
 
   // === Host / Guest classification for the *current incoming message* ===
@@ -208,6 +216,20 @@ export const handler = async (event, context) => {
     return {
       statusCode: 200,
       body: JSON.stringify({ skipped: true, reason: 'Host message (sender metadata only)' })
+    };
+  }
+
+  // Skip "message.updated" events that are purely host reaction additions (e.g. manual thumbs up on a guest message).
+  // These are not new guest content; the guest message was already (or will be) handled via its .created event.
+  // Without this, Hospitable emits both "message.created" and "message.updated" (with triggers:["reaction_added"])
+  // for the same guest text + host reaction, leading to duplicate auto-replies (e.g. double "You're welcome").
+  const action = msgContext.action || null;
+  const triggers = Array.isArray(msgContext.triggers) ? msgContext.triggers : (msgContext.triggers ? [msgContext.triggers] : []);
+  if (action === 'message.updated' && triggers.includes('reaction_added')) {
+    console.log(`[Handler] ⛔ Ignoring message.updated with reaction_added (host manually reacted to guest message; not new input for auto-reply).`);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ skipped: true, reason: 'reaction_added update' })
     };
   }
 
@@ -234,6 +256,8 @@ export const handler = async (event, context) => {
     airbnb_conversation_id: msgContext.airbnb_conversation_id,
     reservationId: msgContext.reservationId || msgContext.reservation_id,
     sender_type: msgContext.sender_type || msgContext.sender?.type,
+    action: msgContext.action,
+    triggers: msgContext.triggers,
   }, null, 2));
 
   console.log('\n💬 GUEST MESSAGE:');
@@ -253,25 +277,40 @@ export const handler = async (event, context) => {
 
   // === Idempotency / Dedup using DynamoDB (prevents double sends from SQS redeliveries + duplicate webhooks) ===
   // Uses the stable top-level webhook "id" from the Hospitable payload.
+  // Additionally, when a platform message id is present (data.id / platform_id), we dedup on the
+  // *guest message itself* (composite key). This catches the case where Hospitable emits two distinct
+  // events for the same guest communication: "message.created" + "message.updated" (e.g. when host adds
+  // a reaction like thumbs up shortly after the guest sends "thank you"). Both events carry the same
+  // guest body and message id, so without message-level dedup we process the guest text twice and send
+  // duplicate "You're welcome" acks. Webhook id alone is not sufficient (different event ids).
   const webhookIdForDedup = msgContext._webhookId || msgContext.id || null;
-  if (webhookIdForDedup) {
+  // Prefer a stable message identifier for the *guest content* (platform_id or the inner data.id for the message).
+  // This is present on both "message.created" and "message.updated" events for the same guest text,
+  // allowing us to dedup across the multiple events Hospitable emits for one guest message + host reaction.
+  const messagePlatformId = msgContext.platform_id || (msgContext.id && typeof msgContext.id === 'string' && !msgContext.id.includes('-') ? msgContext.id : (typeof msgContext.id === 'number' ? msgContext.id : null));
+  const convForDedup = msgContext.conversation_id || msgContext.conversationId || msgContext.reservation_id || msgContext.reservationId || null;
+  let dedupKey = webhookIdForDedup;
+  if (messagePlatformId && convForDedup) {
+    dedupKey = `guestmsg:${convForDedup}:${messagePlatformId}`;
+  }
+  if (dedupKey) {
     try {
       const ttl = Math.floor(Date.now() / 1000) + (2 * 60 * 60); // 2h TTL
       await ddbClient.send(new PutCommand({
         TableName: 'airbnb-harness-dedup',
         Item: {
-          webhookId: webhookIdForDedup,
+          webhookId: dedupKey,
           ttl,
           processedAt: new Date().toISOString(),
           reservationId: msgContext.reservationId || msgContext.reservation_id || null
         },
         ConditionExpression: 'attribute_not_exists(webhookId)'
       }));
-      console.log(`[Handler] Dedup: webhookId ${webhookIdForDedup} recorded (first processing)`);
+      console.log(`[Handler] Dedup: dedupKey ${dedupKey} recorded (first processing)`);
     } catch (e) {
       if (e.name === 'ConditionalCheckFailedException') {
-        console.log(`[Handler] ⛔ DEDUP SKIP: webhookId ${webhookIdForDedup} already processed (SQS redelivery / duplicate webhook protection)`);
-        return { statusCode: 200, body: JSON.stringify({ skipped: true, reason: 'Duplicate webhook (dedup)' }) };
+        console.log(`[Handler] ⛔ DEDUP SKIP: dedupKey ${dedupKey} already processed (SQS redelivery / duplicate webhook / duplicate guest message event (created+updated) protection)`);
+        return { statusCode: 200, body: JSON.stringify({ skipped: true, reason: 'Duplicate webhook or guest message (dedup)' }) };
       }
       console.warn('[Handler] Dedup check non-fatal (proceeding):', e.message);
     }
