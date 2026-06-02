@@ -8,7 +8,7 @@
 - When it includes thanks ("Thanks again...", "thanks for your host", dishwasher mention, etc.), prefer THANK_YOU_MESSAGE category for the "You're welcome" style reply. Do not escalate or use OTHER_MESSAGE.
 
 **PACK_AND_PLAY_BRAND**:
-- "We use the Graco Pack and Play. It is already set up and ready to use in the unit — all units have one pre-placed for guests."
+- See the full definition and rules in misc-questions.md (use for any direct crib/Pack-and-Play ask, even on first post-booking messages; pre-placed fact only; never "upon request" language). When first-host greeting instructions apply, prefix with greeting + name but keep this as the primary category.
 
 **COOKING_UTENSILS**:
 - Yes, we provide cooking utensils, cookware, dishware, a dishwasher, and a stove.

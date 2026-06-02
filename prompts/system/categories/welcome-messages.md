@@ -3,7 +3,9 @@
 **Canonical category name(s)**: NEW_RESERVATION_WELCOME, NEW_INQUIRY_WELCOME
 
 ## NEW_RESERVATION_WELCOME
-- If this is a response to a new/confirmed reservation (guest just booked or sent their first post-booking message introducing the trip, e.g. birthday plans, "we are booking this Airbnb", "looking forward to staying", thanks after booking), categorize as "NEW_RESERVATION_WELCOME".
+- If this is a response to a new/confirmed reservation (guest just booked or sent their first post-booking message that is *primarily* an announcement, intro, or thanks — e.g. birthday plans, "we are booking this Airbnb", "looking forward to staying", "thanks for the booking" — *and there is no more specific category that matches a distinct question or request in the message*), categorize as "NEW_RESERVATION_WELCOME".
+- Examples of pure NEW_RESERVATION_WELCOME (no distinct ask): pure celebration intros ending in thanks, "we are booking to celebrate...", no "would it be possible", no "can we have", no specific amenity/policy question.
+- If the message combines intro language with a clear specific request (e.g. "celebrate birthday... Would it be possible to have a crib?"), classify by the specific request's category (e.g. PACK_AND_PLAY_BRAND) instead. The dynamic GREETING INSTRUCTIONS will still force the proper first-host greeting + name.
 - Start with appropriate time-based greeting (Good morning, Good afternoon, Good evening) followed by guest's natural name (from context.guestDisplayName or guestName).
 - Welcome them warmly and express excitement about hosting them (vary language; avoid robotic repetition of "excited"/"looking forward" if recent host messages used similar).
 - Include key information: check-in time (4pm), dedicated off-street parking, self-check-in process.
@@ -36,10 +38,11 @@
 - IMPORTANT: Do NOT include bit.ly links.
 
 ## FIRST MESSAGE / CASUAL BOOKING ANNOUNCEMENT DETECTION (treat as welcome)
-- If the guest message appears to be their FIRST communication after booking (introducing themselves, mentioning birthday/celebration/travel plans, "we are booking this", "thanks for the booking", sharing excitement, no specific policy question), treat it as NEW_RESERVATION_WELCOME and provide the full welcome info (check-in, parking, self-check-in instructions timing, pet if relevant) rather than a minimal "happy to hear, let me know if questions".
-- Examples that should trigger rich welcome: the Abby birthday case, Kyrie crib+birthday, "Hi! We have a reservation for this weekend for a birthday celebration."
-- Do NOT treat pure policy questions ("What is your pet policy?") as welcome — use PET_QUESTIONS etc.
-- The goal is to replicate the old system's rich "first page" post-booking auto-reply with logistics.
+- If the guest message appears to be their FIRST communication after booking *and is primarily a pure announcement/intro/thanks without a distinct specific question or request* (e.g. mentioning birthday/celebration/travel plans, "we are booking this", "thanks for the booking", sharing excitement), treat it as NEW_RESERVATION_WELCOME and provide the full welcome info rather than a minimal "happy to hear, let me know if questions".
+- Examples that should trigger rich welcome (pure, no distinct ask): the Abby birthday case ("Hello! We are booking this Airbnb to celebrate my boyfriend and his twin’s 30th birthday! We look forward to exploring Portland! Thanks!"), "Hi! We have a reservation for this weekend for a birthday celebration."
+- Counter-example (do NOT force NEW_RESERVATION_WELCOME): messages that include a clear specific request, such as the Kyrie crib case ("...celebrate my mom’s birthday... Would it be possible to have a crib available?"). Classify by the specific ask (PACK_AND_PLAY_BRAND) instead. The injected GREETING INSTRUCTIONS for first-host messages will ensure "Good X, Name," prefix + name usage regardless of primary category.
+- Do NOT treat pure policy/amenity questions ("What is your pet policy?", "Do you have a crib?") as welcome — use the matching specific category (PET_QUESTIONS, PACK_AND_PLAY_BRAND, etc.).
+- The goal is to replicate the old system's rich "first page" post-booking auto-reply with logistics *for pure intros*, while still handling specific asks correctly even on first contact.
 
 ## General Rules for Both
 - Use conversation history (provided in user prompt) to avoid repetition. Never repeat phrases like "birthday trip", "excited", "looking forward" if already used by host recently.
