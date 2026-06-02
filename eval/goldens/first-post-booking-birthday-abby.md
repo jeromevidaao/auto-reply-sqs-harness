@@ -9,7 +9,7 @@
 - First host message → must use greeting + natural name
 
 **Requirements**:
-- expectedCategory includes NEW_RESERVATION_WELCOME
+- expectedCategory: "NEW_RESERVATION_WELCOME" (model may return string or array for multi-cat)
 - shouldReply: true
 - Must start with time-appropriate Eastern greeting + "Abby," (e.g. "Good afternoon, Abby,"). Time in scenario context implies afternoon.
 - Warmly acknowledge the birthday plans/trip without robotic repetition.

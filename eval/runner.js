@@ -74,11 +74,13 @@ async function main() {
     let maxScore = 0;
     const notes = [];
 
-    // Category check
+    // Category check (handles string or array for both expected and received, as model can return array for multi-category)
     if (rubric.expectedCategory) {
       maxScore++;
-      if (result.typeOfMessageReceived === rubric.expectedCategory || 
-          (Array.isArray(result.typeOfMessageReceived) && result.typeOfMessageReceived.includes(rubric.expectedCategory))) {
+      const expectedCats = Array.isArray(rubric.expectedCategory) ? rubric.expectedCategory : [rubric.expectedCategory];
+      const receivedCats = Array.isArray(result.typeOfMessageReceived) ? result.typeOfMessageReceived : [result.typeOfMessageReceived];
+      const catMatch = expectedCats.some(ec => receivedCats.includes(ec) || result.typeOfMessageReceived === ec);
+      if (catMatch) {
         score++;
       } else {
         notes.push(`Expected category ${rubric.expectedCategory}, got ${result.typeOfMessageReceived}`);

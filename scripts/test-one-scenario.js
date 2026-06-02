@@ -91,8 +91,9 @@ async function main() {
   const rubric = scenario.rubric || {};
   console.log('\n=== RUBRIC CHECK (local) ===');
   if (rubric.expectedCategory) {
-    const match = result.typeOfMessageReceived === rubric.expectedCategory ||
-      (Array.isArray(result.typeOfMessageReceived) && result.typeOfMessageReceived.includes(rubric.expectedCategory));
+    const expectedCats = Array.isArray(rubric.expectedCategory) ? rubric.expectedCategory : [rubric.expectedCategory];
+    const receivedCats = Array.isArray(result.typeOfMessageReceived) ? result.typeOfMessageReceived : [result.typeOfMessageReceived];
+    const match = expectedCats.some(ec => receivedCats.includes(ec) || result.typeOfMessageReceived === ec);
     console.log(`Category match: ${match ? '✅' : '❌'} (expected ${rubric.expectedCategory}, got ${result.typeOfMessageReceived})`);
   }
   if (rubric.shouldReply !== undefined) {

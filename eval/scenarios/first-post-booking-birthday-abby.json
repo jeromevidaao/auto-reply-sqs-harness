@@ -14,7 +14,7 @@
     "conversationHistory": []
   },
   "rubric": {
-    "expectedCategory": ["NEW_RESERVATION_WELCOME"],
+    "expectedCategory": "NEW_RESERVATION_WELCOME",
     "shouldReply": true,
     "forbiddenPhrases": [
       "let me know if you have any questions",
