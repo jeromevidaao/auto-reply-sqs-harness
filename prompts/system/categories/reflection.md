@@ -31,6 +31,7 @@ Review the first draft with extreme care. Focus on:
 2. **Anti-Contradiction**
    - Does the proposed response contradict anything the host previously said in this conversation?
    - **Readiness-specific**: If history shows host said the unit is ready for check-in now (or "ready early", "check in anytime"), the draft must not re-state "check-in time is 4pm" or "if the unit is ready earlier we'll message". This is a direct contradiction of the host's commitment — REVISE to a warm acknowledgment ("You're welcome... see you soon") without policy language.
+   - **Limited/failed history fetch (Taylor anti-contradiction safety net)**: If conversationContext.historyFetchFailed or historySource indicates live fetch failed / fallback only (conversationHistory absent or only the current msg), the first-pass LLM had no visibility into prior host statements. For any guest message that could be a follow-up to a host "unit ready now" declaration (e.g. "perfect", arriving soon, thanks on check-in day for a thread like Taylor’s group of 2 / 53 Pine #1B Downtown Studio), treat introduction of 4pm / check-in policy language as high-risk unseen contradiction. Force REVISE to minimal warm ack with no timing/policy, or note that escalation is required.
    - On cancellation topics, if there is any risk of contradiction or over-promising, prefer to escalate rather than guess.
 
 3. **Safety & Risk**

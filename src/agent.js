@@ -273,6 +273,31 @@ export class GuestMessagingAgent {
       });
     }
 
+    // === CONVERSATION HISTORY STATUS (anti-silent-failure for Taylor-style anti-contradiction) ===
+    // Ensures the first-pass LLM (and later reflection/judge) ALWAYS knows whether it has the "full" recent thread
+    // or is flying blind on prior host statements (e.g. the "We are pleased to let you know that the unit is ready
+    // for you to check in now" message in the 9AM Taylor thread for 53 Pine #1B).
+    const hTraces = context.conversationTraces || {};
+    if (hTraces.historyFetchFailed || hTraces.historySource === 'live_fetch_failed' || hTraces.historySource === 'fallback_used_after_failure') {
+      lines.push('');
+      lines.push('⚠️⚠️ CRITICAL: LIVE CONVERSATION HISTORY FETCH FAILED OR INCOMPLETE');
+      lines.push('   Source: ' + (hTraces.historySource || 'unknown') + ', count=' + (hTraces.recentMessageCount || 0));
+      lines.push('   The /conversations/{id}/messages call to Hospitable failed (or no conversationId was in the event).');
+      lines.push('   conversationHistory above (if present) is ONLY from the incoming webhook payload — which for guest message.created events typically contains ONLY the current message, NOT prior host or guest turns.');
+      lines.push('   Therefore you have ZERO visibility into prior host statements such as explicit unit readiness ("unit is ready for you to check in now"), prior answers, or recent greetings.');
+      lines.push('   FOR THIS RESPONSE:');
+      lines.push('   - NEVER mention "4pm", "check-in time is 4pm", "If the unit is ready earlier we\'ll message you right away", "Check-in starts at 4PM", or any default policy timing.');
+      lines.push('   - If the current guest message sounds like a follow-up (thanks, "perfect", "arriving in about an hour", "we will be there soon") after a possible prior host readiness or ack message, use ONLY a short warm acknowledgment: "You\'re welcome, [Name]!", "Got it — see you then.", "Perfect, safe travels."');
+      lines.push('   - Do not add any new information about timing, self-check-in process details, or policy.');
+      lines.push('   - When in doubt about whether a prior commitment was made, do NOT reply (let it escalate) rather than risk contradicting the real thread history that we failed to fetch.');
+      lines.push('   This protects exactly the Taylor 9AM / 53 Pine #1B class of bug reported by the user.');
+    } else if (context.conversationHistory?.length) {
+      const src = hTraces.historySource || 'live_fetched_or_provided';
+      lines.push(`   (History source: ${src}; ${context.conversationHistory.length} messages fetched/passed for context. The most recent prior host messages (including any readiness declarations) are visible above.)`);
+    } else {
+      lines.push('- No prior conversation history available in this context (new thread or fetch not performed). Assume no prior host commitments visible; avoid introducing 4pm/check-in policy language on arrival-related messages unless the current guest message explicitly asks about timing.');
+    }
+
     // Rich traces for higher quality first-pass decisions (pre-approval, recent host messages, etc.)
     if (context.conversationTraces) {
       lines.push('- Conversation safety traces:');
@@ -298,6 +323,9 @@ export class GuestMessagingAgent {
       }
       if (context.conversationTraces.traces?.length) {
         context.conversationTraces.traces.forEach(t => lines.push(`  • ${t}`));
+      }
+      if (context.conversationTraces.historySource) {
+        lines.push(`  • History source: ${context.conversationTraces.historySource} (count=${context.conversationTraces.recentMessageCount || 0})${context.conversationTraces.historyFetchFailed ? ' — FETCH FAILED, see CRITICAL block above' : ''}`);
       }
 
       // Greeting / first-contact-of-day signals (critical for natural "Good morning Name," style on first host reply or new day)
@@ -434,7 +462,13 @@ export class GuestMessagingAgent {
         }
         if (traces.duplicateRisk) summary.push('duplicate risk');
         if (traces.preApprovalDetected) summary.push('pre-approval detected');
+        if (traces.historyFetchFailed) summary.push('HISTORY FETCH FAILED');
         if (traces.traces?.length) summary.push(...traces.traces);
+
+        // Always log the history fetch status explicitly (prevents "silent" failures for history-dependent logic like Taylor anti-contradiction).
+        const histSrc = traces.historySource || 'unknown';
+        const histCount = traces.recentMessageCount || (traces.recentConversationMessages?.length || 0);
+        console.log(`[Agent] → Conversation history status: source=${histSrc}, count=${histCount}${traces.historyFetchFailed ? ' (FAILED — see CRITICAL log above)' : ''}`);
 
         if (summary.length > 0) {
           console.log('[Agent] → Early trace enrichment complete:', summary.join(' | '));
@@ -600,6 +634,11 @@ export class GuestMessagingAgent {
     if (tracesForHistory.recentConversationMessages && tracesForHistory.recentConversationMessages.length > 0) {
       enrichedContext.conversationHistory = tracesForHistory.recentConversationMessages;
       console.log('[Agent] → Populated conversationHistory from live fetch (' + tracesForHistory.recentConversationMessages.length + ' messages) for LLM prompt + judge');
+    } else {
+      // Always log when we did NOT get live history (the silent-fail case the user asked to prevent).
+      const src = tracesForHistory.historySource || 'none';
+      const providedLen = (enrichedContext.conversationHistory || []).length;
+      console.log(`[Agent] → No live conversationHistory populated into prompt context (historySource=${src}, provided in event context: ${providedLen} msgs). For Taylor-style threads this means prior host "unit ready" statements may be invisible unless explicitly in the webhook payload (rare).`);
     }
 
     // === Apply early safety decisions from traces (old production fast paths) ===

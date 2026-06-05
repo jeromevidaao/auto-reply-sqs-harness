@@ -42,12 +42,24 @@ This rule exists because the harness directly affects live guest replies and the
   - Rule: "If we (host) told them the unit is ready, the unit is ready — do not contradict a previous statement. Conversation history + traces must prevent it."
   - Judge was augmented with specific rule + example for this class of contradiction.
 
+- **No silent failure to fetch conversation history (user requirement for Taylor threads)**: The primary source of "full recent history" (including the critical prior host readiness message) in production is the live call inside ConversationContextTool: `hospitableClient.getConversationMessages(conversationId, 20)` using the conversation_id from the SQS/webhook payload. This list is then copied to conversationHistory for the prompt + judge/reflection.
+  - The ConversationContextTool *always* sets `historySource`, `historyFetchFailed`, `recentMessageCount`, and a clear trace (success or "Live message history fetch failed (using fallback)").
+  - On any fetch failure the catch does a loud `console.error` with "CRITICAL HISTORY FETCH FAILURE (anti-contradiction / ... at risk)" + the exact Taylor example + the named thread "Taylor’s group of 2 Jun 5 – 6 · 1 night 53 Pine #1B · Downtown Studio, Parking with EV charger".
+  - `_runCoreSafetyTraces` and the post-enrich block in handleMessage *always* log the history status (`[Agent] → Conversation history status: source=...` and the "No live conversationHistory populated" case).
+  - `_buildUserPrompt` now *always* emits a prominent "CONVERSATION HISTORY STATUS / FETCH WARNING" block (with the full safety rules + Taylor-specific instructions) when historyFetchFailed or limited visibility. The LLM sees it on every first-pass.
+  - The same flags flow (via enrichedContext + conversationTraces) into reflection and judge contexts.
+  - Judge (rule 3) and reflection now have explicit "Limited / failed history fetch case" sub-rules + issue examples that force REVISE/REJECT on 4pm/policy language for plausible follow-ups when we don't have the prior thread.
+  - Base prompt also calls it out.
+  - Eval scenario `host-said-unit-ready-guest-thanks` (and its golden) documents the expectation: in prod the live fetch must succeed with the prior host msg visible (or the WARNING + judge rules must catch the bad case).
+  - Result: there is no longer a silent path where we operate without the history and accidentally contradict a prior host statement. Every relevant log line, trace, prompt section, and second-pass reviewer knows the fetch status.
+  - When adding similar history-dependent rules in future, follow the same pattern (dedicated fields on the context tool result, loud error on failure, explicit status block in first-pass prompt, judge/reflection sub-rule).
+
 ## Adding / Changing HVAC Behavior
 - Update language in `src/tools/hvac/ThermostatTool.js` + `prompts/system/base.md` + `prompts/system/categories/thermostat.md`.
 - Update corresponding goldens + scenarios under `eval/`.
 - Update the test in `tests/basic.test.js` if the warning strings change.
 - For live behavior changes: edit `src/clients/KumoCloudClient.js` (mappings, login, get/set, ensureConsistent...) and `src/tools/hvac/HeatPumpTool.js` (analysis + auto-fix decision + snippet).
-- Always add or update an eval scenario that exercises the exact guest wording from the real incident (e.g. "We have both of the remotes turned on and set to these settings, still no air..."). Same for host-readiness contradictions: add `host-said-unit-ready-guest-thanks.json` style scenario + golden with conversationHistory containing the contradicting host statement + forbiddenPhrases for 4pm language.
+- Always add or update an eval scenario that exercises the exact guest wording from the real incident (e.g. "We have both of the remotes turned on and set to these settings, still no air..."). Same for host-readiness contradictions: add `host-said-unit-ready-guest-thanks.json` style scenario + golden with conversationHistory containing the contradicting host statement + forbiddenPhrases for 4pm language. The scenario/golden must also document the history fetch contract (live_fetched with the prior host msg for the named Taylor thread, or the new WARNING block + judge limited-history rule must be exercised).
 - After change: full `npm test`, commit+push+verify as above.
 
 ## Other Standing Rules

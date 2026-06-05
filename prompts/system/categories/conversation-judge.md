@@ -19,6 +19,10 @@
 3. **Detect Contradiction with Previous Host Statements**
    - If the host has already said something about refunds, cancellations, early check-in, pet policy, etc., the new response must **not** contradict it.
    - **Specific readiness contradiction (new rule)**: If conversation history (or conversationContext.earlyUnitReadyOffered or lastHostMessagePreview / traces) shows a prior HOST message stating the unit is ready for check-in now (e.g. "the unit is ready for you to check in now", "ready for you to check in", "check in now", "you can check in anytime"), then the first-draft proposedResponse MUST NOT contain "4pm", "check-in time is 4pm", "Check-in starts at 4PM", "If the unit is ready earlier we'll message you right away", or any restatement of the default check-in policy. Such a response directly contradicts the host's prior commitment that the unit is ready — this is grounds for REVISE (or REJECT if severe). The correct behavior is a warm "You're welcome" + brief confirmation of arrival time if mentioned, using self-check-in / anytime language.
+   - **Limited / failed history fetch case (anti-silent-failure for Taylor threads)**: Check conversationContext.historyFetchFailed, historySource (e.g. 'live_fetch_failed', 'fallback_used_after_failure', 'no_conversation_id_in_context'), or whether conversationHistory is absent / contains only the current guest message. When history visibility is reduced or the live fetch failed:
+     - You do not have the prior host messages. The real thread may contain an explicit "unit is ready for you to check in now" (or similar) that the first-pass could not see.
+     - Therefore: if the guest message is a plausible follow-up (e.g. "Ahh that’s perfect!! We will be arriving in about an hour! Thank you" right after a readiness note, or any "thanks / perfect / arriving soon" on a check-in day), flag ANY proposedResponse that includes 4pm / "check-in time" / "If the unit is ready earlier" language as a high-risk unseen contradiction (even without seeing the exact prior text). This is exactly the 9AM Taylor / "53 Pine #1B · Downtown Studio" bug.
+     - Verdict should normally be REVISE (to a minimal warm "You're welcome, [Name]! See you in about an hour." with no policy) or REJECT if the draft is risky. Add an issue like "History fetch failed or limited; draft used default 4pm policy language that may contradict an unseen prior host readiness statement (Taylor anti-contradiction rule)".
    - When in doubt on cancellation topics, prefer to escalate rather than risk giving incorrect information.
 
 4. **Detect Overly Robotic or Formulaic Responses**
@@ -49,6 +53,8 @@
 
 **Note on Unit Readiness**: When a guest is asking about early check-in or arrival, the `UnitReadinessTool` result (if present) tells you whether the unit is expected to be ready. Use this information to give accurate guidance instead of defaulting to "4pm check-in". Additionally, conversationContext may now include `earlyUnitReadyOffered: true` + `earlyReadyMessagePreview` (populated by ConversationContextTool scanning host messages in history). When this is true (host explicitly told guest unit is ready), the draft MUST NOT re-introduce 4pm language — treat as already offered; flag any contradiction as REVISE/REJECT per rule 3 above.
 
+Also check `historyFetchFailed` / `historySource` in conversationContext: if the live history fetch failed, the first-pass had no visibility into prior host readiness statements even if they existed in the real thread (e.g. the Taylor "unit is ready for you to check in now" case for the 53 Pine #1B Downtown Studio booking). In that situation apply the limited-history sub-rule above — be conservative and require revise on any policy/timing language in follow-up messages.
+
 ## Output Format
 
 You must return **only** valid JSON in this exact structure:
@@ -61,7 +67,8 @@ You must return **only** valid JSON in this exact structure:
     "Repetitive phrasing: agent used very similar 'looking forward' language in the last two host messages",
     "Contradicts previous host statement about refunds",
     "Failed to direct guest to the official Airbnb policy page",
-    "Contradicts prior host statement that unit is ready for check-in now (draft re-stated 4pm policy)"
+    "Contradicts prior host statement that unit is ready for check-in now (draft re-stated 4pm policy)",
+    "History fetch failed or limited; draft used default 4pm policy language that may contradict an unseen prior host readiness statement (Taylor anti-contradiction rule for 53 Pine #1B thread)"
   ],
   "confidence": 0.0-1.0,
   "notes": "Brief explanation of the main problems and why you chose this verdict"

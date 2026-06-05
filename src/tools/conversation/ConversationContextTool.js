@@ -37,6 +37,11 @@ export class ConversationContextTool extends BaseTool {
       traces: [],
       // Greeting signals (for first-message-of-day / first-host-message greetings)
       greeting: null,
+      // History fetch status (CRITICAL to prevent silent failures for anti-contradiction, greeting suppression, etc.)
+      // 'live_fetched' | 'live_fetch_failed' | 'fallback_used' | 'not_attempted'
+      historySource: 'not_attempted',
+      historyFetchFailed: false,
+      recentMessageCount: 0,
     };
 
     // === Recent host message + duplicate risk check ===
@@ -46,11 +51,18 @@ export class ConversationContextTool extends BaseTool {
 
     if (this.hospitableClient && conversationId) {
       try {
-        const messages = await this.hospitableClient.getConversationMessages(conversationId, 10);
+        // Fetch a generous recent window so that "full history" for short/medium threads (e.g. the Taylor readiness + thanks case)
+        // and prior host statements are reliably included. We still only surface recent slices to the LLM to control tokens,
+        // but the raw list is used for scans (earlyUnitReadyOffered, greeting, duplicate, etc.) and copied to conversationHistory.
+        const messages = await this.hospitableClient.getConversationMessages(conversationId, 20);
         allRecentMessages = messages || [];
         recentHostMessages = allRecentMessages
           .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        result.historySource = 'live_fetched';
+        result.recentMessageCount = allRecentMessages.length;
+        result.traces.push(`Live history fetched successfully (${allRecentMessages.length} messages) — full recent thread available for anti-contradiction, greeting, and context scans`);
 
         // Make the live messages available to agent so _buildUserPrompt can include real conversationHistory.
         // This gives the LLM (and judge/reflection) visibility into prior host messages (e.g. recent "Good morning")
@@ -98,10 +110,21 @@ export class ConversationContextTool extends BaseTool {
             result.duplicateReason = 'We sent a "You\'re welcome" style reply very recently — strongly prefer not replying again';
             result.traces.push('Recent short host acknowledgment detected (anti double "You\'re welcome")');
           }
+        } else {
+          result.traces.push('Live history fetched but no host messages in the recent window');
         }
       } catch (e) {
+        result.historySource = 'live_fetch_failed';
+        result.historyFetchFailed = true;
+        result.recentMessageCount = 0;
+        const errDetail = e?.message || String(e);
         result.traces.push('Live message history fetch failed (using fallback)');
+        // Loud, non-silent error so CloudWatch + logs make it obvious when history (and thus anti-contradiction for Taylor-style cases) is at risk.
+        console.error(`[ConversationContextTool] CRITICAL HISTORY FETCH FAILURE (anti-contradiction / greeting / duplicate risk at risk): getConversationMessages failed for conversationId=${conversationId}. Error: ${errDetail}. The Taylor-style bug (host said "unit is ready for you to check in now" then auto-reply contradicted with 4pm) can recur if prior host messages are invisible. Will fall back to any context.conversationHistory provided in the event (usually empty for webhook guest messages).`);
       }
+    } else {
+      result.historySource = this.hospitableClient ? 'no_conversation_id_in_context' : 'no_hospitable_client';
+      result.traces.push(`History fetch not attempted (source=${result.historySource}) — relying on provided context.conversationHistory if any`);
     }
 
     // Host reactions on the *current* guest message (provided in webhook payload for created/updated events).
@@ -237,6 +260,18 @@ export class ConversationContextTool extends BaseTool {
         result.minutesSinceLastHostMessage = Math.round(((Date.now() - new Date(recentHost.created_at || Date.now()).getTime()) / (1000 * 60)) * 10) / 10;
         result.lastHostMessagePreview = (recentHost.body || '').substring(0, 180);
         result.traces.push(`Recent host message within ~10 min (fallback from history) - duplicate risk`);
+        if (result.historySource !== 'live_fetched') {
+          result.historySource = 'fallback_used';
+          result.recentMessageCount = context.conversationHistory.length;
+        }
+      }
+    }
+
+    // If we ended up with no live success and have provided history, mark source for visibility (used by prompt/judge warnings)
+    if (result.historySource === 'not_attempted' || result.historySource === 'live_fetch_failed') {
+      if (context.conversationHistory && context.conversationHistory.length > 0 && !result.recentConversationMessages) {
+        result.historySource = result.historyFetchFailed ? 'fallback_used_after_failure' : 'provided_only';
+        result.recentMessageCount = context.conversationHistory.length;
       }
     }
 

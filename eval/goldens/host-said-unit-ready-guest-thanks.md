@@ -18,6 +18,7 @@
 - May return array of categories including THANK_YOU_MESSAGE etc.
 - In full pipeline (handleMessage + reflection/judge) the Conversation Judge must flag any 4pm contradiction as REVISE/REJECT (per augmented conversation-judge.md rule 3 + note).
 - Traces must include earlyUnitReadyOffered (visible in logs / judge input).
+- History status: conversationTraces.historySource must be set (in this eval scenario it will be 'fallback_used' or 'provided_only' because no HospitableClient is wired; in real Lambda/handler it must be 'live_fetched' with recentMessageCount >=2 for the Taylor thread, or if fetch fails the WARNING block + judge limited-history rule must be active and prevent the bad 4pm reply). The mechanism (ConversationContextTool always-scan + agent population + prompt status block + judge) guarantees the relevant prior host message ("unit is ready for you to check in now" for the "Taylor’s group of 2 Jun 5 – 6 · 1 night 53 Pine #1B · Downtown Studio, Parking with EV charger" conversation) is passed down and acted on, with no silent failure path.
 
 **Good example responses** (natural variations OK):
 "You're welcome, Taylor! Perfect — we'll see you in about an hour."
