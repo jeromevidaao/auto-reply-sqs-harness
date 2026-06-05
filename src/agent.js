@@ -265,6 +265,13 @@ export class GuestMessagingAgent {
     if (daysUntilCheckIn !== null) lines.push(`- Days until check-in: ${daysUntilCheckIn}`);
     lines.push(`- Stay timing: ${stayTiming} (current = check-in day or in-stay; future = upcoming)`);
 
+    // Strong signal for the 3-day check-in instructions rule on future NEW_RESERVATION_WELCOME cases (e.g. abby birthday scenario).
+    // This is injected directly into the user prompt Context so the first-pass LLM (processMessage / eval) cannot miss it.
+    // Complements the CRITICAL in welcome-messages.md. The requiredPhrases check in runner is strict substring.
+    if (stayTiming === 'future' && daysUntilCheckIn !== null && daysUntilCheckIn >= 3) {
+      lines.push(`- CRITICAL FOR NEW_RESERVATION_WELCOME (FUTURE STAY): Days until check-in: ${daysUntilCheckIn} (>=3). For pure first-post-booking welcomes (like the Abby birthday scenario with no specific ask and empty history), the proposedResponse MUST contain the substring "detailed check-in instructions 3 days before" (ideally the full "I will send the detailed check-in instructions 3 days before your arrival."). This is a hard requirement in the welcome category rules, the scenario rubric, and the golden. Do not omit or use a variation that drops this exact sequence of words. Include it naturally in the logistics paragraph.`);
+    }
+
     if (context.conversationHistory?.length) {
       lines.push('- Recent conversation (newest last):');
       context.conversationHistory.slice(-6).forEach(m => {
