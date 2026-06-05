@@ -1,5 +1,5 @@
 {
-  "id": "kathryn-mixed-heat-pump-ac-no-air",
+  "id": "kathryn-mixed-ac-no-air",
   "description": "Real incident: Guest reports AC units 'on' but no air, confirms using the remotes correctly with settings. Root cause was mixed modes (one head on 'heat', others 'cool' + unit at 80F) on Apt 2 (Sunny). Auto-reply must use neutral language ('make sure using the remotes'), use live Kumo status, auto-set all 3 heads to consistent mode (auto/cool at 65), and tell guest what was found + what was fixed.",
   "guestMessage": "We have both of the remotes turned on and set to these settings, still no air coming from either unit all night",
   "context": {
@@ -18,7 +18,37 @@
         "sender_type": "host",
         "body": "Good morning, Kathryn, sorry you're having trouble with the AC. Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat."
       }
-    ]
+    ],
+    "heatPumpInfo": {
+      "detected": true,
+      "guestMessageRelevant": true,
+      "liveStatus": {
+        "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+        "unitCount": 3,
+        "summary": {
+          "modes": ["cool", "heat"],
+          "mixedModes": true,
+          "avgRoomTempF": 79
+        },
+        "units": [
+          {"operationMode": "cool", "roomTempF": 78, "power": 1},
+          {"operationMode": "heat", "roomTempF": 80, "power": 1},
+          {"operationMode": "cool", "roomTempF": 79, "power": 1}
+        ]
+      },
+      "actionTaken": {
+        "fixed": true,
+        "recommendedMode": "auto",
+        "recommendedTempF": 65,
+        "before": {
+          "summary": {
+            "modes": ["cool", "heat"]
+          }
+        },
+        "reason": "mixed modes or wrong season mode for complaint"
+      },
+      "suggestedResponseSnippet": "Kathryn, I checked the heat pumps for you (room ~79°F). Before, the modes were cool/heat. One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time across heads. I've set all the units to auto at 65°F now. It should start cooling down shortly (it should cool down). You can still adjust with the wall remotes if you want."
+    }
   },
   "rubric": {
     "expectedCategory": "THERMOSTAT_HEATPUMP",

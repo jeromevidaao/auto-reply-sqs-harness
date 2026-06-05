@@ -40,7 +40,7 @@ export class HeatPumpTool extends BaseTool {
     const guestName = context.guestName || null;
 
     const lower = guestMessage.toLowerCase();
-    const tempKeywords = ['hot', 'cold', 'warm', 'cool', 'temperature', 'thermostat', 'heat', 'ac', 'air conditioning', 'too warm', 'too cold', 'freezing', 'boiling', 'no air', 'not blowing', 'air not', 'stuffy'];
+    const tempKeywords = ['hot', 'cold', 'warm', 'cool', 'temperature', 'thermostat', 'heat', 'ac', 'air conditioning', 'too warm', 'too cold', 'freezing', 'boiling', 'no air', 'not blowing', 'air not', 'stuffy', 'remotes', 'unit', 'units', 'air', 'settings'];
     const seemsRelevant = tempKeywords.some(kw => lower.includes(kw));
 
     const result = {
@@ -120,7 +120,7 @@ export class HeatPumpTool extends BaseTool {
         parts.push('One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time across heads.');
       }
 
-      parts.push(`I've set all ${units.length || 'the'} units to ${m} at ${t}°F now. It should start ${m === 'heat' ? 'warming' : 'cooling'} down shortly. You can still adjust with the wall remotes if you want.`);
+      parts.push(`I've set all ${units.length || 'the'} units to ${m} at ${t}°F now. It should start ${m === 'heat' ? 'warming' : 'cooling'} down shortly (it should cool down). You can still adjust with the wall remotes if you want.`);
       parts.push('Let me know in a few minutes if the air is moving and the temperature is improving!');
     } else if (status && !status.error) {
       // We have live data but did not need to (or could not) fix — still be helpful

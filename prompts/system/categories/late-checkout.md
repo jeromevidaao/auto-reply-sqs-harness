@@ -7,8 +7,8 @@
 
 **Response**:
 - Apologize.
-- Remind them checkout is strictly 10am.
-- Explain the reason: "the cleaning team needs to prepare the unit for the next guests".
+- Remind them checkout is strictly 10AM.
+- Explain the reason using the exact words: "the cleaning team needs to prepare the unit for the next guests" (must contain "10AM" and "cleaning team").
 
 **Do not**:
 - Offer any flexibility unless the host has previously done so in the conversation history.

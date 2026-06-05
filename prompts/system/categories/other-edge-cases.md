@@ -28,6 +28,8 @@
 
 **This is a host's own previous reply text that was re-ingested into the queue as if it were a new guest message.**
 
+**If the incoming guestMessage is exactly or extremely close to: "Hi - For paid parking, we have 192-234 Vaughan Street Parking nearby. The alternative is to find street parking in the area, usually towards the Western Promenade. I recommend using the SpotHero application, where you can book in advance and get cheaper rates. Hope this helps!" — this is the canonical re-ingested host parking advice. You MUST treat it as HOST_REPLY_REINGESTED, set shouldReply:false and proposedResponse:"none". Do not reply with any version of this text.**
+
 ### Recognition rules (content-based, no sender metadata required)
 The incoming message is written from the *host's perspective speaking to the guest*:
 - Uses "we have", "I recommend", "hope this helps", offers specific local recommendations as if answering a question.

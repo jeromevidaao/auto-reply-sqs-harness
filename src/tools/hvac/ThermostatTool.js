@@ -82,7 +82,7 @@ export class ThermostatTool extends BaseTool {
 
     // Simple heuristic: did the guest message seem related to temperature?
     const lowerMsg = guestMessage.toLowerCase();
-    const tempKeywords = ['hot', 'cold', 'warm', 'cool', 'temperature', 'thermostat', 'heat', 'ac', 'air conditioning', 'too warm', 'too cold', 'freezing', 'boiling'];
+    const tempKeywords = ['hot', 'cold', 'warm', 'cool', 'temperature', 'thermostat', 'heat', 'ac', 'air conditioning', 'too warm', 'too cold', 'freezing', 'boiling', 'air', 'remotes', 'no air', 'blowing', 'unit', 'units', 'settings'];
     const seemsRelevant = tempKeywords.some(kw => lowerMsg.includes(kw));
 
     return {

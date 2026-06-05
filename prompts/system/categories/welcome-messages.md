@@ -21,8 +21,9 @@
 - Check-in / stay timing logic (derive "current" vs "future" from context.checkIn vs today in NY time; use provided context.checkIn, days until if available in traces/context):
   - If stay timing is "current" (check-in is today) AND (from readiness signals) unit ready on arrival: Say "The apartment is ready for you! You can check in anytime." — do NOT mention cleaning or 4PM.
   - If stay timing is "current" (check-in is today) AND unit not confirmed ready: Say "Check-in starts at 4PM. If the cleaning is completed before 4pm, we will message you."
-  - If stay timing is "future" AND days until check-in >= 3: Say "I will send the detailed check-in instructions 3 days before your arrival."
+  - If stay timing is "future" AND days until check-in >= 3: **CRITICAL - MUST INCLUDE**: Say exactly "I will send the detailed check-in instructions 3 days before your arrival." (or very close natural variation containing "detailed check-in instructions 3 days before").
   - If stay timing is "future" AND days until check-in < 3: Say "I will be sending you the detailed check-in instructions shortly."
+  - This sentence must appear in every pure NEW_RESERVATION_WELCOME for future stays >=3 days out. Do not omit it.
 - Never include bit.ly links (Hospitable API rejects them).
 - **ABSOLUTE RULE FOR same-day-turnover-unit-not-ready cases** (when context indicates turnover): Category MUST be exactly NEW_RESERVATION_WELCOME. Must contain: "the cleaning team is preparing the unit", "we will message you", "as soon as it's ready". Direct welcome-style reply even if unit not ready yet.
 
