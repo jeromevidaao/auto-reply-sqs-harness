@@ -14,6 +14,7 @@
 - Reply must include neutral reminder: "Please make sure you are using the heat pump remotes on the wall in each room" (or close) + reference the investigation + the fix: "I checked the heat pumps... I've set all the units to auto at 65°F now so it should cool down." (must contain "make sure you are using", "remotes on the wall", "I checked", "set all", "auto at 65", "cool down")
 - Acknowledge the remotes + offer to check settings if still issues.
 - Warm, practical, non-robotic.
+- **Anti-repetition of prior host advice**: In longer threads (see full Kathryn conversation), once host side (human or auto) has already communicated the basic "Nest does not control / use wall remotes" info, subsequent AC-related follow-ups must not re-state the same core reminder paragraph. Focus on the *new* symptom + any fresh live tool action/fix. The Conversation Judge (rule 3) + conversationTraces (priorHostHVACAdvice / repeatedInstructionRisk from ConversationContextTool) will detect semantic/near-verbatim repeats of host-sent instructions anywhere in history and require REVISE to strip the duplicate while preserving new value. Brief "as previously noted" reference is ok.
 
 **Rubric requirements**:
 - Contains "make sure you are using the ... remotes on the wall"

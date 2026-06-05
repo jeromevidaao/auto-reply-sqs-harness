@@ -34,6 +34,12 @@ Review the first draft with extreme care. Focus on:
    - **Limited/failed history fetch (Taylor anti-contradiction safety net)**: If conversationContext.historyFetchFailed or historySource indicates live fetch failed / fallback only (conversationHistory absent or only the current msg), the first-pass LLM had no visibility into prior host statements. For any guest message that could be a follow-up to a host "unit ready now" declaration (e.g. "perfect", arriving soon, thanks on check-in day for a thread like Taylor’s group of 2 / 53 Pine #1B Downtown Studio), treat introduction of 4pm / check-in policy language as high-risk unseen contradiction. Force REVISE to minimal warm ack with no timing/policy, or note that escalation is required.
    - On cancellation topics, if there is any risk of contradiction or over-promising, prefer to escalate rather than guess.
 
+3. **Anti-Repetition of Prior Host-Sent Factual Advice / Instructions**
+   - Does the draft re-state the same core information or advice that a prior HOST message (human or previous auto) already sent the guest in this thread?
+   - Kathryn thread example (full conversation provided by user): early host message gave the Nest/heat-pump-remotes control advice ("Please don't use the Nest thermostat—it doesn't control the AC. Use the heat pump remotes on the wall..."). Later, on a follow-up AC/timer complaint, the draft repeated a very similar core reminder ("Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control...") even while adding good "I checked... set all to auto at 65" content.
+   - If conversationTraces shows `priorHostHVACAdvice`, `priorHostInstructions`, or `repeatedInstructionRisk` (from ConversationContextTool scan of host messages), or you see overlapping text in history host entries vs. the proposedResponse, require REVISE: keep only the *new* value (live status, the fix action, response to the *new* symptom like "shut off after 30 min"), and strip or de-dupe the already-communicated basic advice. Brief reference ("as previously noted") is acceptable; full re-explanation is not.
+   - This is a general rule for any host-sent facts (controls, codes, policies, directions) that have already been delivered once in the thread. The judge is the primary enforcer, but reflection should also catch it for high-stakes categories.
+
 3. **Safety & Risk**
    - Is there any risk of over-promising, giving false hope, or creating liability?
 

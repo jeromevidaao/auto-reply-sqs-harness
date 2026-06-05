@@ -184,6 +184,60 @@ export class ConversationContextTool extends BaseTool {
       result.traces.push('Early unit ready declared by host in recent/prior message — never contradict with 4pm policy');
     }
 
+    // === Prior host factual instructions / advice (anti-repetition of host-sent information) ===
+    // User requirement (from full Kathryn thread): absolutely avoid repeating twice the same information sent by a host
+    // (human host or prior auto-reply). Example: host gave "don't use the Nest... use the heat pump remotes on the wall"
+    // advice early in the thread; later auto repeated near-identical "Please make sure you are using the heat pump remotes...
+    // the Nest thermostat does not control the AC or heat."
+    // The first-pass (via injected context), reflection, and especially the Conversation Judge must detect this and
+    // REVISE to remove/strip the duplicate core advice (keep new value like "I checked... set all to auto at 65" but
+    // do not re-deliver the already-communicated basic control reminder). "As I mentioned earlier" or omit entirely
+    // if the new draft is primarily adding fresh diagnostic/fix info.
+    // Scan uses the same host messages as readiness scan (live recentHostMessages preferred, fallback to conversationHistory host entries).
+    const hostMessagesForAdviceScan = recentHostMessages.length > 0
+      ? recentHostMessages
+      : (context.conversationHistory || []).filter(m => (m.sender_type === 'host' || (m.sender && m.sender.type === 'host')));
+    const hvacControlAdviceRegexes = [
+      /nest.*thermostat/i,
+      /heat pump remotes? on the wall/i,
+      /remotes? on the wall in each room/i,
+      /does not control the (AC|heat|temperature)/i,
+      /use the .*remotes? on the wall/i,
+      /make sure you are using.*(heat pump )?remotes?/i,
+      /please don't use the nest/i
+    ];
+    let priorHostHVACAdvice = null;
+    const priorHostInstructions = [];
+    for (const m of hostMessagesForAdviceScan) {
+      const body = (m.body || m.text || '');
+      const lower = body.toLowerCase();
+      if (hvacControlAdviceRegexes.some(re => re.test(lower))) {
+        if (!priorHostHVACAdvice) {
+          priorHostHVACAdvice = body.substring(0, 220);
+        }
+        priorHostInstructions.push({
+          preview: body.substring(0, 160),
+          approxTime: m.created_at || m.timestamp || null
+        });
+        // continue to collect a couple if multiple
+        if (priorHostInstructions.length >= 2) break;
+      }
+    }
+    result.priorHostHVACAdvice = priorHostHVACAdvice;
+    result.priorHostInstructions = priorHostInstructions;
+    if (priorHostHVACAdvice) {
+      result.traces.push('Prior host HVAC/control advice already given in thread (e.g. Nest vs wall remotes) — avoid repeating the same core instruction');
+    }
+
+    // If current guest message is about AC/heat/timer/controls AND we have prior host HVAC advice, mark repeated-instruction risk.
+    // This powers first-pass caution + judge rule for anti-duplication of host-sent facts.
+    const currentMentionsHVAC = /ac|air|cool|heat|temp|thermostat|remote|nest|shut.?off|timer|no air|not blowing/i.test((input || '').toLowerCase());
+    if (priorHostHVACAdvice && currentMentionsHVAC) {
+      result.repeatedInstructionRisk = true;
+      result.repeatedInstructionReason = 'Guest message concerns AC/heat/controls and host previously communicated the basic remote/Nest advice in this thread';
+      result.traces.push('REPEATED INSTRUCTION RISK: HVAC control advice already sent by host earlier — first-pass and judge must prevent re-stating the same info');
+    }
+
     // === Greeting context analysis (first host message, first-of-day, recent greeting for suppression) ===
     // Uses live messages if fetched, else falls back to provided conversationHistory.
     // This powers smart "greet only on first message of day / first host reply" behavior.

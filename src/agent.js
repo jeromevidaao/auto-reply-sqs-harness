@@ -329,6 +329,15 @@ export class GuestMessagingAgent {
           lines.push(`  • Readiness statement: "${context.conversationTraces.earlyReadyMessagePreview.substring(0, 120)}..."`);
         }
       }
+      if (context.conversationTraces.priorHostHVACAdvice || (context.conversationTraces.priorHostInstructions && context.conversationTraces.priorHostInstructions.length)) {
+        lines.push('  • PRIOR HOST INSTRUCTIONS / ADVICE already sent in thread (anti-repetition active)');
+        if (context.conversationTraces.priorHostHVACAdvice) {
+          lines.push(`  • Prior host HVAC/control advice: "${context.conversationTraces.priorHostHVACAdvice.substring(0, 100)}..."`);
+        }
+        if (context.conversationTraces.repeatedInstructionRisk) {
+          lines.push(`  • REPEATED INSTRUCTION RISK: ${context.conversationTraces.repeatedInstructionReason || 'Topic overlaps with prior host advice — avoid re-stating'}`);
+        }
+      }
       if (context.conversationTraces.preApprovalDetected) {
         lines.push('  • Pre-approval detected for this inquiry');
       }
@@ -374,6 +383,17 @@ export class GuestMessagingAgent {
     }
     if (context.conversationTraces?.earlyUnitReadyOffered) {
       lines.push('- CRITICAL ANTI-CONTRADICTION (HOST READINESS): Host has already told the guest the unit is ready for early check-in now (see conversation history / lastHost or earlyReadyMessagePreview). proposedResponse MUST NOT mention "4pm", "check-in time is 4pm", "If the unit is ready earlier we\'ll message you", or any default check-in policy language. Use "You\'re welcome", "see you in about an hour", "self-check-in", "anytime", or equivalent warm acknowledgment only. Never contradict the prior host statement that the unit is ready.');
+    }
+
+    // Anti-repetition of prior host-sent factual instructions / advice (new requirement from full Kathryn AC thread).
+    // Host (human or prior auto) already gave e.g. "don't use Nest / use heat pump remotes on the wall" or the neutral version.
+    // Later draft repeated near-identical core advice. Judge + first-pass must prevent re-delivering the same host info.
+    if (context.conversationTraces?.repeatedInstructionRisk || (context.conversationTraces?.priorHostInstructions && context.conversationTraces.priorHostInstructions.length > 0)) {
+      lines.push('- CRITICAL ANTI-REPETITION (PRIOR HOST INSTRUCTIONS): A prior host message (human or auto-reply) in this thread already communicated key factual instructions or advice to the guest. Examples: HVAC "Please don\'t use the Nest thermostat—it doesn\'t control the AC. Use the heat pump remotes on the wall in each room instead." or "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat."');
+      if (context.conversationTraces?.priorHostHVACAdvice) {
+        lines.push(`  Prior host HVAC/control advice already given: "${context.conversationTraces.priorHostHVACAdvice.substring(0, 140)}..."`);
+      }
+      lines.push('  Your proposedResponse MUST NOT re-state the same core information using similar phrasing. If you are adding *new* value from tools (e.g. "I checked the heat pumps... I\'ve set all units to auto at 65°F now so it should cool down"), include only the fresh diagnostic/fix details. You may briefly reference ("as I mentioned earlier, please use the wall remotes") or omit the basics entirely if the guest is following up on the same topic. The Conversation Judge will flag near-duplicate host advice and require REVISE to strip the repeated part. This applies across the whole thread (not just immediate prior turn). See conversationHistory for the exact prior host text(s).');
     }
 
     // Live tool results from early traces (visible to first-pass LLM so it can use exact data + any auto-actions)
