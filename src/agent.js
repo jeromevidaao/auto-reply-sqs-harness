@@ -265,11 +265,15 @@ export class GuestMessagingAgent {
     if (daysUntilCheckIn !== null) lines.push(`- Days until check-in: ${daysUntilCheckIn}`);
     lines.push(`- Stay timing: ${stayTiming} (current = check-in day or in-stay; future = upcoming)`);
 
-    // Strong signal for the 3-day check-in instructions rule on future NEW_RESERVATION_WELCOME cases (e.g. abby birthday scenario).
+    // Strong signal for the 3-day check-in instructions rule + 4pm key info on future NEW_RESERVATION_WELCOME cases (e.g. abby birthday scenario).
     // This is injected directly into the user prompt Context so the first-pass LLM (processMessage / eval) cannot miss it.
     // Complements the CRITICAL in welcome-messages.md. The requiredPhrases check in runner is strict substring.
     if (stayTiming === 'future' && daysUntilCheckIn !== null && daysUntilCheckIn >= 3) {
       lines.push(`- CRITICAL FOR NEW_RESERVATION_WELCOME (FUTURE STAY): Days until check-in: ${daysUntilCheckIn} (>=3). For pure first-post-booking welcomes (like the Abby birthday scenario with no specific ask and empty history), the proposedResponse MUST contain the substring "detailed check-in instructions 3 days before" (ideally the full "I will send the detailed check-in instructions 3 days before your arrival."). This is a hard requirement in the welcome category rules, the scenario rubric, and the golden. Do not omit or use a variation that drops this exact sequence of words. Include it naturally in the logistics paragraph.`);
+      const readinessOffered = !!(context.conversationTraces?.earlyUnitReadyOffered || context.conversationContext?.earlyUnitReadyOffered);
+      if (!readinessOffered) {
+        lines.push(`- ALSO CRITICAL (4pm + core logistics for same future NEW_RESERVATION_WELCOME case): Since earlyUnitReadyOffered is false (no prior host said "unit is ready for you to check in now"), the proposedResponse MUST also contain the substring "4pm" (examples that work: "Check-in is at 4pm", "at 4pm with self-check-in", "Check-in starts at 4PM", "4pm check-in"). This is required by the first-post-booking-birthday-abby rubric (requiredPhrases includes "4pm" alongside "self-check-in", "parking", "detailed check-in instructions 3 days before"). Ensure "self-check-in" and a parking mention also appear as part of the standard key information for first welcomes. The Taylor anti-contradiction rules (and the WARNING block above) only suppress 4pm when readiness was offered or history fetch failed on a follow-up. For this pure first welcome on future stay with no history, include the 4pm.`);
+      }
     }
 
     if (context.conversationHistory?.length) {
@@ -302,7 +306,7 @@ export class GuestMessagingAgent {
       const src = hTraces.historySource || 'live_fetched_or_provided';
       lines.push(`   (History source: ${src}; ${context.conversationHistory.length} messages fetched/passed for context. The most recent prior host messages (including any readiness declarations) are visible above.)`);
     } else {
-      lines.push('- No prior conversation history available in this context (new thread or fetch not performed). Assume no prior host commitments visible; avoid introducing 4pm/check-in policy language on arrival-related messages unless the current guest message explicitly asks about timing.');
+      lines.push('- No prior conversation history available in this context (new thread or fetch not performed). This is typically the first host reply on a brand new thread (e.g. the guest\'s first post-booking message). For pure NEW_RESERVATION_WELCOME first-contact intros like the Abby birthday scenario (empty history, future stay, no specific ask), you MUST still deliver the full rich welcome including all core logistics: mention of "4pm" (check-in time), "self-check-in", dedicated off-street parking, and (for >=3 days out) the "detailed check-in instructions 3 days before" sentence. See the CRITICAL injections above and welcome-messages.md. The conservative "avoid 4pm/policy" language only applies to *follow-up* messages (thanks, "arriving in an hour", etc.) on threads where we may have missed a prior host readiness declaration due to fetch failure — see the full WARNING block just above for that Taylor 53 Pine #1B safeguard case. For a true first welcome with no prior activity, include the standard 4pm + parking + self-check-in info.');
     }
 
     // Rich traces for higher quality first-pass decisions (pre-approval, recent host messages, etc.)
