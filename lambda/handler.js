@@ -14,6 +14,7 @@ import { GuestMessagingAgent } from '../src/agent.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { HospitableClient } from '../src/clients/HospitableClient.js';
+import { KumoCloudClient } from '../src/clients/KumoCloudClient.js';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { SQSClient, CreateQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
 
@@ -323,6 +324,7 @@ export const handler = async (event, context) => {
   // === Clients for UnitReadinessTool ===
   const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
   const hospitableClient = new HospitableClient();
+  const kumoClient = new KumoCloudClient();
 
   // === Idempotency / Dedup using DynamoDB (prevents double sends from SQS redeliveries + duplicate webhooks) ===
   // Uses the stable top-level webhook "id" from the Hospitable payload.
@@ -399,7 +401,8 @@ export const handler = async (event, context) => {
 
     // Clients for UnitReadinessTool (used for unit readiness / early check-in logic)
     ddbClient,
-    hospitableClient
+    hospitableClient,
+    kumoClient
   });
 
 
@@ -419,6 +422,7 @@ export const handler = async (event, context) => {
       escalated: result.escalated,
       cleaningIssueDetected: result.cleaningIssueDetected,
       hasThermostatInfo: !!result.thermostatInfo,
+      hasHeatPumpInfo: !!result.heatPumpInfo,
       hasCancellationInfo: !!result.cancellationInfo,
       hasEventInfo: !!result.eventInfo,
     });
@@ -429,6 +433,16 @@ export const handler = async (event, context) => {
     }
     if (result.thermostatInfo) {
       console.log('🌡️  THERMOSTAT INFO:', JSON.stringify(result.thermostatInfo, null, 2));
+    }
+    if (result.heatPumpInfo) {
+      const hp = result.heatPumpInfo;
+      const fixed = hp.actionTaken?.fixed ? ' (AUTO-FIXED units)' : '';
+      console.log('🔥  HEAT PUMP LIVE STATUS' + fixed + ':', JSON.stringify({
+        detected: hp.detected,
+        action: hp.actionTaken ? { fixed: hp.actionTaken.fixed, mode: hp.actionTaken.recommendedMode, tempF: hp.actionTaken.recommendedTempF } : null,
+        summary: hp.liveStatus?.summary,
+        unitCount: hp.liveStatus?.unitCount
+      }, null, 2));
     }
     if (result.cancellationInfo) {
       console.log('📋 CANCELLATION INFO:', JSON.stringify(result.cancellationInfo, null, 2));
@@ -602,6 +616,7 @@ export const handler = async (event, context) => {
         tools: {
           cleaning: result.cleaningIssueDetected ? result.cleaningIssue : null,
           thermostat: result.thermostatInfo,
+          heatPump: result.heatPumpInfo,
           cancellation: result.cancellationInfo,
           event: result.eventInfo,
         },

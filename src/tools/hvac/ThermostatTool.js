@@ -27,7 +27,7 @@ export class ThermostatTool extends BaseTool {
       // 53 Pine #1B (Studio / Downtown)
       'c899481f-2e5b-402d-80c4-3167fd824d96': {
         system: 'KumoCloud heat pump (2 indoor heads)',
-        warning: "Please don't use the Nest thermostat — it doesn't control the AC. Use the heat pump remotes on the wall in each room instead.",
+        warning: "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.",
         howTo: [
           'Use the dedicated heat pump remotes mounted on the wall in each room.',
           'If you want us to pre-set the temperature before arrival, just let us know.',
@@ -40,7 +40,7 @@ export class ThermostatTool extends BaseTool {
       // Apt 2
       '114663c5-0709-4eff-a868-fa9ebd6ed42d': {
         system: 'KumoCloud heat pump (3 indoor heads)',
-        warning: "Please don't use the Nest thermostat if you see one — it doesn't control the AC or heat. Use the heat pump remotes on the wall in each room instead.",
+        warning: "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.",
         howTo: [
           'Each room has its own heat pump remote on the wall.',
           'You can control the temperature independently in different areas.',
@@ -53,7 +53,7 @@ export class ThermostatTool extends BaseTool {
       // Apt 3
       '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd': {
         system: 'KumoCloud heat pump (3 indoor heads)',
-        warning: "Please don't use the Nest thermostat — it doesn't control the AC. Use the heat pump remotes on the wall in each room instead.",
+        warning: "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.",
         howTo: [
           'Look for the heat pump remotes on the wall in the main living area and bedrooms.',
           'Each remote controls the unit in that room.',

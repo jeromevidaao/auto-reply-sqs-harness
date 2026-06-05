@@ -1,6 +1,6 @@
 {
   "id": "thermostat-ignore-nest-remotes",
-  "description": "Guest asks about thermostat or wants to change temperature. Real per-unit logic: tell them NOT to use the Nest thermostat, use wall remotes instead. Especially important for certain units.",
+  "description": "Guest asks about thermostat or wants to change temperature. Real per-unit logic: neutral 'make sure using the remotes' language (do not accuse of using Nest), direct to wall remotes. (Live Kumo status + auto-fix of mixed modes added in later enhancement.)",
   "guestMessage": "How do I turn up the heat? It's cold in here.",
   "context": {
     "guestName": "Casey",
@@ -15,7 +15,7 @@
     "expectedCategory": "THERMOSTAT_HEATPUMP",
     "shouldReply": true,
     "forbiddenPhrases": ["Nest thermostat controls"],
-    "requiredPhrases": ["remotes on the wall", "don't use the Nest"]
+    "requiredPhrases": ["remotes on the wall", "make sure you are using"]
   },
-  "notes": "High value real scenario. Old code had strong 'ignore the Nest' instruction + use heat pump remotes on the wall. Per-unit differences existed."
+  "notes": "High value real scenario. Language softened post-incident (guest correctly on remotes; root cause was mixed mode on the Kumo heads themselves). Live status+auto-fix support added later."
 }

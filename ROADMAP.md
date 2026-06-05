@@ -10,6 +10,7 @@ This document tracks the concrete next steps for the harness. We will grow it it
 - [x] Escalation / notification system
 - [x] Tool abstraction (`BaseTool` + `ToolRegistry`)
 - [x] CleaningIssueTool + ThermostatTool
+- [x] Live HeatPumpTool + KumoCloudClient (investigate per-head modes + auto-set all to consistent cool/heat/auto on complaints; neutral "make sure using remotes" language; driven by the Kathryn mixed-mode AC incident)
 - [x] Property-specific knowledge extraction
 - [x] CI/CD via GitHub Actions + OIDC
 - [x] SQS cutover to harness Lambda

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { ToolRegistry, CleaningIssueTool, ThermostatTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool } from './tools/index.js';
+import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool } from './tools/index.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,6 +56,9 @@ export class GuestMessagingAgent {
       }
       if (!this.tools.has('get_thermostat_instructions')) {
         this.tools.register(new ThermostatTool());
+      }
+      if (!this.tools.has('get_heat_pump_status')) {
+        this.tools.register(new HeatPumpTool({ kumoClient: options.kumoClient || null }));
       }
       if (!this.tools.has('handle_cancellation')) {
         this.tools.register(new CancellationTool());
@@ -325,6 +328,34 @@ export class GuestMessagingAgent {
       lines.push('- HIGH DUPLICATE RISK: A very similar question appears to have been answered by the host recently. Strongly prefer not replying or escalating.');
     }
 
+    // Live tool results from early traces (visible to first-pass LLM so it can use exact data + any auto-actions)
+    if (context.earlyThermostatInfo || context.heatPumpInfo) {
+      lines.push('');
+      lines.push('=== HVAC / HEAT PUMP TOOL RESULTS (use these exact values and actions) ===');
+      if (context.earlyThermostatInfo) {
+        const t = context.earlyThermostatInfo;
+        lines.push(`- Thermostat instructions (from tool): warning="${t.warning || ''}" system="${t.system || ''}"`);
+        if (t.howTo?.length) lines.push(`  howTo: ${t.howTo.join(' ')}`);
+        if (t.suggestedResponseSnippet) lines.push(`  suggestedSnippet: ${t.suggestedResponseSnippet}`);
+      }
+      if (context.heatPumpInfo) {
+        const h = context.heatPumpInfo;
+        lines.push(`- LIVE heat pump status: ${h.liveStatus ? JSON.stringify({
+          unitCount: h.liveStatus.unitCount,
+          summary: h.liveStatus.summary,
+          units: (h.liveStatus.units || []).map(u => ({mode: u.operationMode, roomF: u.roomTempF, spCoolF: u.spCoolF}))
+        }) : 'no liveStatus'}`);
+        if (h.actionTaken && h.actionTaken.fixed) {
+          lines.push(`- ACTION TAKEN by HeatPumpTool: fixed all units to ${h.actionTaken.recommendedMode} @ ${h.actionTaken.recommendedTempF}°F. Before modes: ${(h.actionTaken.before?.summary?.modes || []).join('/')}. Tell the guest you checked the units and performed the fix.`);
+        } else if (h.actionTaken) {
+          lines.push(`- Heat pump check performed (no fix needed or not applicable): ${h.actionTaken.reason || 'consistent'}`);
+        }
+        if (h.suggestedResponseSnippet) {
+          lines.push(`- Suggested HVAC snippet from tool: ${h.suggestedResponseSnippet}`);
+        }
+      }
+    }
+
     lines.push('');
     lines.push('Respond with the required JSON only.');
 
@@ -436,6 +467,22 @@ export class GuestMessagingAgent {
         }
       } catch (err) {
         // Non-fatal
+      }
+    }
+
+    // Live KumoCloud heat pump status + auto-fix for mixed mode / wrong-season config issues
+    // (the root cause behind "AC says on but no air" when heads disagree on heat vs cool)
+    const heatPumpTool = this.tools.get('get_heat_pump_status');
+    if (heatPumpTool && enrichedContext.earlyThermostatInfo?.guestMessageRelevant) {
+      try {
+        const hpInfo = await heatPumpTool.execute(guestMessage, enrichedContext);
+        if (hpInfo && (hpInfo.liveStatus || hpInfo.detected)) {
+          enrichedContext.heatPumpInfo = hpInfo;
+          const fixed = hpInfo.actionTaken?.fixed ? ' (auto-fix applied)' : '';
+          console.log('[Agent] → Live heat pump status fetched' + fixed);
+        }
+      } catch (err) {
+        // Non-fatal — we still want to reply even if Kumo is unreachable
       }
     }
   }
@@ -624,6 +671,25 @@ export class GuestMessagingAgent {
       console.log('[Agent] → Using early thermostat info');
     }
 
+    // === Live heat pump status (KumoCloud) — prefer early, fall back to late fetch ===
+    let heatPumpInfo = enrichedContext.heatPumpInfo || null;
+    if (!heatPumpInfo) {
+      const hpTool = this.tools.get('get_heat_pump_status');
+      if (hpTool) {
+        try {
+          const info = await hpTool.execute(guestMessage, enrichedContext);
+          if (info && (info.liveStatus || info.detected)) {
+            heatPumpInfo = info;
+            console.log('[Agent] → Heat pump live status generated (late)');
+          }
+        } catch (err) {
+          // non-fatal
+        }
+      }
+    } else {
+      console.log('[Agent] → Using early heat pump live status');
+    }
+
     // === Cancellation handling (high-risk policy area) ===
     const cancellationTool = this.tools.get('handle_cancellation');
     let cancellationInfo = null;
@@ -679,6 +745,7 @@ export class GuestMessagingAgent {
       escalated: shouldEscalate,
       cleaningIssueDetected: cleaningIssue.detected,
       thermostatInfo,
+      heatPumpInfo,
       cancellationInfo,
       eventInfo,
       unitReadiness: enrichedContext.unitReadiness || null,
@@ -686,6 +753,7 @@ export class GuestMessagingAgent {
         conversationTraces: enrichedContext.conversationTraces || null,
         unitReadiness: enrichedContext.unitReadiness || null,
         earlyThermostatInfo: enrichedContext.earlyThermostatInfo || null,
+        heatPumpInfo: heatPumpInfo || enrichedContext.heatPumpInfo || null,
         earlyEventDetection: enrichedContext.earlyEventDetection || null,
       },
     };
@@ -721,6 +789,7 @@ export class GuestMessagingAgent {
       const toolResults = {
         cleaning: cleaningIssue.detected ? cleaningIssue : null,
         thermostat: thermostatInfo,
+        heatPump: heatPumpInfo,
         cancellation: cancellationInfo,
         event: eventInfo,
         conversationContext: enrichedContext.conversationTraces || null,
@@ -759,6 +828,7 @@ export class GuestMessagingAgent {
       const toolResults = {
         cleaning: cleaningIssue.detected ? cleaningIssue : null,
         thermostat: thermostatInfo,
+        heatPump: heatPumpInfo,
         cancellation: cancellationInfo,
         event: eventInfo,
         airbnbPolicy: cancellationInfo?.policy || null,

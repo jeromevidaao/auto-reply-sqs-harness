@@ -11,6 +11,7 @@ export { BaseTool } from './BaseTool.js';
 export { ToolRegistry } from './ToolRegistry.js';
 export { CleaningIssueTool } from './CleaningIssueTool.js';
 export { ThermostatTool } from './hvac/ThermostatTool.js';
+export { HeatPumpTool } from './hvac/HeatPumpTool.js';
 export { CancellationTool } from './cancellation/CancellationTool.js';
 export { EventRequestTool } from './event/EventRequestTool.js';
 export { AirbnbPolicyTool } from './policy/AirbnbPolicyTool.js';

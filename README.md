@@ -63,8 +63,8 @@ prompts/
 
 src/
   agent.js                  # GuestMessagingAgent (multipass: early traces → LLM → tools → Reflection → Judge)
-  tools/                    # Rich tool system (Cancellation, Thermostat, UnitReadiness, ConversationContext, etc.)
-  clients/                  # HospitableClient, etc.
+  tools/                    # Rich tool system (Cancellation, Thermostat + Live HeatPump/KumoCloud with auto-fix of mixed modes, UnitReadiness, ConversationContext, etc.)
+  clients/                  # HospitableClient, KumoCloudClient (live status + control for the 3 Apt heat pumps)
 
 eval/
   scenarios/                # 43 goldens (many are real production scenarios)
@@ -102,7 +102,7 @@ Ongoing work focuses on refining the modular prompts + the multipass agent logic
 
 - [x] Fully local execution (mocks by default, real Grok supported)
 - [x] Mature core agent with pluggable LLM + notification adapters
-- [x] Rich Tool system (`BaseTool` + `ToolRegistry`) — Cleaning, Thermostat, Cancellation (+ live policy), Event, UnitReadiness, ConversationContext, etc.
+- [x] Rich Tool system (`BaseTool` + `ToolRegistry`) — Cleaning, Thermostat + **Live HeatPumpTool** (KumoCloud API: fetches real per-head mode/roomTemp, detects mixed cool/heat across units, auto-sets all heads to consistent mode+temp on AC/heat complaints, surfaces "I checked... I've set them to..." for the reply), Cancellation (+ live policy), Event, UnitReadiness, ConversationContext, etc.
 - [x] Sophisticated multipass response system:
   - Early "Pre-processing / Trace Enrichment" step (pre-approval detection, recent host activity, duplicate risk, unit readiness hints)
   - Main LLM generation with rich traces

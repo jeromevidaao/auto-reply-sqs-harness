@@ -156,7 +156,7 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
 
     assert.ok(result.thermostatInfo);
     assert.equal(result.thermostatInfo.detected, true);
-    assert.ok(result.thermostatInfo.warning && result.thermostatInfo.warning.includes("don't use the Nest thermostat"));
+    assert.ok(result.thermostatInfo.warning && result.thermostatInfo.warning.includes("make sure you are using the heat pump remotes"));
     assert.ok(result.thermostatInfo.system.includes('KumoCloud'));
     assert.ok(result.thermostatInfo.howTo.some(step => step.includes('remotes on the wall')));
   });

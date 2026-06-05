@@ -1,0 +1,30 @@
+{
+  "id": "kathryn-mixed-heat-pump-ac-no-air",
+  "description": "Real incident: Guest reports AC units 'on' but no air, confirms using the remotes correctly with settings. Root cause was mixed modes (one head on 'heat', others 'cool' + unit at 80F) on Apt 2 (Sunny). Auto-reply must use neutral language ('make sure using the remotes'), use live Kumo status, auto-set all 3 heads to consistent mode (auto/cool at 65), and tell guest what was found + what was fixed.",
+  "guestMessage": "We have both of the remotes turned on and set to these settings, still no air coming from either unit all night",
+  "context": {
+    "guestName": "Kathryn",
+    "checkIn": "2026-06-03",
+    "checkOut": "2026-06-05",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-05-20T10:00:00Z",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi Jerome, we’re having some issues with the AC units. Both of them say that they’re on, but no air is being blown out."
+      },
+      {
+        "sender_type": "host",
+        "body": "Good morning, Kathryn, sorry you're having trouble with the AC. Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat."
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "THERMOSTAT_HEATPUMP",
+    "shouldReply": true,
+    "forbiddenPhrases": ["don't use the Nest", "it doesn't control the AC. Use the heat pump remotes"],
+    "requiredPhrases": ["make sure you are using", "remotes on the wall", "I checked", "set all", "auto at 65", "cool down"]
+  },
+  "notes": "Exact follow-up from the Kathryn Booker incident (June 2026). The first auto-reply wrongly assumed Nest misuse. Live HeatPumpTool + neutral phrasing + auto-fix of mixed modes is the required behavior."
+}
