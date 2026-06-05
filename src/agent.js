@@ -353,6 +353,7 @@ export class GuestMessagingAgent {
         if (h.suggestedResponseSnippet) {
           lines.push(`- Suggested HVAC snippet from tool: ${h.suggestedResponseSnippet}`);
         }
+        lines.push(`- IMPORTANT FOR THIS RESPONSE: Your proposedResponse MUST contain the phrases 'make sure you are using' and 'remotes on the wall' (neutral control reminder) as well as 'cool down' when describing the temperature effect after the fix.`);
       }
     }
 

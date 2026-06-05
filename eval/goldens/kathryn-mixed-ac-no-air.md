@@ -11,7 +11,7 @@
 **Approved ideal behavior (post HeatPumpTool)**:
 - Use neutral "Please make sure you are using the heat pump remotes..." (never "don't use the Nest — you're doing it wrong").
 - The live tool will have already fetched status and auto-set all heads.
-- Reply must reference the investigation + the fix: "I checked the heat pumps... one was on heat while the others were on cool (room ~79-80°F). I've set all of them to auto at 65°F now so it should cool down." (or very close, including "I checked", "set all", "auto at 65", "cool down")
+- Reply must include neutral reminder: "Please make sure you are using the heat pump remotes on the wall in each room" (or close) + reference the investigation + the fix: "I checked the heat pumps... I've set all the units to auto at 65°F now so it should cool down." (must contain "make sure you are using", "remotes on the wall", "I checked", "set all", "auto at 65", "cool down")
 - Acknowledge the remotes + offer to check settings if still issues.
 - Warm, practical, non-robotic.
 

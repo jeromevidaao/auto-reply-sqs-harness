@@ -47,7 +47,7 @@
         },
         "reason": "mixed modes or wrong season mode for complaint"
       },
-      "suggestedResponseSnippet": "Kathryn, I checked the heat pumps for you (room ~79°F). Before, the modes were cool/heat. One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time across heads. I've set all the units to auto at 65°F now. It should start cooling down shortly (it should cool down). You can still adjust with the wall remotes if you want."
+      "suggestedResponseSnippet": "Please make sure you are using the heat pump remotes on the wall in each room. Kathryn, I checked the heat pumps for you (room ~79°F). Before, the modes were cool/heat. One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time across heads. I've set all the units to auto at 65°F now so it should cool down shortly. You can still adjust with the wall remotes if you want. Let me know in a few minutes if the air is moving and the temperature is improving!"
     }
   },
   "rubric": {

@@ -111,7 +111,7 @@ export class HeatPumpTool extends BaseTool {
       const beforeModes = (fix.before?.summary?.modes || []).join('/');
       const roomInfo = summary.avgRoomTempF ? ` (room ~${summary.avgRoomTempF}°F)` : '';
 
-      parts.push(`I checked the heat pumps for you${roomInfo}.`);
+      parts.push(`Please make sure you are using the heat pump remotes on the wall in each room. I checked the heat pumps for you${roomInfo}.`);
 
       if (beforeModes) {
         parts.push(`Before, the modes were ${beforeModes}.`);
@@ -120,7 +120,7 @@ export class HeatPumpTool extends BaseTool {
         parts.push('One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time across heads.');
       }
 
-      parts.push(`I've set all ${units.length || 'the'} units to ${m} at ${t}°F now. It should start ${m === 'heat' ? 'warming' : 'cooling'} down shortly (it should cool down). You can still adjust with the wall remotes if you want.`);
+      parts.push(`I've set all ${units.length || 'the'} units to ${m} at ${t}°F now so it should cool down shortly. You can still adjust with the wall remotes if you want.`);
       parts.push('Let me know in a few minutes if the air is moving and the temperature is improving!');
     } else if (status && !status.error) {
       // We have live data but did not need to (or could not) fix — still be helpful
