@@ -125,6 +125,42 @@ export class ConversationContextTool extends BaseTool {
       }
     }
 
+    // === Host-declared early unit readiness (CRITICAL anti-contradiction signal) ===
+    // Scan recent host messages for explicit statements that the unit/apt is ready for early / now check-in.
+    // When true, first-pass, reflection, and judge MUST ensure the response NEVER re-states 4pm policy or "if ready earlier".
+    // This directly fixes the bug where host said "unit is ready for you to check in now" then auto-reply contradicted with 4pm.
+    // Uses live recentHostMessages if available; falls back to provided conversationHistory.
+    const hostMessagesForReadyScan = recentHostMessages.length > 0
+      ? recentHostMessages
+      : (context.conversationHistory || []).filter(m => (m.sender_type === 'host' || (m.sender && m.sender.type === 'host')));
+    const earlyReadyPhrases = [
+      /unit is ready/i,
+      /ready for you to check in/i,
+      /ready for check-?in/i,
+      /check in (now|early|anytime)/i,
+      /the (unit|apartment|place|home|listing) is ready/i,
+      /pleased to let you know.*ready/i,
+      /you can check in (anytime|early|now)/i,
+      /self-check-in.*anytime/i,
+      /arrive (early|anytime|now)/i,
+      /unit ready for you/i
+    ];
+    let earlyUnitReadyOffered = false;
+    let earlyReadyMessagePreview = null;
+    for (const m of hostMessagesForReadyScan) {
+      const body = (m.body || m.text || '').toLowerCase();
+      if (earlyReadyPhrases.some(re => re.test(body))) {
+        earlyUnitReadyOffered = true;
+        earlyReadyMessagePreview = (m.body || m.text || '').substring(0, 160);
+        break;
+      }
+    }
+    result.earlyUnitReadyOffered = earlyUnitReadyOffered;
+    if (earlyUnitReadyOffered) {
+      result.earlyReadyMessagePreview = earlyReadyMessagePreview;
+      result.traces.push('Early unit ready declared by host in recent/prior message — never contradict with 4pm policy');
+    }
+
     // === Greeting context analysis (first host message, first-of-day, recent greeting for suppression) ===
     // Uses live messages if fetched, else falls back to provided conversationHistory.
     // This powers smart "greet only on first message of day / first host reply" behavior.

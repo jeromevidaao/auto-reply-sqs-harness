@@ -287,6 +287,12 @@ export class GuestMessagingAgent {
       if (context.conversationTraces.duplicateRisk) {
         lines.push(`  • DUPLICATE RISK: ${context.conversationTraces.duplicateReason || 'Similar recent host reply detected'}`);
       }
+      if (context.conversationTraces.earlyUnitReadyOffered) {
+        lines.push('  • EARLY UNIT READY OFFERED by prior host message (anti-contradiction active)');
+        if (context.conversationTraces.earlyReadyMessagePreview) {
+          lines.push(`  • Readiness statement: "${context.conversationTraces.earlyReadyMessagePreview.substring(0, 120)}..."`);
+        }
+      }
       if (context.conversationTraces.preApprovalDetected) {
         lines.push('  • Pre-approval detected for this inquiry');
       }
@@ -326,6 +332,9 @@ export class GuestMessagingAgent {
     }
     if (context.conversationTraces?.duplicateRisk) {
       lines.push('- HIGH DUPLICATE RISK: A very similar question appears to have been answered by the host recently. Strongly prefer not replying or escalating.');
+    }
+    if (context.conversationTraces?.earlyUnitReadyOffered) {
+      lines.push('- CRITICAL ANTI-CONTRADICTION (HOST READINESS): Host has already told the guest the unit is ready for early check-in now (see conversation history / lastHost or earlyReadyMessagePreview). proposedResponse MUST NOT mention "4pm", "check-in time is 4pm", "If the unit is ready earlier we\'ll message you", or any default check-in policy language. Use "You\'re welcome", "see you in about an hour", "self-check-in", "anytime", or equivalent warm acknowledgment only. Never contradict the prior host statement that the unit is ready.');
     }
 
     // Live tool results from early traces (visible to first-pass LLM so it can use exact data + any auto-actions)

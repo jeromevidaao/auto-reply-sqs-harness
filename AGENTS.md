@@ -37,12 +37,17 @@ This rule exists because the harness directly affects live guest replies and the
 - All other tools (cleaning, cancellation, event, unit readiness, conversation context) continue to work as before.
 - Reflection + Conversation Judge run on (almost) every message in prod for safety.
 
+- **Host-declared unit readiness (anti-contradiction)**: ConversationContextTool now always scans recent/prior host messages (live fetch + provided conversationHistory) for phrases indicating the host told the guest the unit is ready early ("unit is ready for you to check in now", "ready for check in", "check in now/anytime", etc.). When detected it sets `earlyUnitReadyOffered: true` + preview + trace. The first-pass prompt (_buildUserPrompt) injects a CRITICAL ANTI-CONTRADICTION block, category prompts (early-checkin, thank-you, self-checkin, welcome-messages) have explicit "scan history, never restate 4pm" rules, and the Conversation Judge (plus reflection) will REVISE/REJECT any draft that contradicts a host readiness statement by re-introducing "4pm" / "if the unit is ready earlier" language. 
+  - The Taylor 9AM incident (host: "unit is ready for you to check in now" → guest: "arriving in about an hour! Thank you" → bad auto: "check-in time is 4pm...") is the canonical case. The new eval scenario `host-said-unit-ready-guest-thanks` + forbiddenPhrases in rubric will catch regressions.
+  - Rule: "If we (host) told them the unit is ready, the unit is ready — do not contradict a previous statement. Conversation history + traces must prevent it."
+  - Judge was augmented with specific rule + example for this class of contradiction.
+
 ## Adding / Changing HVAC Behavior
 - Update language in `src/tools/hvac/ThermostatTool.js` + `prompts/system/base.md` + `prompts/system/categories/thermostat.md`.
 - Update corresponding goldens + scenarios under `eval/`.
 - Update the test in `tests/basic.test.js` if the warning strings change.
 - For live behavior changes: edit `src/clients/KumoCloudClient.js` (mappings, login, get/set, ensureConsistent...) and `src/tools/hvac/HeatPumpTool.js` (analysis + auto-fix decision + snippet).
-- Always add or update an eval scenario that exercises the exact guest wording from the real incident (e.g. "We have both of the remotes turned on and set to these settings, still no air...").
+- Always add or update an eval scenario that exercises the exact guest wording from the real incident (e.g. "We have both of the remotes turned on and set to these settings, still no air..."). Same for host-readiness contradictions: add `host-said-unit-ready-guest-thanks.json` style scenario + golden with conversationHistory containing the contradicting host statement + forbiddenPhrases for 4pm language.
 - After change: full `npm test`, commit+push+verify as above.
 
 ## Other Standing Rules

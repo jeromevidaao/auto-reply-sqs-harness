@@ -18,6 +18,7 @@
 
 3. **Detect Contradiction with Previous Host Statements**
    - If the host has already said something about refunds, cancellations, early check-in, pet policy, etc., the new response must **not** contradict it.
+   - **Specific readiness contradiction (new rule)**: If conversation history (or conversationContext.earlyUnitReadyOffered or lastHostMessagePreview / traces) shows a prior HOST message stating the unit is ready for check-in now (e.g. "the unit is ready for you to check in now", "ready for you to check in", "check in now", "you can check in anytime"), then the first-draft proposedResponse MUST NOT contain "4pm", "check-in time is 4pm", "Check-in starts at 4PM", "If the unit is ready earlier we'll message you right away", or any restatement of the default check-in policy. Such a response directly contradicts the host's prior commitment that the unit is ready — this is grounds for REVISE (or REJECT if severe). The correct behavior is a warm "You're welcome" + brief confirmation of arrival time if mentioned, using self-check-in / anytime language.
    - When in doubt on cancellation topics, prefer to escalate rather than risk giving incorrect information.
 
 4. **Detect Overly Robotic or Formulaic Responses**
@@ -46,7 +47,7 @@
 - Results from any tools that ran (especially the CancellationTool and UnitReadinessTool)
 - Key rules that must be respected
 
-**Note on Unit Readiness**: When a guest is asking about early check-in or arrival, the `UnitReadinessTool` result (if present) tells you whether the unit is expected to be ready. Use this information to give accurate guidance instead of defaulting to "4pm check-in".
+**Note on Unit Readiness**: When a guest is asking about early check-in or arrival, the `UnitReadinessTool` result (if present) tells you whether the unit is expected to be ready. Use this information to give accurate guidance instead of defaulting to "4pm check-in". Additionally, conversationContext may now include `earlyUnitReadyOffered: true` + `earlyReadyMessagePreview` (populated by ConversationContextTool scanning host messages in history). When this is true (host explicitly told guest unit is ready), the draft MUST NOT re-introduce 4pm language — treat as already offered; flag any contradiction as REVISE/REJECT per rule 3 above.
 
 ## Output Format
 
@@ -59,7 +60,8 @@ You must return **only** valid JSON in this exact structure:
   "issues": [
     "Repetitive phrasing: agent used very similar 'looking forward' language in the last two host messages",
     "Contradicts previous host statement about refunds",
-    "Failed to direct guest to the official Airbnb policy page"
+    "Failed to direct guest to the official Airbnb policy page",
+    "Contradicts prior host statement that unit is ready for check-in now (draft re-stated 4pm policy)"
   ],
   "confidence": 0.0-1.0,
   "notes": "Brief explanation of the main problems and why you chose this verdict"

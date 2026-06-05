@@ -30,6 +30,7 @@ Review the first draft with extreme care. Focus on:
 
 2. **Anti-Contradiction**
    - Does the proposed response contradict anything the host previously said in this conversation?
+   - **Readiness-specific**: If history shows host said the unit is ready for check-in now (or "ready early", "check in anytime"), the draft must not re-state "check-in time is 4pm" or "if the unit is ready earlier we'll message". This is a direct contradiction of the host's commitment — REVISE to a warm acknowledgment ("You're welcome... see you soon") without policy language.
    - On cancellation topics, if there is any risk of contradiction or over-promising, prefer to escalate rather than guess.
 
 3. **Safety & Risk**

@@ -1,0 +1,39 @@
+{
+  "id": "host-said-unit-ready-guest-thanks",
+  "description": "Bug regression: Host proactively messaged 'unit is ready for you to check in now' (9AM). Guest replied they'll arrive in ~1h + thanks. Auto-reply must NOT contradict by saying 4pm policy; must be warm 'You're welcome' style acknowledgment only. History + earlyUnitReadyOffered trace must prevent the 4pm restatement.",
+  "guestMessage": "Ahh that’s perfect!! We will be arriving in about an hour! Thank you",
+  "context": {
+    "guestName": "Taylor",
+    "checkIn": "2026-06-04",
+    "checkOut": "2026-06-06",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "conversationHistory": [
+      {
+        "sender_type": "host",
+        "body": "Hi Taylor, We are pleased to let you know that the unit is ready for you to check in now.",
+        "created_at": "2026-06-04T09:00:00Z"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Ahh that’s perfect!! We will be arriving in about an hour! Thank you",
+        "created_at": "2026-06-04T09:05:00Z"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": ["THANK_YOU_MESSAGE", "SELF_CHECKIN_QUESTION", "EARLY_CHECKIN"],
+    "shouldReply": true,
+    "requiredPhrases": [],
+    "forbiddenPhrases": [
+      "4pm",
+      "4 PM",
+      "check-in time is 4pm",
+      "Check-in starts at 4PM",
+      "If the unit is ready earlier we'll message you right away",
+      "check in starts at 4",
+      "4:00 PM"
+    ]
+  },
+  "notes": "Exact reproduction of the 9AM Taylor incident that caused contradiction. The prior host ready message must cause earlyUnitReadyOffered=true (via ConversationContextTool scan), the CRITICAL block in prompt, and judge to catch 4pm if it slips. Good reply: short warm 'You're welcome, Taylor! Perfect, see you in about an hour.' or equivalent — no policy, no greeting if recent host. Use natural name."
+}
