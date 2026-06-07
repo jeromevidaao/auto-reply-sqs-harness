@@ -294,6 +294,20 @@ export class ConversationContextTool extends BaseTool {
         }
         result.traces.push('Greeting suppressed via recent host trace cross-check (<3h host activity)');
       }
+
+      // Promote a top-level signal for very recent host time-greeting (Olivia-style 2-min thanks follow-up).
+      // When a prior host (human or auto) sent a "Good morning, Name," (or equiv) only minutes earlier,
+      // first-pass MUST NOT repeat the formal greeting on the quick ack/thanks; judge will enforce as repetition.
+      if (result.greeting && result.greeting.hasRecentGreeting && result.greeting.lastGreetingMessage) {
+        const mins = (result.minutesSinceLastHostMessage != null)
+          ? result.minutesSinceLastHostMessage
+          : (result.greeting.minutesSinceLastHost != null ? result.greeting.minutesSinceLastHost : null);
+        if (mins === null || mins < 30) {
+          result.recentHostGreeting = result.greeting.lastGreetingMessage;
+          result.recentHostGreetingMinutesAgo = mins;
+          result.traces.push(`[CONVERSATION_CONTEXT] Recent host time greeting detected ~${mins != null ? mins : '?'}min ago: "${result.greeting.lastGreetingMessage.substring(0, 100)}..." — do not repeat formal greeting on this rapid follow-up (robotic)`);
+        }
+      }
     } catch (gErr) {
       // Non-fatal — greeting signals are best-effort enrichment
       result.traces.push('Greeting context analysis failed (non-fatal)');

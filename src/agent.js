@@ -396,6 +396,15 @@ export class GuestMessagingAgent {
       lines.push('  Your proposedResponse MUST NOT re-state the same core information using similar phrasing. If you are adding *new* value from tools (e.g. "I checked the heat pumps... I\'ve set all units to auto at 65°F now so it should cool down"), include only the fresh diagnostic/fix details. You may briefly reference ("as I mentioned earlier, please use the wall remotes") or omit the basics entirely if the guest is following up on the same topic. The Conversation Judge will flag near-duplicate host advice and require REVISE to strip the repeated part. This applies across the whole thread (not just immediate prior turn). See conversationHistory for the exact prior host text(s).');
     }
 
+    // Anti-repetition of recent host time-greeting (Olivia car-spot thanks case).
+    // Human (or prior auto) sent "Good morning, Olivia, ..." only ~2 minutes earlier.
+    // Quick guest thanks → auto must not reply "Good morning, Olivia, You're welcome!" — this is robotic.
+    // First time-of-day greeting on the initial reply of a session is good; repeating it on the immediate follow-up is bad.
+    if (context.conversationTraces?.recentHostGreeting) {
+      const mins = context.conversationTraces.recentHostGreetingMinutesAgo;
+      lines.push('- CRITICAL ANTI-REPETITION (RECENT HOST GREETING): A prior host message (human or previous auto-reply) in this thread sent only ' + (mins != null ? `~${mins} minutes` : 'a few minutes') + ' ago already opened with a time-based greeting + name (e.g. "Good morning, Olivia," or equivalent). On this rapid follow-up (e.g. guest "No problem, we’ll move it. Thanks for the quick response!" 2 min later), your proposedResponse MUST NOT start with "Good morning, Olivia," / "Good afternoon," or any other formal time-of-day greeting. Use a short warm acknowledgment only: "You\'re welcome, Olivia!" or "You\'re welcome!" (name is fine; repeating the "Good X" opener is weird/robotic and must be avoided). The Conversation Judge (rule on repetition of prior host style) will flag any repeated greeting and require REVISE to the minimal natural ack. See conversationHistory for the exact prior host greeting text.');
+    }
+
     // Live tool results from early traces (visible to first-pass LLM so it can use exact data + any auto-actions)
     if (context.earlyThermostatInfo || context.heatPumpInfo) {
       lines.push('');
