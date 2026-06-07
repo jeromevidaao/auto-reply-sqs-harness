@@ -1,36 +1,34 @@
 {
-  "name": "olivia-car-spot-thanks",
+  "id": "olivia-car-spot-thanks",
   "description": "Olivia · Booker checkout-morning car spot question. Human host replied at 6:54 AM with 'Good morning, Olivia, the spot is needed for the cleaning team...' (parking for next guests). Guest 1 min later: 'No problem, we’ll move it. Thanks for the quick response!'. Auto at 6:56 must NOT repeat 'Good morning, Olivia,' on the thanks — only 2 min after prior host greeting. This is robotic. Regression for recent-host-greeting anti-repetition (ConversationContextTool recentHostGreeting signal + CRITICAL block + judge rule 3).",
-  "conversationHistory": [
-    {
-      "sender_type": "host",
-      "message": "Good morning, Olivia, the spot is needed for the cleaning team to prepare the unit for the next guests. If you could move the car when convenient that would be great — no big deal either way. Safe travels!"
-    },
-    {
-      "sender_type": "guest",
-      "message": "No problem, we’ll move it. Thanks for the quick response!"
-    }
-  ],
-  "currentMessage": "No problem, we’ll move it. Thanks for the quick response!",
-  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
-  "checkInDate": "2025-06-04",
-  "expectedType": "THANK_YOU_MESSAGE",
-  "shouldReply": true,
-  "forbiddenPhrases": [
-    "Good morning, Olivia",
-    "Good morning,",
-    "Good afternoon, Olivia",
-    "Good evening, Olivia",
-    "Good morning Olivia"
-  ],
-  "requiredPhrases": [
-    "You're welcome"
-  ],
+  "guestMessage": "No problem, we’ll move it. Thanks for the quick response!",
   "context": {
-    "conversationTraces": {
-      "recentHostGreeting": "Good morning, Olivia, the spot is needed for the cleaning team to prepare the unit for the next guests. If you could move the car when convenient that would be great — no big deal either way. Safe travels!",
-      "recentHostGreetingMinutesAgo": 2
-    }
+    "guestName": "Olivia",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "conversationHistory": [
+      {
+        "sender_type": "host",
+        "body": "Good morning, Olivia, the spot is needed for the cleaning team to prepare the unit for the next guests. If you could move the car when convenient that would be great — no big deal either way. Safe travels!"
+      },
+      {
+        "sender_type": "guest",
+        "body": "No problem, we’ll move it. Thanks for the quick response!"
+      }
+    ]
   },
-  "notes": "Exact reproduction of the 6:54/6:56 Olivia car-spot incident. The prior host message (human) contained the time greeting; the thanks 2 min later must produce a short warm ack WITHOUT repeating 'Good morning, Olivia,'. ConversationContextTool (via analyzeGreetingContext + promotion of recentHostGreeting when <30min) + CRITICAL ANTI-REPETITION (RECENT HOST GREETING) block in _buildUserPrompt + thank-you category rule + judge rule 3 must force the correct minimal 'You're welcome, Olivia!' style. In prod the recent host messages (including human sends) come via live getConversationMessages(limit=20) in ConversationContextTool. Eval provides them in conversationHistory so the signal is present. Good reply is brief, uses natural name, no time greeting. See golden and AGENTS.md."
+  "rubric": {
+    "expectedCategory": "THANK_YOU_MESSAGE",
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "Good morning, Olivia",
+      "Good morning,",
+      "Good afternoon, Olivia",
+      "Good evening, Olivia",
+      "Good morning Olivia"
+    ],
+    "requiredPhrases": [
+      "You're welcome"
+    ]
+  },
+  "notes": "Exact reproduction of the 6:54/6:56 Olivia car-spot incident. The prior host message (human) contained the time greeting; the thanks 2 min later must produce a short warm ack WITHOUT repeating 'Good morning, Olivia,'. ConversationContextTool (via analyzeGreetingContext + promotion of recentHostGreeting) + CRITICAL ANTI-REPETITION (RECENT HOST GREETING) block in _buildUserPrompt + thank-you category rule + judge rule 3 must force the correct minimal 'You're welcome, Olivia!' style. In prod the recent host messages come via live getConversationMessages. Eval provides them in context.conversationHistory so the signal is present for processMessage. Good reply is brief, uses natural name, no time greeting on rapid follow-up. See golden and AGENTS.md."
 }
