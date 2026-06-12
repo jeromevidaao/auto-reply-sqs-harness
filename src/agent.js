@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool } from './tools/index.js';
+import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool, GoogleMapsTool } from './tools/index.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -79,6 +79,9 @@ export class GuestMessagingAgent {
         this.tools.register(new ConversationContextTool({
           hospitableClient: options.hospitableClient || null
         }));
+      }
+      if (!this.tools.has('get_travel_times')) {
+        this.tools.register(new GoogleMapsTool());
       }
     }
   }
@@ -434,6 +437,17 @@ export class GuestMessagingAgent {
       }
     }
 
+    if (context.travelTimes) {
+      const t = context.travelTimes;
+      lines.push('');
+      lines.push('=== GOOGLE MAPS TRAVEL TIMES (use these exact numbers — do not invent times or distances) ===');
+      lines.push(`Destination: ${t.destination || 'queried location'}`);
+      if (t.driving) lines.push(`- Driving: ${t.driving.duration} (${t.driving.distance})`);
+      if (t.walking) lines.push(`- Walking: ${t.walking.duration} (${t.walking.distance})`);
+      if (t.mock) lines.push('(using mock/approximate data — no live GOOGLE_MAPS_API_KEY was available at runtime)');
+      lines.push('For any distance or "how close / walk / drive / Uber" questions, quote the driving + walking values above directly and naturally. Report both when the guest asks about walking distance or Uber.');
+    }
+
     lines.push('');
     lines.push('Respond with the required JSON only.');
 
@@ -567,6 +581,25 @@ export class GuestMessagingAgent {
         }
       } catch (err) {
         // Non-fatal — we still want to reply even if Kumo is unreachable
+      }
+    }
+
+    // Google Maps live (or mock) driving + walking times for distance questions
+    // (Old Port, downtown, "how far", walk/drive/Uber, etc.). Matches original auto-reply-grok-sqs behavior.
+    const mapsTool = this.tools.get('get_travel_times');
+    if (mapsTool) {
+      try {
+        const msgLower = (guestMessage || '').toLowerCase();
+        const looksLikeDistanceQuestion = /old port|how (?:far|close|long)|walk(?:ing)?|drive|uber|distance|minutes (?:away|to|from)|downtown|waterfront|the port/.test(msgLower);
+        if (looksLikeDistanceQuestion) {
+          const travel = await mapsTool.execute(guestMessage, enrichedContext);
+          if (travel && (travel.driving || travel.destination)) {
+            enrichedContext.travelTimes = travel;
+            console.log('[Agent] → Travel times from Google Maps:', travel.destination || 'destination in message');
+          }
+        }
+      } catch (err) {
+        // Non-fatal — never let a maps lookup break a reply
       }
     }
   }
@@ -883,6 +916,7 @@ export class GuestMessagingAgent {
         event: eventInfo,
         conversationContext: enrichedContext.conversationTraces || null,
         unitReadiness: enrichedContext.unitReadiness || null,
+        travelTimes: enrichedContext.travelTimes || null,
       };
 
       const reflectionContext = {
@@ -923,6 +957,7 @@ export class GuestMessagingAgent {
         airbnbPolicy: cancellationInfo?.policy || null,
         conversationContext: enrichedContext.conversationTraces || null,
         unitReadiness: enrichedContext.unitReadiness || null,
+        travelTimes: enrichedContext.travelTimes || null,
       };
 
       // Make policy data more prominent for the judge

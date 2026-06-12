@@ -51,6 +51,29 @@ async function getGrokApiKey() {
   }
 }
 
+/**
+ * Fetches Google Maps API key (for get_travel_times / distance questions to Old Port etc.).
+ * Priority: process.env.GOOGLE_MAPS_API_KEY → SSM /google/maps-api-key (SecureString)
+ * Non-fatal: if missing the GoogleMapsTool will return sensible mock data.
+ */
+async function getGoogleMapsApiKey() {
+  if (process.env.GOOGLE_MAPS_API_KEY) {
+    return process.env.GOOGLE_MAPS_API_KEY;
+  }
+  try {
+    const command = new GetParameterCommand({
+      Name: '/google/maps-api-key',
+      WithDecryption: true
+    });
+    const response = await ssm.send(command);
+    process.env.GOOGLE_MAPS_API_KEY = response.Parameter.Value;
+    return response.Parameter.Value;
+  } catch (err) {
+    console.warn('[Handler] Could not fetch GOOGLE_MAPS_API_KEY from SSM /google/maps-api-key (will use mocks for distance questions):', err.message);
+    return null;
+  }
+}
+
 export const handler = async (event, context) => {
   const requestId = context?.awsRequestId || 'local-' + Date.now();
   const startTime = Date.now();
@@ -374,6 +397,10 @@ export const handler = async (event, context) => {
   if (!process.env.GROK_API_KEY) {
     throw new Error('GROK_API_KEY is required. Mock LLM is disabled.');
   }
+
+  // Optional: Google Maps key for live distance / Old Port / walk-drive answers (used by GoogleMapsTool).
+  // Falls back gracefully to mock data if missing (same pattern as old monolithic Lambda).
+  await getGoogleMapsApiKey();
 
   // Reflection is now always enabled in production.
   // This ensures the complete pipeline (Main LLM → Tools → Reflection → Judge) runs on every message.

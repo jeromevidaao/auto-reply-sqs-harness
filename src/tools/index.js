@@ -17,3 +17,4 @@ export { EventRequestTool } from './event/EventRequestTool.js';
 export { AirbnbPolicyTool } from './policy/AirbnbPolicyTool.js';
 export { UnitReadinessTool } from './unit-readiness/UnitReadinessTool.js';
 export { ConversationContextTool } from './conversation/ConversationContextTool.js';
+export { GoogleMapsTool } from './location/GoogleMapsTool.js';
