@@ -126,6 +126,10 @@ export const handler = async (event, context) => {
   // with shapes like:
   //   { body: "<json-string>" }                          → inner may contain .data.body
   //   { data: { body: "...", reservation_id, conversation_id, ... } }
+  //
+  // Important: Inquiries (and some message.created events) legitimately have no reservation_id,
+  // only conversation_id. We must never fall back to the numeric message platform id (data.id).
+  // We explicitly compute isInquiry later and route to conversation-based send + tools.
   // This helper tries the most common shapes so we don't lose messages during cutover.
   function extractMessageAndContext(evt) {
     // Direct / simulator style
@@ -315,6 +319,17 @@ export const handler = async (event, context) => {
 
   // (Dedup check moved below after ddbClient is initialized for reuse)
 
+  // Explicitly detect inquiries.
+  // Inquiries (pre-booking leads, some message.created events) legitimately arrive without a reservation_id,
+  // only with conversation_id. We must NOT fall back to the message's numeric platform id.
+  const hasReservation = !!(msgContext.reservationId || msgContext.reservation_id || msgContext.reservation?.id);
+  const hasConversation = !!(msgContext.conversation_id || msgContext.airbnb_conversation_id);
+  msgContext.isInquiry = !hasReservation && hasConversation;
+
+  if (msgContext.isInquiry) {
+    console.log('[Handler] Detected as INQUIRY (no reservation_id present) — will route to conversation-based send + context tools.');
+  }
+
   console.log('\n📋 RESERVATION / INQUIRY DETAILS:');
   console.log(JSON.stringify({
     guestName: msgContext.guestName || msgContext.guest?.first_name,
@@ -328,6 +343,7 @@ export const handler = async (event, context) => {
     conversation_id: msgContext.conversation_id,
     airbnb_conversation_id: msgContext.airbnb_conversation_id,
     reservationId: msgContext.reservationId || msgContext.reservation_id,
+    isInquiry: msgContext.isInquiry,
     sender_type: msgContext.sender_type || msgContext.sender?.type,
     action: msgContext.action,
     triggers: msgContext.triggers,
@@ -517,14 +533,15 @@ export const handler = async (event, context) => {
     }
 
     // === Actually send the reply to the guest ===
-    // The original working auto-reply-sqs used the reservations endpoint.
-    // We prefer that when we have a reservationId (more reliable with current token).
+    // Inquiries legitimately have no reservation_id (only conversation_id).
+    // We use the reservation endpoint only when we have a real reservationId.
+    // Otherwise we fall back to the conversation endpoint (this is the correct path for inquiries).
     if (result.shouldReply && result.proposedResponse && result.proposedResponse !== 'none' && !result.escalated) {
       const reservationId = msgContext.reservationId || msgContext.reservation_id || msgContext.reservation?.id;
       const convId = msgContext.conversation_id || msgContext.airbnb_conversation_id;
 
       const targetId = reservationId || convId;
-      const targetType = reservationId ? 'reservation' : 'conversation';
+      const targetType = (reservationId && !msgContext.isInquiry) ? 'reservation' : 'conversation';
 
       if (targetId) {
         const sentPreview = result.proposedResponse.substring(0, 80);
@@ -564,7 +581,7 @@ export const handler = async (event, context) => {
 
         try {
           // === Actual send (this is the critical operation) ===
-          if (reservationId) {
+          if (reservationId && !msgContext.isInquiry) {
             await hospitableClient.sendMessageToReservation(reservationId, result.proposedResponse);
           } else {
             await hospitableClient.sendMessage(convId, result.proposedResponse);
