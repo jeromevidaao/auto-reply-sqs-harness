@@ -155,7 +155,7 @@ export const handler = async (event, context) => {
             message: inner.data.body || inner.data.message || '',
             context: {
               ...inner.data,
-              reservationId: inner.data.reservation_id || inner.data.id,
+              reservationId: inner.data.reservation_id || null,
               conversation_id: inner.data.conversation_id || inner.data.airbnb_conversation_id,
               sender_type: inner.data.sender_type || inner.data.sender?.type,
               sender: inner.data.sender || { type: inner.data.sender_type },
@@ -182,7 +182,7 @@ export const handler = async (event, context) => {
         message: outer.data.body || outer.data.message || '',
         context: {
           ...outer.data,
-          reservationId: outer.data.reservation_id || outer.data.id,
+          reservationId: outer.data.reservation_id || null,
           conversation_id: outer.data.conversation_id || outer.data.airbnb_conversation_id,
           sender_type: outer.data.sender_type || outer.data.sender?.type,
           sender: outer.data.sender || { type: outer.data.sender_type },

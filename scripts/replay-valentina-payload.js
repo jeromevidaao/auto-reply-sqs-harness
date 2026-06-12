@@ -39,7 +39,7 @@ async function main() {
             message: inner.data.body || '',
             context: {
               ...inner.data,
-              reservationId: inner.data.reservation_id || inner.data.id,
+              reservationId: inner.data.reservation_id || null,
               conversation_id: inner.data.conversation_id,
               sender_type: inner.data.sender_type,
               sender: inner.data.sender,
