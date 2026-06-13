@@ -332,6 +332,27 @@ export const handler = async (event, context) => {
     console.log('[Handler] Detected as INQUIRY (no reservation_id present) — will route to conversation-based send + context tools.');
   }
 
+  // === Robust property / listing name normalization for ALL cases (reservations + inquiries + plain messages) ===
+  // Webhook payloads often include "property" or "properties" or "listing" even for pre-booking inquiries.
+  // This ensures "Property: ..." appears in prompts, traces, and (critically) SNS escalations instead of "Unknown property".
+  if (!msgContext.propertyName) {
+    msgContext.propertyName =
+      msgContext.property?.name ||
+      msgContext.property?.public_name ||
+      (Array.isArray(msgContext.properties) && msgContext.properties[0]?.name) ||
+      msgContext.listing?.name ||
+      msgContext.listing?.public_name ||
+      null;
+  }
+  if (!msgContext.listingId) {
+    msgContext.listingId =
+      msgContext.listingId ||
+      msgContext.property?.id ||
+      (Array.isArray(msgContext.properties) && msgContext.properties[0]?.id) ||
+      msgContext.listing?.platform_id ||
+      null;
+  }
+
   console.log('\n📋 RESERVATION / INQUIRY DETAILS:');
   console.log(JSON.stringify({
     guestName: msgContext.guestName || msgContext.guest?.first_name,

@@ -220,11 +220,25 @@ export class GuestMessagingAgent {
     }
 
     // Normalize
+    let confidence = parsed.confidence ?? 0.7;
+    let shouldReply = parsed.shouldReply ?? (parsed.proposedResponse && parsed.proposedResponse !== 'none');
+
+    // For simple, direct operational questions (early check-in flexibility, self-check-in arrival questions)
+    // that produce a concrete proposedResponse, force high confidence and reply.
+    // These are almost always safe and valuable to answer; the user expects 100% confidence on clear cases.
+    const earlyFlexCategories = ['EARLY_CHECKIN', 'EARLY_CHECKIN_QUESTION', 'CHECK_IN_TIME_QUESTION', 'SELF_CHECKIN_QUESTION'];
+    if (earlyFlexCategories.includes(parsed.typeOfMessageReceived) &&
+        parsed.proposedResponse && parsed.proposedResponse !== 'none' &&
+        parsed.proposedResponse.length > 20) {
+      confidence = 1.0;
+      if (shouldReply !== false) shouldReply = true;
+    }
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',
-      shouldReply: parsed.shouldReply ?? (parsed.proposedResponse && parsed.proposedResponse !== 'none'),
-      confidence: parsed.confidence ?? 0.7,
+      shouldReply,
+      confidence,
       rawModelOutput: raw
     };
   }
@@ -747,6 +761,18 @@ export class GuestMessagingAgent {
         proposedResponse: 'none',
         suppressedDueToRecentHost: true,
       };
+    }
+
+    // Do not suppress auto-reply on simple early check-in / self-check-in flexibility questions
+    // just because of generic recentHostActivity. These are high-value and the user wants them answered
+    // (with the specific practical language) unless there's an *exact* duplicate recent host reply on the topic.
+    const earlyFlex = ['EARLY_CHECKIN', 'EARLY_CHECKIN_QUESTION', 'CHECK_IN_TIME_QUESTION', 'SELF_CHECKIN_QUESTION'];
+    if (finalDecision.suppressedDueToRecentHost &&
+        earlyFlex.includes(finalDecision.typeOfMessageReceived) &&
+        finalDecision.proposedResponse && finalDecision.proposedResponse.length > 30) {
+      console.log('[Agent] → Overriding recent-host suppression for clear early/self check-in flexibility question (user wants these answered)');
+      finalDecision.shouldReply = true;
+      finalDecision.suppressedDueToRecentHost = false;
     }
 
     const shouldEscalate =
