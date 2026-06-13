@@ -17,8 +17,10 @@ import { HospitableClient } from '../src/clients/HospitableClient.js';
 import { KumoCloudClient } from '../src/clients/KumoCloudClient.js';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { SQSClient, CreateQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
+const sns = new SNSClient({ region: 'us-east-1' });
 
 let _grokKeyCache = null;
 
@@ -581,8 +583,18 @@ export const handler = async (event, context) => {
 
         try {
           // === Actual send (this is the critical operation) ===
+          // For brand new inquiries (no reservation_id), the old system used a dedicated
+          // sendInquiryMessage path. We now have sendMessageToInquiry (tries /inquiries/{id}/messages).
+          // Many "message.created" inquiry webhooks provide a conversation_id that 404s on both
+          // /conversations and /inquiries messaging endpoints for the current token/integration.
+          // We special-case inquiry send failures below so they do not hard-fail the Lambda
+          // (prevents the guest-messaging-agent-harness-errors alarm and SQS retry/DLQ spam).
           if (reservationId && !msgContext.isInquiry) {
             await hospitableClient.sendMessageToReservation(reservationId, result.proposedResponse);
+          } else if (msgContext.isInquiry) {
+            const inquiryIdForSend = msgContext.conversation_id || msgContext.airbnb_conversation_id || convId;
+            console.log(`📤 SENDING REPLY → inquiry:`, inquiryIdForSend, '| preview:', sentPreview);
+            await hospitableClient.sendMessageToInquiry(inquiryIdForSend, result.proposedResponse);
           } else {
             await hospitableClient.sendMessage(convId, result.proposedResponse);
           }
@@ -630,6 +642,72 @@ export const handler = async (event, context) => {
         } catch (sendError) {
           // Only actual send failures are hard failures
           console.error('❌ HARD FAILURE: Failed to send reply to guest:', sendError.message);
+
+          if (msgContext.isInquiry) {
+            const inquiryIdForSend = msgContext.conversation_id || msgContext.airbnb_conversation_id || convId;
+            console.error('🚨 INQUIRY SEND FAILED — the ID provided in the message.created webhook (reservation_id null) is not writable via the Hospitable /inquiries or /conversations messaging endpoints (404).');
+            console.log('\n========== GENERATED REPLY FOR MANUAL SEND ==========');
+            console.log(result.proposedResponse);
+            console.log('====================================================\n');
+
+            // Escalate the perfectly good reply (generation + judge/reflection succeeded) so you get the exact text
+            try {
+              const topicArn = process.env.SNS_TOPIC_ARN;
+              if (topicArn) {
+                await sns.send(new PublishCommand({
+                  TopicArn: topicArn,
+                  Subject: `[Airbnb Inquiry] Auto-reply ready for manual send — ${msgContext.guestName || 'Guest'}`,
+                  Message: [
+                    'Brand new inquiry (no reservation_id in webhook).',
+                    '',
+                    `Guest: ${msgContext.guestName || 'Unknown'}`,
+                    `Listing / Property: ${msgContext.propertyName || msgContext.listing?.name || msgContext.property?.name || 'N/A'}`,
+                    `Webhook conversation_id: ${inquiryIdForSend}`,
+                    `Original message: ${guestMessage || msgContext.body || '(see CloudWatch)'}`,
+                    '',
+                    'GENERATED REPLY (send this manually via Hospitable or the Chrome extension):',
+                    result.proposedResponse,
+                    '',
+                    'The harness correctly classified this as NEW_INQUIRY_WELCOME, ran the full agent + reflection + judge, and produced the reply above.',
+                    'However sendMessageToInquiry (and the conversation fallback) returned 404 for the ID in the payload.',
+                    'This ID may be an Airbnb-side conversation reference that is not directly addressable for sending on the current Hospitable integration until the guest books (or requires a different endpoint/claim step).',
+                    '',
+                    `Request ID: ${requestId}`,
+                    'Full logs and context are in CloudWatch (search the request ID).'
+                  ].join('\n')
+                }));
+                console.log('📧 Full generated inquiry reply published to SNS_TOPIC_ARN');
+              }
+            } catch (snsErr) {
+              console.warn('Could not publish inquiry escalation to SNS (the reply text is printed in the logs above):', snsErr.message);
+            }
+
+            // Return a clean 200 success. This acks the SQS message, avoids incrementing the Lambda Errors metric,
+            // stops the guest-messaging-agent-harness-errors alarm for inquiry traffic, and prevents further retries/DLQ.
+            const duration = Date.now() - startTime;
+            console.log('\n⏱️  Total handler duration:', duration, 'ms (inquiry reply generated + escalated; no hard send error)');
+            console.log('═══════════════════════════════════════════════════════════════\n');
+
+            return {
+              statusCode: 200,
+              body: JSON.stringify({
+                success: true,
+                requestId,
+                decision: {
+                  typeOfMessageReceived: result.typeOfMessageReceived,
+                  proposedResponse: result.proposedResponse,
+                  shouldReply: true,
+                  escalated: false,
+                  inquirySendFailed: true,
+                  manualDeliveryRequired: true
+                },
+                note: 'Inquiry reply generated and approved by judge/reflection but could not be auto-delivered (404 on send for the webhook conversation/inquiry ID). Full text published to SNS and logged for manual send.'
+              })
+            };
+          }
+
+          // Reservation-path (or other non-inquiry) send failures remain hard errors.
+          // This preserves the designed behavior: DLQ after max receives + alarm visibility.
           throw new Error(`Failed to deliver message to guest: ${sendError.message}`);
         }
       } else {

@@ -319,6 +319,38 @@ export class HospitableClient {
   }
 
   /**
+   * Send a message for an inquiry (pre-booking / no reservation_id case).
+   * The old monolithic system had a dedicated sendInquiryMessage path for webhooks
+   * where reservation_id is null but conversation_id (or equivalent) is present.
+   * We try the /inquiries/{id}/messages endpoint (symmetric to getInquiryDetails).
+   * If this (or the conversation fallback) 404s for the ID provided in the webhook,
+   * the handler will escalate the generated reply instead of hard-failing the Lambda.
+   */
+  async sendMessageToInquiry(inquiryId, body) {
+    if (!inquiryId) throw new Error('inquiryId is required to send a message');
+    if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
+
+    return this._withRetry('sendMessageToInquiry', async () => {
+      const token = await this.getToken();
+
+      const response = await axios.post(
+        `${this.baseUrl}/inquiries/${inquiryId}/messages`,
+        { body },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          timeout: 15000
+        }
+      );
+
+      return response.data?.data || response.data;
+    });
+  }
+
+  /**
    * Get full details for an inquiry (used for pre-approval detection).
    */
   async getInquiryDetails(inquiryId) {
