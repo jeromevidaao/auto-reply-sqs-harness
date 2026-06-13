@@ -260,7 +260,8 @@ export class GuestMessagingAgent {
     if (context.listingId) lines.push(`- Listing ID: ${context.listingId}`);
     const pc = (context.petCount != null ? context.petCount : (context.hasPets ? 1 : 0));
     lines.push(`- Pets: ${context.hasPets ? 'yes' : 'no'} (count: ${pc})`);
-    if (context.hasPets != null) lines.push(`- hasPets (from reservation): ${context.hasPets}`);
+    if (context.hasPets != null) lines.push(`- hasPets (from reservation/inquiry): ${context.hasPets}`);
+    if (context.petCount != null) lines.push(`- petCount (from reservation/inquiry): ${context.petCount}`);
     if (context.propertyName) lines.push(`- Property: ${context.propertyName}`);
 
     // Computed stay timing + days (helps NEW_RESERVATION_WELCOME follow exact timing rules for check-in instructions)
@@ -739,6 +740,14 @@ export class GuestMessagingAgent {
     if (traces.hasRecentHostMessage) {
       enrichedContext.recentHostActivity = true;
       console.log('[Agent] → Recent host message detected — first pass will be biased toward suppression to avoid duplicates');
+    }
+
+    // Merge pet info surfaced by ConversationContextTool (inquiry path) if handler/webhook did not provide it.
+    // Ensures _buildUserPrompt and welcome pet-mismatch logic see the correct count (prevents "add the pets" on inquiries where pets were declared).
+    if (traces.petCount != null && (enrichedContext.petCount == null || enrichedContext.petCount === 0)) {
+      enrichedContext.petCount = traces.petCount;
+      if (enrichedContext.hasPets == null) enrichedContext.hasPets = !!traces.hasPets;
+      console.log('[Agent] → Pet count merged from conversation traces (inquiry enrichment):', enrichedContext.petCount);
     }
 
     // Broad safety net: any cancellation talk + recent host activity = escalate so Jerome can watch

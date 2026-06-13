@@ -228,9 +228,47 @@ export const handler = async (event, context) => {
     msgContext.guestName = extractedGuestName;
   }
 
+  // === Normalize pet/guest count directly from common webhook payload shapes (res + inquiry) ===
+  // Inquiry webhooks (invite sent, pre-booking message.created) and some reservation events include
+  // guests.pet_count (or equivalent) at the data level. Without normalization here the agent sees
+  // undefined → defaults to hasPets:false / count:0 in _buildUserPrompt and welcome logic then
+  // incorrectly emits the "add the pets to your reservation" mismatch text even when guest selected pets.
+  if (msgContext.petCount == null && msgContext.pet_count != null) {
+    msgContext.petCount = Number(msgContext.pet_count) || 0;
+    if (msgContext.hasPets == null) msgContext.hasPets = msgContext.petCount > 0;
+  }
+  if (msgContext.hasPets == null && msgContext.has_pets != null) {
+    msgContext.hasPets = !!msgContext.has_pets;
+  }
+  if (msgContext.guests) {
+    const g = msgContext.guests;
+    const pc = Number(g.pet_count || g.pets || g.petCount || g.number_of_pets || 0);
+    if (msgContext.petCount == null && pc > 0) {
+      msgContext.petCount = pc;
+    }
+    if (msgContext.hasPets == null) {
+      msgContext.hasPets = (pc > 0) || !!g.has_pets;
+    }
+    if (msgContext.petCount == null && pc === 0) {
+      msgContext.petCount = 0;
+    }
+  }
+  if (msgContext.petCount == null && msgContext.number_of_pets != null) {
+    msgContext.petCount = Number(msgContext.number_of_pets) || 0;
+    if (msgContext.hasPets == null) msgContext.hasPets = msgContext.petCount > 0;
+  }
+  if (msgContext.petCount == null && msgContext.pets != null) {
+    const p = Number(msgContext.pets);
+    if (!isNaN(p)) {
+      msgContext.petCount = p;
+      if (msgContext.hasPets == null) msgContext.hasPets = p > 0;
+    }
+  }
+
   // === Early enrichment from full reservation details (for reliable petCount, checkIn/Out, listing on NEW_RESERVATION_WELCOME etc) ===
   // Message webhooks after booking often lack the full guests.pet_count etc that reservation.created provided in the old system.
   // Fetching here ensures the agent + welcome logic has accurate hasPets/petCount for the critical pet fee mismatch rules.
+  // (Inquiries are enriched separately below using getInquiryDetails.)
   const reservationIdForEnrich = msgContext.reservationId || msgContext.reservation_id || msgContext.reservation?.id;
   if (reservationIdForEnrich) {
     try {
@@ -330,6 +368,61 @@ export const handler = async (event, context) => {
 
   if (msgContext.isInquiry) {
     console.log('[Handler] Detected as INQUIRY (no reservation_id present) — will route to conversation-based send + context tools.');
+  }
+
+  // === Early enrichment from inquiry details (petCount / dates for NEW_INQUIRY_WELCOME pet logic) ===
+  // Inquiries (invite sent, pre-booking) legitimately have no reservation yet. The guest selects #pets
+  // (e.g. "2 pets") at inquiry time and this is visible in Hospitable as "2 guests, 2 pets" on the invite.
+  // Without fetching /inquiries/{id} (or using the normalized webhook fields above), hasPets/petCount stay
+  // falsy, the welcome prompt sees count:0, and the agent emits the "add the pets ... fee is included"
+  // mismatch sentence (wrong when pets were already declared on the inquiry). Same mismatch rules apply
+  // to NEW_INQUIRY_WELCOME per welcome-messages.md + pet-policy.md.
+  const inquiryIdForEnrich = msgContext.conversation_id || msgContext.airbnb_conversation_id || msgContext.inquiry_id || msgContext.inquiryId;
+  const needsInquiryEnrich = msgContext.isInquiry || (!reservationIdForEnrich && inquiryIdForEnrich);
+  if (needsInquiryEnrich && inquiryIdForEnrich) {
+    try {
+      const enrichClient = new HospitableClient();
+      const fullInquiry = await enrichClient.getInquiryDetails(inquiryIdForEnrich).catch((e) => {
+        console.warn('[Handler] Inquiry enrichment fetch failed (non-fatal):', e?.message || e);
+        return null;
+      });
+      if (fullInquiry) {
+        // Dates (inquiries may use check_in/arrival_date or similar)
+        if (!msgContext.checkIn && (fullInquiry.check_in || fullInquiry.arrival_date)) {
+          msgContext.checkIn = fullInquiry.check_in || fullInquiry.arrival_date;
+        }
+        if (!msgContext.checkOut && (fullInquiry.check_out || fullInquiry.departure_date)) {
+          msgContext.checkOut = fullInquiry.check_out || fullInquiry.departure_date;
+        }
+
+        // Pet count - try multiple shapes Hospitable uses for inquiries
+        let pc = 0;
+        if (fullInquiry.guests) {
+          pc = Number(fullInquiry.guests.pet_count || fullInquiry.guests.pets || fullInquiry.guests.number_of_pets || fullInquiry.guests.petCount || 0);
+        }
+        if (!pc) {
+          pc = Number(fullInquiry.pet_count || fullInquiry.pets || fullInquiry.number_of_pets || fullInquiry.petCount || 0);
+        }
+        if (pc > 0) {
+          if (msgContext.hasPets == null) msgContext.hasPets = true;
+          if (msgContext.petCount == null || msgContext.petCount === 0) msgContext.petCount = pc;
+        } else if (fullInquiry.guests || fullInquiry.pet_count != null || fullInquiry.pets != null) {
+          // We got a guests block or explicit pet field → trust a zero
+          if (msgContext.hasPets == null) msgContext.hasPets = false;
+          if (msgContext.petCount == null) msgContext.petCount = 0;
+        }
+
+        // Property/listing if present on the inquiry record
+        if (fullInquiry.properties?.[0]) {
+          if (!msgContext.listingId) msgContext.listingId = fullInquiry.properties[0].id;
+          if (!msgContext.propertyName) msgContext.propertyName = fullInquiry.properties[0].name;
+        }
+
+        console.log('[Handler] Enriched msgContext from inquiry details (pet/dates/listing for NEW_INQUIRY_WELCOME & pet mismatch logic)');
+      }
+    } catch (e) {
+      console.warn('[Handler] Early inquiry enrichment skipped (non-fatal):', e?.message || e);
+    }
   }
 
   // === Robust property / listing name normalization for ALL cases (reservations + inquiries + plain messages) ===

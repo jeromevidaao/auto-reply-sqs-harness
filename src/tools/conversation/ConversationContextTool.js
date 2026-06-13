@@ -357,6 +357,26 @@ export class ConversationContextTool extends BaseTool {
             result.traces.push('Pre-approval detected on inquiry (fast path should be used)');
           }
 
+          // Extract pet count from inquiry details (so NEW_INQUIRY_WELCOME sees accurate hasPets/petCount
+          // even if webhook was minimal and handler enrichment did not run or had no id yet).
+          // This prevents the "add the pets to your reservation" mismatch text when guest already declared pets.
+          let pc = 0;
+          if (inquiry.guests) {
+            pc = Number(inquiry.guests.pet_count || inquiry.guests.pets || inquiry.guests.number_of_pets || inquiry.guests.petCount || 0);
+          }
+          if (!pc) {
+            pc = Number(inquiry.pet_count || inquiry.pets || inquiry.number_of_pets || inquiry.petCount || 0);
+          }
+          if (pc > 0) {
+            result.hasPets = true;
+            result.petCount = pc;
+            result.traces.push(`Pet count from inquiry details: ${pc}`);
+          } else if (inquiry.guests || inquiry.pet_count != null || inquiry.pets != null) {
+            result.hasPets = false;
+            result.petCount = 0;
+            result.traces.push('Zero pets confirmed from inquiry details');
+          }
+
           // Also try to fetch recent messages to look for explicit pre-approval language
           try {
             const messages = await this.hospitableClient.getConversationMessages(inquiryId, 8);
