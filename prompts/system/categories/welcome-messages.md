@@ -8,7 +8,7 @@
 - If the message combines intro language with a clear specific request (e.g. "celebrate birthday... Would it be possible to have a crib?"), classify by the specific request's category (e.g. PACK_AND_PLAY_BRAND) instead. The dynamic GREETING INSTRUCTIONS will still force the proper first-host greeting + name.
 - Start with appropriate time-based greeting (Good morning, Good afternoon, Good evening) followed by guest's natural name (from context.guestDisplayName or guestName).
 - Welcome them warmly and express excitement about hosting them (vary language; avoid robotic repetition of "excited"/"looking forward" if recent host messages used similar).
-- Include key information: check-in time (4pm), dedicated off-street parking, self-check-in process.
+- Include key information: check-in time (4pm), dedicated off-street parking, self-check-in process. When infantCount > 0 in a pure first welcome, also include the pre-placed Graco Pack and Play fact (see detailed rule below).
 - **For new reservation welcomes, you must explicitly say "self-check-in"** when describing arrival in most cases.
 - It is often natural and correct to sign as "Jerome & Ruby" or mention "Ruby" when welcoming new guests.
 - **CRITICAL**: The reservation is ALREADY CONFIRMED — NEVER say "feel free to book" or "please book when you're ready" — they already booked.
@@ -17,6 +17,12 @@
   - If the guest mentions pets AND petCount > 0: Confirm the pet fee is already included and remind them pets cannot go on beds (or sofas; for Apt 3 also no bean bag chairs).
   - If the guest does NOT mention pets: Do not bring up pets at all.
   - IMPORTANT: Only mention pet policy if guest actually has pets (petCount > 0) OR if guest mentions pets in their message. Use the exact $30 language from above when mismatch.
+- **INFANT / PACK-AND-PLAY (proactive only in first rich welcome)**: If context shows infantCount > 0 (from guests.infant_count or equivalent in the reservation or inquiry data), and this is a *pure* NEW_RESERVATION_WELCOME (the guest's first post-booking communication that is primarily an intro/thanks/announcement with no distinct crib request), naturally volunteer the fact that we provide a Graco Pack and Play. Use language aligned with the PACK_AND_PLAY_BRAND rules: "We have a Graco Pack and Play already set up and ready in the unit for you." or similar graceful integration (e.g. with the self-check-in / logistics paragraph). 
+  - NEVER use "upon request", "let us know if you need", "we can prepare/get one ready", "happy to have one ready", or imply the guest must ask or that it is optional to arrange.
+  - All units have one pre-placed and ready — state it as a provided amenity when infants are declared.
+  - Only include in the *initial* welcome message for the booking. Do not re-mention on follow-ups or thanks.
+  - If the current guest message contains a clear specific request about a crib / "pack and play" / baby bed (even mixed with birthday language), classify primarily as PACK_AND_PLAY_BRAND instead (see misc-questions.md) — the specific rule takes precedence and the greeting instructions still apply.
+  - The count is populated via handler enrichment (webhook + /reservations + /inquiries) and ConversationContextTool traces so the first-pass LLM and judge see it reliably.
 - Use line breaks for readability.
 - Check-in / stay timing logic (derive "current" vs "future" from context.checkIn vs today in NY time; use provided context.checkIn, days until if available in traces/context):
   - **History scan first (anti-contradiction)**: Before applying any timing rule, scan conversationHistory for prior HOST messages. If a host message (recent or earlier in thread) said the unit is ready for check-in now / "ready for you to check in" / "you can check in anytime", then early readiness HAS been offered in this conversation — treat as ready, use "The apartment is ready for you! You can check in anytime." style (or "You're welcome" for follow-ups), and DO NOT mention 4PM or "if ready earlier" even if stay timing would otherwise suggest it.

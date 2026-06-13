@@ -262,6 +262,9 @@ export class GuestMessagingAgent {
     lines.push(`- Pets: ${context.hasPets ? 'yes' : 'no'} (count: ${pc})`);
     if (context.hasPets != null) lines.push(`- hasPets (from reservation/inquiry): ${context.hasPets}`);
     if (context.petCount != null) lines.push(`- petCount (from reservation/inquiry): ${context.petCount}`);
+    const ic = (context.infantCount != null ? context.infantCount : (context.conversationTraces && context.conversationTraces.infantCount != null ? context.conversationTraces.infantCount : 0));
+    if (context.infantCount != null || ic > 0) lines.push(`- infantCount (from reservation/inquiry guests): ${ic}`);
+    if (context.childCount != null) lines.push(`- childCount (from reservation/inquiry): ${context.childCount}`);
     if (context.propertyName) lines.push(`- Property: ${context.propertyName}`);
 
     // Computed stay timing + days (helps NEW_RESERVATION_WELCOME follow exact timing rules for check-in instructions)
@@ -298,6 +301,14 @@ export class GuestMessagingAgent {
       if (!readinessOffered) {
         lines.push(`- ALSO CRITICAL (4pm + core logistics for same future NEW_RESERVATION_WELCOME case): Since earlyUnitReadyOffered is false (no prior host said "unit is ready for you to check in now"), the proposedResponse MUST also contain the substring "4pm" (examples that work: "Check-in is at 4pm", "at 4pm with self-check-in", "Check-in starts at 4PM", "4pm check-in"). This is required by the first-post-booking-birthday-abby rubric (requiredPhrases includes "4pm" alongside "self-check-in", "parking", "detailed check-in instructions 3 days before"). Ensure "self-check-in" and a parking mention also appear as part of the standard key information for first welcomes. The Taylor anti-contradiction rules (and the WARNING block above) only suppress 4pm when readiness was offered or history fetch failed on a follow-up. For this pure first welcome on future stay with no history, include the 4pm.`);
       }
+    }
+
+    // Proactive pack-and-play mention for declared infants (only in the first rich welcome / pure NEW_RESERVATION_WELCOME).
+    // Mirrors the 3-day / 4pm forcing pattern. The count is populated from guests.infant_count during handler enrichment
+    // and ConversationContextTool (inquiry path). Rule lives in welcome-messages.md; this ensures the first-pass LLM sees it.
+    const infantCountForPrompt = (context.infantCount != null ? context.infantCount : (context.conversationTraces?.infantCount || 0));
+    if (infantCountForPrompt > 0) {
+      lines.push(`- CRITICAL FOR NEW_RESERVATION_WELCOME (INFANTS): infantCount=${infantCountForPrompt} (>0 from guests.infant_count). For pure first-post-booking welcomes (first host/auto message in thread, empty or minimal conversationHistory, no explicit crib/ "pack and play" / baby bed ask in the current guest message), naturally include in the logistics that we provide a Graco Pack and Play that is already set up and ready in the unit. Use phrasing consistent with the PACK_AND_PLAY_BRAND category: include "Graco Pack and Play", "already set up", "ready". Prefer integrating it gracefully (e.g. after self-check-in or parking). NEVER say "upon request", "happy to prepare one", "let us know if you need a crib", "we can get one ready for you", or anything implying the guest must ask or that it is not pre-placed. If the guest message has a clear specific crib request (even with birthday language), PACK_AND_PLAY_BRAND category takes precedence and uses its exact pre-placed language. Only surface this fact for the initial welcome when infantCount > 0; do not repeat on follow-ups.`);
     }
 
     if (context.conversationHistory?.length) {

@@ -271,6 +271,16 @@ export const handler = async (event, context) => {
     if (msgContext.petCount == null && pc === 0) {
       msgContext.petCount = 0;
     }
+    // Also capture infant/child counts for proactive pack-and-play mention in first welcome
+    if (msgContext.infantCount == null) {
+      msgContext.infantCount = Number(g.infant_count || g.infants || g.infantCount || 0);
+    }
+    if (msgContext.childCount == null) {
+      msgContext.childCount = Number(g.child_count || g.children || g.childCount || 0);
+    }
+    if (msgContext.adultCount == null) {
+      msgContext.adultCount = Number(g.adult_count || g.adults || g.adultCount || 0);
+    }
   }
   if (msgContext.petCount == null && msgContext.number_of_pets != null) {
     msgContext.petCount = Number(msgContext.number_of_pets) || 0;
@@ -282,6 +292,13 @@ export const handler = async (event, context) => {
       msgContext.petCount = p;
       if (msgContext.hasPets == null) msgContext.hasPets = p > 0;
     }
+  }
+  // Direct top-level infant/child counts (some webhook shapes)
+  if (msgContext.infantCount == null && msgContext.infant_count != null) {
+    msgContext.infantCount = Number(msgContext.infant_count) || 0;
+  }
+  if (msgContext.childCount == null && msgContext.child_count != null) {
+    msgContext.childCount = Number(msgContext.child_count) || 0;
   }
 
   // === Early enrichment from full reservation details (for reliable petCount, checkIn/Out, listing on NEW_RESERVATION_WELCOME etc) ===
@@ -303,6 +320,13 @@ export const handler = async (event, context) => {
           const pc = Number(fullRes.guests.pet_count || 0);
           if (msgContext.hasPets == null) msgContext.hasPets = pc > 0;
           if (msgContext.petCount == null) msgContext.petCount = pc;
+          // Capture infant/child counts (for proactive pack-and-play info in first NEW_RESERVATION_WELCOME)
+          if (msgContext.infantCount == null) {
+            msgContext.infantCount = Number(fullRes.guests.infant_count || fullRes.guests.infants || fullRes.guests.infantCount || 0);
+          }
+          if (msgContext.childCount == null) {
+            msgContext.childCount = Number(fullRes.guests.child_count || fullRes.guests.children || fullRes.guests.childCount || 0);
+          }
         }
         if (fullRes.properties?.[0]) {
           if (!msgContext.listingId) msgContext.listingId = fullRes.properties[0].id;
@@ -431,6 +455,23 @@ export const handler = async (event, context) => {
           if (msgContext.petCount == null) msgContext.petCount = 0;
         }
 
+        // Infant / child counts from inquiry guests (for proactive pack-and-play mention in first welcome)
+        if (fullInquiry.guests) {
+          const g = fullInquiry.guests;
+          if (msgContext.infantCount == null) {
+            msgContext.infantCount = Number(g.infant_count || g.infants || g.infantCount || 0);
+          }
+          if (msgContext.childCount == null) {
+            msgContext.childCount = Number(g.child_count || g.children || g.childCount || 0);
+          }
+        }
+        if (msgContext.infantCount == null) {
+          msgContext.infantCount = Number(fullInquiry.infant_count || fullInquiry.infants || fullInquiry.infantCount || 0);
+        }
+        if (msgContext.childCount == null) {
+          msgContext.childCount = Number(fullInquiry.child_count || fullInquiry.children || fullInquiry.childCount || 0);
+        }
+
         // Property/listing if present on the inquiry record
         if (fullInquiry.properties?.[0]) {
           if (!msgContext.listingId) msgContext.listingId = fullInquiry.properties[0].id;
@@ -490,6 +531,8 @@ export const handler = async (event, context) => {
     bookingDate: msgContext.bookingDate,
     hasPets: msgContext.hasPets,
     petCount: msgContext.petCount,
+    infantCount: msgContext.infantCount,
+    childCount: msgContext.childCount,
     conversation_id: msgContext.conversation_id,
     airbnb_conversation_id: msgContext.airbnb_conversation_id,
     reservationId: msgContext.reservationId || msgContext.reservation_id,

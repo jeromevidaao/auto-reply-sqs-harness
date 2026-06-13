@@ -71,6 +71,28 @@ function extractPetFromInquiry(inquiry) {
   return { hasPets, petCount, rawPc: pc };
 }
 
+function extractInfantFromInquiry(inquiry) {
+  // Mirror of the production infant extraction added for pack-and-play proactive in first welcome.
+  let ic = 0;
+  if (inquiry?.guests) {
+    ic = Number(
+      inquiry.guests.infant_count ||
+      inquiry.guests.infants ||
+      inquiry.guests.infantCount ||
+      0
+    );
+  }
+  if (!ic) {
+    ic = Number(
+      inquiry?.infant_count ||
+      inquiry?.infants ||
+      inquiry?.infantCount ||
+      0
+    );
+  }
+  return { infantCount: ic };
+}
+
 async function main() {
   const id = process.argv[2];
 
@@ -142,6 +164,15 @@ async function main() {
     } else {
       console.log('\n⚠️  No usable pet fields in the inquiry record.');
       console.log('   Webhook normalization (guests.pet_count etc. at message time) would be the only source.');
+    }
+
+    const infant = extractInfantFromInquiry(inquiry);
+    console.log('\nINFANT COUNT (for proactive pack-and-play in first NEW_RESERVATION_WELCOME):');
+    console.log('infantCount:', infant.infantCount);
+    if (infant.infantCount > 0) {
+      console.log('✅ infantCount > 0 — first welcome should proactively note the Graco Pack and Play (pre-placed, ready).');
+    } else {
+      console.log('   (No infants declared in this record.)');
     }
 
     // Simulate the new message-based inference fallback (used in handler + ContextTool

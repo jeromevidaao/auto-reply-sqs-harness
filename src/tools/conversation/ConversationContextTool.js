@@ -405,6 +405,34 @@ export class ConversationContextTool extends BaseTool {
             result.traces.push('Zero pets confirmed from inquiry details');
           }
 
+          // Extract infant/child counts (for proactive pack-and-play mention in pure first NEW_RESERVATION_WELCOME / first host message).
+          // If infants > 0 we can volunteer "We have a Graco Pack and Play already set up and ready" in the rich welcome.
+          let ic = 0;
+          if (inquiry.guests) {
+            ic = Number(inquiry.guests.infant_count || inquiry.guests.infants || inquiry.guests.infantCount || 0);
+          }
+          if (!ic) {
+            ic = Number(inquiry.infant_count || inquiry.infants || inquiry.infantCount || 0);
+          }
+          if (ic > 0) {
+            result.infantCount = ic;
+            result.traces.push(`Infant count from inquiry details: ${ic} (will trigger pack-and-play note in first welcome)`);
+          } else if (inquiry.guests || inquiry.infant_count != null || inquiry.infants != null) {
+            result.infantCount = 0;
+            result.traces.push('Zero infants confirmed from inquiry details');
+          }
+
+          let cc = 0;
+          if (inquiry.guests) {
+            cc = Number(inquiry.guests.child_count || inquiry.guests.children || inquiry.guests.childCount || 0);
+          }
+          if (!cc) {
+            cc = Number(inquiry.child_count || inquiry.children || inquiry.childCount || 0);
+          }
+          if (cc > 0 || (inquiry.guests && inquiry.guests.child_count != null)) {
+            result.childCount = cc;
+          }
+
           // Fallback inference from the guest message text when the API (and webhook) did not
           // provide pet_count. Important for inquiries where the guest declares pets explicitly
           // ("we have two dogs", "bringing our pets") but structured data is missing.
