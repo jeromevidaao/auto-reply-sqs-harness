@@ -144,6 +144,28 @@ async function main() {
       console.log('   Webhook normalization (guests.pet_count etc. at message time) would be the only source.');
     }
 
+    // Simulate the new message-based inference fallback (used in handler + ContextTool
+    // when API + webhook both lack the count). For the real Nicole message this would
+    // have produced petCount=2.
+    const nicoleMessage = 'Hello! We are interesting in booking tomorrow night. Is it okay if we bring our two dogs? A very well behaved 8 year English old golden retriever and a sweet 5 year old cockapoo. Thanks!';
+    const inferred = (function inferPetCountFromMessage(text) {
+      if (!text || typeof text !== 'string') return 0;
+      const lower = text.toLowerCase();
+      if (!/(dog|dogs|pet|pets|cat|cats|puppy|puppies|animal|animals)/.test(lower)) return 0;
+      const numMatch = lower.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(dog|dogs|pet|pets|cat|cats|puppy|puppies)/);
+      if (numMatch) {
+        const word = numMatch[1];
+        const num = parseInt(word, 10) || ({ one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }[word] || 1);
+        return Math.min(Math.max(num, 1), 2);
+      }
+      return 1;
+    })(nicoleMessage);
+    console.log('\nMessage-based inference fallback for Nicole-style text:');
+    console.log('  Inferred hasPets:', inferred > 0, 'petCount:', inferred);
+    if (inferred > 0 && pet.petCount === 0) {
+      console.log('  → This fallback would have supplied the correct count to the welcome logic.');
+    }
+
     // Bonus: try conversation messages on the same ID (very common for inquiry webhooks)
     console.log('\n→ Also attempting getConversationMessages on the same ID...');
     try {

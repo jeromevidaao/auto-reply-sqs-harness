@@ -26,6 +26,21 @@ export class ConversationContextTool extends BaseTool {
     const conversationId = inquiryId || reservationId;
     const isInquiry = !context.reservationId && !!inquiryId;
 
+    // Local helper (mirrors the one in the Lambda handler). See comments there for rationale.
+    function inferPetCountFromMessage(text) {
+      if (!text || typeof text !== 'string') return 0;
+      const lower = text.toLowerCase();
+      if (!/(dog|dogs|pet|pets|cat|cats|puppy|puppies|animal|animals)/.test(lower)) return 0;
+
+      const numMatch = lower.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(dog|dogs|pet|pets|cat|cats|puppy|puppies)/);
+      if (numMatch) {
+        const word = numMatch[1];
+        const num = parseInt(word, 10) || ({ one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }[word] || 1);
+        return Math.min(Math.max(num, 1), 2);
+      }
+      return 1;
+    }
+
     const result = {
       hasRecentHostMessage: false,
       minutesSinceLastHostMessage: null,
@@ -375,6 +390,18 @@ export class ConversationContextTool extends BaseTool {
             result.hasPets = false;
             result.petCount = 0;
             result.traces.push('Zero pets confirmed from inquiry details');
+          }
+
+          // Fallback inference from the guest message text when the API (and webhook) did not
+          // provide pet_count. Important for inquiries where the guest declares pets explicitly
+          // ("we have two dogs", "bringing our pets") but structured data is missing.
+          if ((result.petCount == null || result.petCount === 0) && input) {
+            const inferred = inferPetCountFromMessage(input);
+            if (inferred > 0) {
+              result.hasPets = true;
+              result.petCount = inferred;
+              result.traces.push(`Inferred pet count ${inferred} from guest message text (inquiry API had no pet_count)`);
+            }
           }
 
           // Also try to fetch recent messages to look for explicit pre-approval language

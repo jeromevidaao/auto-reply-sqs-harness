@@ -363,6 +363,12 @@ export class HospitableClient {
           Accept: 'application/json',
           Authorization: `Bearer ${token}`
         },
+        params: {
+          // Request richer data (properties, guest, etc.) to better match the documented
+          // response shape that includes guests.pet_count (see Hospitable Get Inquiry by UUID docs).
+          // This helps when the webhook is minimal for pre-booking inquiries.
+          include: 'properties,guest'
+        },
         timeout: 8000
       });
 

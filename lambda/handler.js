@@ -211,6 +211,25 @@ export const handler = async (event, context) => {
   const guestMessage = extracted.message;
   const msgContext = { ...extracted.context, ...(event?.context || {}), ...(event?.payload?.context || {}) };
 
+  // Helper: infer pet count when structured data (webhook + /inquiries) is missing but the guest
+  // explicitly declares pets in their message. This covers real-world cases like the Nicole inquiry
+  // where the UI showed "2 guests, 2 pets" but neither the webhook data nor the getInquiryDetails
+  // response included guests.pet_count.
+  function inferPetCountFromMessage(text) {
+    if (!text || typeof text !== 'string') return 0;
+    const lower = text.toLowerCase();
+    if (!/(dog|dogs|pet|pets|cat|cats|puppy|puppies|animal|animals)/.test(lower)) return 0;
+
+    // Try explicit number + pet word
+    const numMatch = lower.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(dog|dogs|pet|pets|cat|cats|puppy|puppies)/);
+    if (numMatch) {
+      const word = numMatch[1];
+      const num = parseInt(word, 10) || ({ one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }[word] || 1);
+      return Math.min(Math.max(num, 1), 2); // respect max 2 pets policy
+    }
+    return 1; // at least one pet declared
+  }
+
   // Enrich guest name for greeting + personalization.
   // Prod webhooks (message.created etc) reliably include sender.first_name / full_name on guest messages.
   // Reservation/inquiry shapes may have guest or guestName. Ensure we always surface a usable guestName
@@ -422,6 +441,21 @@ export const handler = async (event, context) => {
       }
     } catch (e) {
       console.warn('[Handler] Early inquiry enrichment skipped (non-fatal):', e?.message || e);
+    }
+  }
+
+  // === Fallback: infer pet count from the guest message text for inquiries ===
+  // Per docs, /inquiries should include guests.pet_count, but in practice (e.g. some Airbnb inquiries)
+  // the structured count may be absent even after fetch (while the UI shows "2 guests, 2 pets").
+  // If the guest explicitly declares pets in their first message ("bring our two dogs", "we have a dog", etc.)
+  // and we still have no count from webhook or API, infer it so the welcome logic uses the correct
+  // "pet fee already included" branch instead of the mismatch "add the pets..." text.
+  if ((msgContext.petCount == null || msgContext.petCount === 0) && msgContext.isInquiry && guestMessage) {
+    const inferred = inferPetCountFromMessage(guestMessage);
+    if (inferred > 0) {
+      msgContext.petCount = inferred;
+      if (msgContext.hasPets == null) msgContext.hasPets = true;
+      console.log('[Handler] Inferred petCount from inquiry guest message text (API/webhook had none):', inferred);
     }
   }
 
