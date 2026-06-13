@@ -266,11 +266,17 @@ export class GuestMessagingAgent {
 
     // Computed stay timing + days (helps NEW_RESERVATION_WELCOME follow exact timing rules for check-in instructions)
     // Uses NY calendar day for "today" to match greeting / old system behavior.
+    // For eval scenarios (e.g. first-post-booking-birthday-abby with frozen dates), context may provide asOfDate
+    // (or simulatedToday) to make "future >=3 days" and the "detailed check-in instructions 3 days before" requirement
+    // deterministic regardless of wall-clock when the eval runs.
     let stayTiming = 'unknown';
     let daysUntilCheckIn = null;
     if (context.checkIn) {
       try {
-        const nyTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+        const anchor = context.asOfDate || context.simulatedToday || context.today;
+        const nyTodayStr = anchor
+          ? String(anchor).slice(0, 10)
+          : new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
         const today = new Date(nyTodayStr + 'T00:00:00');
         const ci = new Date((context.checkIn || '').slice(0,10) + 'T00:00:00');
         daysUntilCheckIn = Math.round((ci - today) / (1000 * 3600 * 24));
@@ -654,7 +660,19 @@ export class GuestMessagingAgent {
   _looksLikeCheckInDay(ctx = {}) {
     if (!ctx.checkIn) return false;
 
-    const today = new Date().toISOString().split('T')[0];
+    const anchor = ctx.asOfDate || ctx.simulatedToday || ctx.today;
+    let today;
+    if (anchor) {
+      today = String(anchor).slice(0, 10);
+    } else if (ctx.bookingTimestamp) {
+      try {
+        today = new Date(ctx.bookingTimestamp).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      } catch (e) {
+        today = new Date().toISOString().split('T')[0];
+      }
+    } else {
+      today = new Date().toISOString().split('T')[0];
+    }
     const checkIn = ctx.checkIn;
 
     // If check-in is today or the context already marks it as current stay

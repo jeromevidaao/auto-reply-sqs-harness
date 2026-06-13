@@ -68,7 +68,7 @@ function getNYDayKey(date) {
  * Returns signals so the LLM (and early traces) can decide whether to start with time greeting + name.
  */
 export function analyzeGreetingContext(messages = [], options = {}) {
-  const now = new Date();
+  const now = options.now || options.asOf || new Date();
   const todayKey = getNYDayKey(now);
 
   const greetingPatterns = [
@@ -199,7 +199,8 @@ export function analyzeGreetingContext(messages = [], options = {}) {
  * produce the combined greeting signals + time greeting.
  */
 export function buildGreetingSignals({ conversationHistory = [], liveHostMessages = null, options = {} } = {}) {
-  const timeInfo = getTimeBasedGreeting();
+  const now = options.now || options.asOf || new Date();
+  const timeInfo = getTimeBasedGreeting(now);
 
   const messagesToUse = liveHostMessages && liveHostMessages.length > 0
     ? liveHostMessages
