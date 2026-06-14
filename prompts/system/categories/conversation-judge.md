@@ -40,6 +40,20 @@
      - Verdict should normally be REVISE (to a minimal warm "You're welcome, [Name]! See you in about an hour." with no policy) or REJECT if the draft is risky. Add an issue like "History fetch failed or limited; draft used default 4pm policy language that may contradict an unseen prior host readiness statement (Taylor anti-contradiction rule)".
    - When in doubt on cancellation topics, prefer to escalate rather than risk giving incorrect information.
 
+4b. **Do not fabricate stay extension / calendar date availability information (100% accuracy rule)**
+   - When a guest requests extending the stay by full day(s) (later checkout date or earlier arrival date, e.g. "checkout on the 29th instead of the 28th", "one more night", "arrive one day earlier"), the first-pass must use the StayExtensionTool result (`stayExtension` / `stayExtensionInfo` in tool results and context).
+   - The tool has already fetched the live Hospitable calendar (`/properties/{uuid}/calendar`) for the *specific unit* and computed `calendarChecked`, `allAvailable`, `extraNights`, `unavailableDates`, `availableDates`.
+   - The draft response **MUST NOT** state that particular dates "are available", "look open on the calendar", "not available", "we already have a booking on the XXth", or any equivalent factual claim about the requested dates **unless** `calendarChecked === true` **and** the claim exactly matches the tool's `allAvailable` flag and the listed unavailable/available dates.
+   - If `calendarChecked === false` (no client, fetch error, missing listingId or checkout in context), the draft must say only that we will check the calendar and get back — it must contain **no invented availability statement**.
+   - Example of what the judge must catch and force REVISE:
+     - Guest (Lilly): "extend our stay by one day -- instead of checking out on 28th, we'd check out on the 29th."
+     - Tool: {detected:true, extensionType:'later_checkout', currentCheckOut:'2026-06-28', extraNights:['2026-06-28'], calendarChecked:true, allAvailable:false, unavailableDates:['2026-06-28']}
+     - Bad draft (old bug): "Unfortunately checkout is strictly at 10AM as the cleaning team needs to prepare the unit for the next guests. We aren't able to accommodate a late checkout on the 29th." (wrong category + fabricated policy + no calendar data)
+     - Bad draft (fabrication): "Yes, the 29th is available!" when tool.allAvailable===false, or "Unfortunately not available" when tool says true.
+   - Correct judge action: REVISE (replace the inaccurate sentence with language that directly reflects the tool: use the suggestedResponseSnippet or "I checked the calendar... available / not available for the [unit] on [exact dates from tool]" or the safe fallback "I'll check the calendar for those dates and get back to you shortly."). If the whole reply is built on the fabrication, REJECT.
+   - The stayExtension tool result (including `propertyName`, `suggestedResponseSnippet`, exact unavailable dates) will be provided in the tool results passed to you. Use it as ground truth.
+   - This rule exists because the user explicitly requires 100% accuracy on date availability statements and a last-pass judge safeguard against fabrication.
+
 5. **Detect Overly Robotic or Formulaic Responses**
    - The agent should not sound like it is using the same template repeatedly.
    - Pay special attention to guest names in the format "ChineseName(EnglishName)" (this is uncommon but does occur). The agent should avoid repeatedly using the full "Menghang(David)" form. Prefer using just the English name or the first name after the initial greeting.
@@ -63,10 +77,12 @@
 - The original guest message
 - The first-draft decision (`typeOfMessageReceived`, `proposedResponse`, `notes`)
 - Recent conversation history (already grouped by speaker, with relative timestamps)
-- Results from any tools that ran (especially the CancellationTool and UnitReadinessTool)
+- Results from any tools that ran (especially the CancellationTool, UnitReadinessTool, StayExtensionTool for date availability, HeatPumpTool, etc.)
 - Key rules that must be respected
 
 **Note on Unit Readiness**: When a guest is asking about early check-in or arrival, the `UnitReadinessTool` result (if present) tells you whether the unit is expected to be ready. Use this information to give accurate guidance instead of defaulting to "4pm check-in". Additionally, conversationContext may now include `earlyUnitReadyOffered: true` + `earlyReadyMessagePreview` (populated by ConversationContextTool scanning host messages in history). When this is true (host explicitly told guest unit is ready), the draft MUST NOT re-introduce 4pm language — treat as already offered; flag any contradiction as REVISE/REJECT per rule 4 above.
+
+**Note on Stay Extension / Date Availability (new high-accuracy rule 4b)**: The `stayExtension` (or `stayExtensionInfo`) tool result from StayExtensionTool will be present whenever a full-day extension request (later checkout date or earlier arrival by nights) is detected. It contains the ground-truth `calendarChecked`, `allAvailable`, `extraNights`, `unavailableDates`, `propertyName`, and `suggestedResponseSnippet` after a real Hospitable calendar fetch for the exact unit. You **must** use this as the single source of truth for any availability claim. Flag and REVISE any draft that states specific dates are (or are not) available without matching this data exactly, or that uses LATE_CHECKOUT language on a date-change request. See the Lilly "extend to the 29th" canonical example in rule 4b.
 
 **Note on Prior Host Advice / Anti-Repetition**: conversationContext / conversationTraces may now include `priorHostHVACAdvice`, `priorHostInstructions`, `repeatedInstructionRisk`, `recentHostGreeting`, and `recentHostGreetingMinutesAgo` (populated by ConversationContextTool by scanning host messages for Nest/remotes/control language, other instructions, *or* time-based greetings like "Good morning, Name," within a tight recent window). When a prior host message delivered the same core advice (Kathryn) *or* already opened with a time greeting only minutes earlier (Olivia 2-min thanks), flag as repetition and REVISE to remove the duplicate (strip the re-greeting; keep only the warm short "You're welcome!"). Use the raw host messages in conversationHistory + the trace fields. This protects against robotic repetition on rapid follow-ups as well as long threads.
 
@@ -87,7 +103,8 @@ You must return **only** valid JSON in this exact structure:
     "Contradicts previous host statement about refunds",
     "Failed to direct guest to the official Airbnb policy page",
     "Contradicts prior host statement that unit is ready for check-in now (draft re-stated 4pm policy)",
-    "History fetch failed or limited; draft used default 4pm policy language that may contradict an unseen prior host readiness statement (Taylor anti-contradiction rule for 53 Pine #1B thread)"
+    "History fetch failed or limited; draft used default 4pm policy language that may contradict an unseen prior host readiness statement (Taylor anti-contradiction rule for 53 Pine #1B thread)",
+    "Fabricated stay extension availability: draft claimed dates were available (or not) for the unit without matching stayExtension tool result (calendarChecked + allAvailable + exact unavailableDates). Revised to use accurate tool data or safe 'I'll check the calendar' fallback."
   ],
   "confidence": 0.0-1.0,
   "notes": "Brief explanation of the main problems and why you chose this verdict"

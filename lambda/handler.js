@@ -661,6 +661,9 @@ export const handler = async (event, context) => {
       hasHeatPumpInfo: !!result.heatPumpInfo,
       hasCancellationInfo: !!result.cancellationInfo,
       hasEventInfo: !!result.eventInfo,
+      hasStayExtensionInfo: !!result.stayExtensionInfo,
+      stayExtensionCalendarChecked: result.stayExtensionInfo ? result.stayExtensionInfo.calendarChecked : null,
+      stayExtensionAllAvailable: result.stayExtensionInfo ? result.stayExtensionInfo.allAvailable : null,
     });
 
     // Log tool results in detail (very useful for debugging)
@@ -691,6 +694,20 @@ export const handler = async (event, context) => {
     }
     if (result.eventInfo) {
       console.log('🎉 EVENT REQUEST INFO:', JSON.stringify(result.eventInfo, null, 2));
+    }
+    if (result.stayExtensionInfo) {
+      const se = result.stayExtensionInfo;
+      console.log('📅 STAY EXTENSION / DATE AVAILABILITY:', JSON.stringify({
+        detected: se.detected,
+        type: se.extensionType,
+        current: se.currentCheckIn + '→' + se.currentCheckOut,
+        proposed: se.proposedCheckOut || se.proposedCheckIn,
+        extraNights: se.extraNights,
+        calendarChecked: se.calendarChecked,
+        allAvailable: se.allAvailable,
+        unavailable: se.unavailableDates,
+        unit: se.propertyName
+      }, null, 2));
     }
 
     // Log urgent access SMS escalations (very high priority)

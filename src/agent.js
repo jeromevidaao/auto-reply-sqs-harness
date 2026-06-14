@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool, GoogleMapsTool } from './tools/index.js';
+import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool, GoogleMapsTool, StayExtensionTool } from './tools/index.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -82,6 +82,9 @@ export class GuestMessagingAgent {
       }
       if (!this.tools.has('get_travel_times')) {
         this.tools.register(new GoogleMapsTool());
+      }
+      if (!this.tools.has('check_stay_extension')) {
+        this.tools.register(new StayExtensionTool({ hospitableClient: options.hospitableClient || null }));
       }
     }
   }
@@ -480,6 +483,35 @@ export class GuestMessagingAgent {
       lines.push('For any distance or "how close / walk / drive / Uber" questions, quote the driving + walking values above directly and naturally. Report both when the guest asks about walking distance or Uber.');
     }
 
+    if (context.stayExtensionInfo) {
+      const e = context.stayExtensionInfo;
+      lines.push('');
+      lines.push('=== STAY EXTENSION / DATE CHANGE TOOL RESULT (MANDATORY for 100% accurate availability claims — do not fabricate dates) ===');
+      lines.push(`- Detected: full-day stay extension request (type=${e.extensionType || 'date_change'})`);
+      lines.push(`- Current stay: ${e.currentCheckIn || '?'} → ${e.currentCheckOut || '?'}`);
+      if (e.proposedCheckOut) lines.push(`- Guest wants checkout: ${e.proposedCheckOut}`);
+      if (e.proposedCheckIn) lines.push(`- Guest wants check-in: ${e.proposedCheckIn}`);
+      if (e.extraNights && e.extraNights.length) lines.push(`- Extra night(s) requiring calendar check: ${e.extraNights.join(', ')}`);
+      lines.push(`- Property/unit: ${e.propertyName || 'the unit'} (listingId=${e.listingId || 'unknown'})`);
+      lines.push(`- Calendar fetched from Hospitable: ${e.calendarChecked ? 'YES (live data used)' : 'NO (failed / no client / missing ids)'}`);
+      if (e.calendarChecked) {
+        lines.push(`- Result for requested extra night(s): ${e.allAvailable ? 'ALL AVAILABLE' : 'NOT AVAILABLE'}`);
+        if (e.availableDates && e.availableDates.length) lines.push(`  Available per calendar: ${e.availableDates.join(', ')}`);
+        if (e.unavailableDates && e.unavailableDates.length) lines.push(`  UNAVAILABLE / blocked per calendar: ${e.unavailableDates.join(', ')}`);
+        if (e.allAvailable) {
+          lines.push('  → Reply rule: State accurately that the dates look available on our calendar for this specific unit. Offer to extend if they confirm. Do NOT claim the reservation has already been updated.');
+        } else {
+          lines.push('  → Reply rule: State accurately "Unfortunately those dates are not available for the unit — we already have another booking overlapping [exact unavailable date(s)]".');
+        }
+      } else {
+        lines.push('  → Reply rule: Do NOT claim any specific date is available or unavailable. Say only: "I\'ll check the calendar for those dates and get back to you shortly."');
+      }
+      if (e.suggestedResponseSnippet) {
+        lines.push(`- Tool suggested snippet (reflect accurately): "${e.suggestedResponseSnippet}"`);
+      }
+      lines.push('CRITICAL: NEVER invent availability, never use LATE_CHECKOUT language for full-day requests, and never contradict this tool result. The Conversation Judge (last pass) will REVISE or REJECT any fabrication of date availability.');
+    }
+
     lines.push('');
     lines.push('Respond with the required JSON only.');
 
@@ -632,6 +664,24 @@ export class GuestMessagingAgent {
         }
       } catch (err) {
         // Non-fatal — never let a maps lookup break a reply
+      }
+    }
+
+    // Stay extension / date change requests (full nights, not hour-late checkout) — cheap regex pre-filter + tool for calendar accuracy
+    const stayExtTool = this.tools.get('check_stay_extension');
+    if (stayExtTool) {
+      try {
+        const msgLower = (guestMessage || '').toLowerCase();
+        const looksLikeExtension = /(extend.*(stay|night|day)|one more (day|night)|extra (day|night)|checkout on the \d|check out on the \d|arriv(e|ing).*(one|a) day (early|earlier)|stay (longer|until|through the)|change (checkout|check.out) (date|to))/i.test(msgLower);
+        if (looksLikeExtension) {
+          const extInfo = await stayExtTool.execute(guestMessage, enrichedContext);
+          if (extInfo && extInfo.detected) {
+            enrichedContext.stayExtensionInfo = extInfo;
+            console.log('[Agent] → Early stay extension request detected (calendarChecked=' + (extInfo.calendarChecked ? 'true' : 'false') + ', allAvailable=' + extInfo.allAvailable + ')');
+          }
+        }
+      } catch (err) {
+        // Non-fatal — we still want to reply; the tool result will indicate we could not check calendar
       }
     }
   }
@@ -922,6 +972,25 @@ export class GuestMessagingAgent {
       console.log('[Agent] → Using early event detection');
     }
 
+    // === Stay extension / date availability (prefer early trace; late fallback) ===
+    let stayExtensionInfo = enrichedContext.stayExtensionInfo || null;
+    if (!stayExtensionInfo) {
+      const extTool = this.tools.get('check_stay_extension');
+      if (extTool) {
+        try {
+          const info = await extTool.execute(guestMessage, enrichedContext);
+          if (info && info.detected) {
+            stayExtensionInfo = info;
+            console.log('[Agent] → Stay extension request detected (late, calendarChecked=' + (info.calendarChecked ? 'true' : 'false') + ')');
+          }
+        } catch (err) {
+          // non-fatal
+        }
+      }
+    } else {
+      console.log('[Agent] → Using early stay extension info (calendarChecked=' + (stayExtensionInfo.calendarChecked ? 'true' : 'false') + ')');
+    }
+
     const category = Array.isArray(finalDecision.typeOfMessageReceived)
       ? finalDecision.typeOfMessageReceived[0]
       : finalDecision.typeOfMessageReceived;
@@ -934,6 +1003,7 @@ export class GuestMessagingAgent {
       heatPumpInfo,
       cancellationInfo,
       eventInfo,
+      stayExtensionInfo,
       unitReadiness: enrichedContext.unitReadiness || null,
       earlyTraces: {
         conversationTraces: enrichedContext.conversationTraces || null,
@@ -941,6 +1011,7 @@ export class GuestMessagingAgent {
         earlyThermostatInfo: enrichedContext.earlyThermostatInfo || null,
         heatPumpInfo: heatPumpInfo || enrichedContext.heatPumpInfo || null,
         earlyEventDetection: enrichedContext.earlyEventDetection || null,
+        stayExtensionInfo: enrichedContext.stayExtensionInfo || stayExtensionInfo || null,
       },
     };
 
@@ -978,6 +1049,7 @@ export class GuestMessagingAgent {
         heatPump: heatPumpInfo,
         cancellation: cancellationInfo,
         event: eventInfo,
+        stayExtension: stayExtensionInfo,
         conversationContext: enrichedContext.conversationTraces || null,
         unitReadiness: enrichedContext.unitReadiness || null,
         travelTimes: enrichedContext.travelTimes || null,
@@ -1018,6 +1090,7 @@ export class GuestMessagingAgent {
         heatPump: heatPumpInfo,
         cancellation: cancellationInfo,
         event: eventInfo,
+        stayExtension: stayExtensionInfo,
         airbnbPolicy: cancellationInfo?.policy || null,
         conversationContext: enrichedContext.conversationTraces || null,
         unitReadiness: enrichedContext.unitReadiness || null,

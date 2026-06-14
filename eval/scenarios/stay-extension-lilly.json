@@ -1,0 +1,47 @@
+{
+  "id": "stay-extension-lilly-extend-one-day",
+  "description": "Guest Lilly asks to extend checkout from 28th to 29th (full extra night / date change). This must be classified as STAY_EXTENSION (not LATE_CHECKOUT), use the pre-seeded stayExtensionInfo tool result for 100% accurate availability, and produce a response that correctly reflects the calendar data without the old wrong 'late checkout on the 29th' language. Real production incident that exposed the hours-vs-full-day misclassification bug.",
+  "guestMessage": "Hello, I'm wondering if I could extend our stay by one day -- instead of checking out on 28th, we'd check out on the 29th. Let me know, thanks!",
+  "guestName": "Lilly",
+  "checkIn": "2026-06-25",
+  "checkOut": "2026-06-28",
+  "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+  "propertyName": "Pine Studio 1B",
+  "bookingTimestamp": "2026-06-10T14:00:00Z",
+  "context": {
+    "stayExtensionInfo": {
+      "detected": true,
+      "extensionType": "later_checkout",
+      "currentCheckIn": "2026-06-25",
+      "currentCheckOut": "2026-06-28",
+      "proposedCheckOut": "2026-06-29",
+      "extraNights": ["2026-06-28"],
+      "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+      "propertyName": "Pine Studio 1B",
+      "calendarChecked": true,
+      "allAvailable": false,
+      "availableDates": [],
+      "unavailableDates": ["2026-06-28"],
+      "calendarWindow": {"start": "2026-06-26", "end": "2026-07-01"},
+      "suggestedResponseSnippet": "Unfortunately, the 28th is not available for Pine Studio 1B — we already have another booking overlapping those dates."
+    },
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "STAY_EXTENSION",
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "strictly at 10AM",
+      "cleaning team needs to prepare the unit for the next guests",
+      "late checkout on the 29th",
+      "aren't able to accommodate a late checkout"
+    ],
+    "requiredPhrases": [
+      "checked",
+      "calendar",
+      "not available",
+      "Pine Studio 1B"
+    ]
+  },
+  "notes": "Locks the fix for the Lilly misclassification bug. Must use STAY_EXTENSION (not LATE_CHECKOUT). Must surface accurate calendar result from the seeded stayExtensionInfo (allAvailable:false for the extra night). Must not fabricate availability and must not use the hour-based late checkout policy language. The judge rule 4b and first-pass CRITICAL block in agent.js enforce this."
+}

@@ -2,8 +2,9 @@
 
 **Canonical category name(s)**: LATE_CHECKOUT, late-checkout
 
-**When to use**:
-- Guest asks for late checkout, extended checkout time, or "can we stay a bit longer on checkout day".
+**When to use (STRICT — only same-day hour shifts)**:
+- Guest asks for late checkout *by a few hours on the original checkout day* (e.g. "can we check out at 12 or 1pm?", "a bit later", "stay until noon", "leave at 1pm instead of 10am").
+- **Full calendar date changes** ("extend by one day", "checkout on the 29th instead of 28th", "one more night", "arrive one day earlier") are STAY_EXTENSION, not LATE_CHECKOUT. See stay-extension.md.
 
 **Response**:
 - Apologize.
@@ -17,3 +18,4 @@
 
 **Do not**:
 - Offer any flexibility on checkout unless the host has previously done so in the conversation history.
+- Classify a full-day stay extension request (changing the checkout *date*) as LATE_CHECKOUT. That produces the wrong policy answer (the 10AM cleaning team language does not apply to adding an extra paid night). Use STAY_EXTENSION + the calendar tool for 100% accurate availability instead.

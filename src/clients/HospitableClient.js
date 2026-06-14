@@ -399,4 +399,38 @@ export class HospitableClient {
       return response.data?.data || [];
     });
   }
+
+  /**
+   * Fetch the calendar (availability + pricing) for a specific property/listing.
+   * Used to accurately answer stay extension requests (full day date changes)
+   * without fabricating availability information.
+   *
+   * Endpoint: GET /properties/{uuid}/calendar?start_date=...&end_date=...
+   * Response entries typically include { date, available, price, min_stay, ... }
+   */
+  async getPropertyCalendar(propertyId, startDate, endDate) {
+    if (!propertyId) throw new Error('propertyId is required for getPropertyCalendar');
+    if (!startDate || !endDate) throw new Error('startDate and endDate are required for getPropertyCalendar');
+
+    return this._withRetry('getPropertyCalendar', async () => {
+      const token = await this.getToken();
+
+      const response = await axios.get(`${this.baseUrl}/properties/${propertyId}/calendar`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        params: {
+          start_date: startDate,
+          end_date: endDate
+        },
+        timeout: 10000
+      });
+
+      // Return the entries array (support both {data: [...]} and direct array shapes)
+      const payload = response.data;
+      return Array.isArray(payload) ? payload : (payload?.data || payload || []);
+    });
+  }
 }

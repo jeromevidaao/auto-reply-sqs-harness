@@ -7,6 +7,7 @@
 Reflection should run (when enabled) for these categories:
 - Any `CANCELLATION_*` category
 - `NEW_RESERVATION_WELCOME` and `NEW_INQUIRY_WELCOME` (especially when pet mismatch or availability edge cases are present)
+- Any message where `stayExtensionInfo` (full-day date change request) is present — high accuracy requirement on calendar data from the tool
 - Cases where important tools returned data (`cancellationInfo`, `thermostatInfo`, etc.)
 
 ## Inputs You Will Receive
@@ -14,7 +15,7 @@ Reflection should run (when enabled) for these categories:
 You will be given:
 - The original guest message
 - The first LLM decision (`typeOfMessageReceived`, `proposedResponse`, `notes`)
-- Results from relevant Tools (especially `CancellationTool`, conversation history snippets, prior host statements)
+- Results from relevant Tools (especially `CancellationTool`, `StayExtensionTool` for calendar/date availability, conversation history snippets, prior host statements)
 - Key rules that must not be violated (e.g. "Never contradict previous host statements about refunds")
 - Recent conversation history (last few messages)
 
@@ -27,6 +28,7 @@ Review the first draft with extreme care. Focus on:
    - Is the refund math correct based on booking timestamp and check-in date?
    - Always ensure any cancellation response directs the guest to the official live policy: https://www.airbnb.com/help/article/475
    - Are prior host commitments respected?
+   - **Stay extension / calendar availability (NEW)**: If the guest asked to extend by full days (date change on checkout or arrival), the `stayExtension` / `stayExtensionInfo` tool result (if present) contains the *live* Hospitable calendar check for the exact unit. The draft must not claim any date is available or unavailable unless it matches `calendarChecked && allAvailable + unavailableDates` exactly. If the tool did not successfully check the calendar, the draft must use the safe "I'll check the calendar and get back to you" language and must not guess. Fabricated availability statements must be revised. This is the same accuracy guarantee the Conversation Judge enforces.
 
 2. **Anti-Contradiction**
    - Does the proposed response contradict anything the host previously said in this conversation?
