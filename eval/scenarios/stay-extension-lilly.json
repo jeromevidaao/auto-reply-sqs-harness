@@ -40,7 +40,7 @@
       "checked",
       "calendar",
       "not available",
-      "Pine Studio 1B"
+      "53 Pine St #3"
     ]
   },
   "notes": "Locks the fix for the Lilly misclassification bug. Must use STAY_EXTENSION (not LATE_CHECKOUT). Must surface accurate calendar result from the seeded stayExtensionInfo (allAvailable:false for the extra night). Must not fabricate availability and must not use the hour-based late checkout policy language. The judge rule 4b and first-pass CRITICAL block in agent.js enforce this."

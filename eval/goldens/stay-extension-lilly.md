@@ -14,13 +14,13 @@
   - In this seeded case: calendarChecked=true, allAvailable=false, unavailableDates includes the extra night → reply must say the dates are not available for the unit, using the property name.
 - Never use LATE_CHECKOUT 10AM/cleaning phrasing.
 - Warm, concise, practical. Use natural name.
-- If the tool had said available, the reply would confirm "looks available on our calendar for Pine Studio 1B" and ask if they want the update.
+- If the tool had said available, the reply would confirm "looks available on our calendar for 53 Pine St #3" (or the unit name from context) and ask if they want the update.
 
 **Rubric requirements** (enforced by eval runner + judge):
 - expectedCategory: STAY_EXTENSION (or array containing it)
 - shouldReply: true
 - forbiddenPhrases: the old late-checkout 10AM + cleaning team language + any "late checkout on the 29th" phrasing
-- requiredPhrases: must mention having "checked" the "calendar", state "not available", and name the unit (e.g. "53 Pine St #3" or "West End Victorian" from context.propertyName) so the accuracy grounding is visible.
+- requiredPhrases: must mention having "checked" the "calendar", state "not available", and name the unit using "53 Pine St #3" (from the seeded tool result and context.propertyName) so the accuracy grounding is visible.
 
 **Example of a good reply for this seeded (unavailable) case**:
 Good afternoon, Lilly, thanks for asking about extending the stay. I checked the calendar for 53 Pine St #3 and unfortunately the 29th is not available — we already have another booking overlapping. Let me know if you'd like me to look at other options.

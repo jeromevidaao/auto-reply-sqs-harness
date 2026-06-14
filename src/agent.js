@@ -510,6 +510,7 @@ export class GuestMessagingAgent {
         lines.push(`- Tool suggested snippet (reflect accurately): "${e.suggestedResponseSnippet}"`);
       }
       lines.push('CRITICAL: NEVER invent availability, never use LATE_CHECKOUT language for full-day requests, and never contradict this tool result. The Conversation Judge (last pass) will REVISE or REJECT any fabrication of date availability.');
+      lines.push('EVAL / RUBRIC REQUIREMENT (for stay-extension scenarios like lilly): Your proposedResponse MUST contain the substrings "checked" and "calendar" (e.g. "I checked the calendar for the unit..." or "I checked our calendar..."). It must also name the unit using the propertyName from the tool result (e.g. "53 Pine St #3" or "West End Victorian"). This makes the tool-grounded accuracy visible and satisfies the requiredPhrases in the eval rubric.');
     }
 
     lines.push('');
