@@ -20,14 +20,15 @@
 - expectedCategory: STAY_EXTENSION (or array containing it)
 - shouldReply: true
 - forbiddenPhrases: the old late-checkout 10AM + cleaning team language + any "late checkout on the 29th" phrasing
-- requiredPhrases: must mention having "checked" the "calendar", state "not available", and name the unit "Pine Studio 1B" (or equivalent from context.propertyName) so the accuracy grounding is visible.
+- requiredPhrases: must mention having "checked" the "calendar", state "not available", and name the unit (e.g. "53 Pine St #3" or "West End Victorian" from context.propertyName) so the accuracy grounding is visible.
 
 **Example of a good reply for this seeded (unavailable) case**:
-Good afternoon, Lilly, thanks for asking about extending the stay. I checked the calendar for Pine Studio 1B and unfortunately the 28th is not available — we already have another booking overlapping. Let me know if you'd like me to look at other options.
+Good afternoon, Lilly, thanks for asking about extending the stay. I checked the calendar for 53 Pine St #3 and unfortunately the 29th is not available — we already have another booking overlapping. Let me know if you'd like me to look at other options.
 
 (The exact wording can vary naturally as long as the required accuracy elements and forbidden phrases are satisfied; the judge will also enforce the tool match.)
 
 **Notes for future regressions**:
+- The scenario now uses the real September 2026 stay dates from the user's example ("Sep 26 – 29 · 3 nights 53 Pine St #3") so the date resolution logic (anchoring bare "28th"/"29th" to the booking's month/year + wrap heuristic) can be exercised in spirit.
 - Adding a similar scenario with allAvailable=true (seeded) + required "looks available" / "checked the calendar" would also be valuable.
-- The Conversation Judge rule 4b + the CRITICAL block in _buildUserPrompt (agent.js) + the tool itself are the multi-layer defense so we never send inaccurate date availability to guests.
-- This scenario + golden + the new stay-extension.md + updated late-checkout.md lock the distinction the user requested.
+- The Conversation Judge rule 4b + the CRITICAL block in _buildUserPrompt (agent.js) + the tool itself (with improved _resolveProposedDate) are the multi-layer defense so we never send inaccurate date availability to guests.
+- This scenario + golden + the new stay-extension.md + updated late-checkout.md lock the distinction the user requested. We now also resolve bare ordinals using the full booking context (checkOut month/year) instead of naive same-month prefix.

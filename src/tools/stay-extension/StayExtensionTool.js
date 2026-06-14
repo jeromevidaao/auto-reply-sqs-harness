@@ -73,6 +73,15 @@ export class StayExtensionTool extends BaseTool {
     // Infer the proposed new checkout (or checkin) date from message + current dates.
     const extension = this._parseProposedExtension(message, currentCheckIn, currentCheckOut);
 
+    // Safety net for pure "one more night / extra night" requests (no bare day number spoken).
+    // Ensures we still propose a concrete +1 using the booking'\''s full date context (month/year).
+    const lowerForOneMore = (message || '').toLowerCase();
+    const looksLikeSimpleOneMore = /(one more|an extra|extra (day|night)|extend.*(by )?(one |a )?(day|night)|stay (one |an )?(extra|more)( night| day)?)/i.test(lowerForOneMore);
+    if (!extension.proposedCheckOut && !extension.proposedCheckIn && currentCheckOut && looksLikeSimpleOneMore) {
+      extension.proposedCheckOut = this._addDaysStr(currentCheckOut, 1);
+      extension.type = 'later_checkout';
+    }
+
     const extraNights = this._computeExtraNights(currentCheckIn, currentCheckOut, extension);
 
     if (extraNights.length === 0) {
@@ -166,11 +175,14 @@ export class StayExtensionTool extends BaseTool {
     const msg = message || '';
     const lower = msg.toLowerCase();
 
-    // Try to find explicit "on the 29th", "on 29", "the 29", "June 29" etc.
-    const dateMatch = msg.match(/(?:on the |on |the |until |through |to )?(\d{1,2})(?:st|nd|rd|th)?(?:\s*(?:of\s+)?(?:june|july|august|sept|sep|oct|nov|dec|jan|feb|mar|apr|may))? /i);
+    // Capture bare day ("28th", "the 29th") + optional month name ("of September", "Sept 3rd", "October 2").
+    // This lets us resolve full dates using the authoritative booking month/year from context.
+    const dateMatch = msg.match(/(?:on the |on |the |until |through |to )?(\d{1,2})(?:st|nd|rd|th)?(?:\s*(?:of\s+)?(\w+))?/i);
     let proposedDay = null;
+    let monthHint = null;
     if (dateMatch) {
       proposedDay = parseInt(dateMatch[1], 10);
+      monthHint = dateMatch[2] || null;
     }
 
     let type = 'later_checkout';
@@ -180,15 +192,12 @@ export class StayExtensionTool extends BaseTool {
     if (/arriv|check.in|come on|start on|earlier/.test(lower)) {
       type = 'earlier_checkin';
       if (proposedDay && currentCheckIn) {
-        const base = currentCheckIn.slice(0, 8); // YYYY-MM-
-        // naive: assume same month; real cases are usually +/-1 day so day number is sufficient
-        proposedCheckIn = `${base}${proposedDay.toString().padStart(2, '0')}`;
+        proposedCheckIn = this._resolveProposedDate(currentCheckIn, proposedDay, monthHint);
       }
     } else if (/checkout|check.out|check out|leave|depart/.test(lower)) {
       type = 'later_checkout';
       if (proposedDay && currentCheckOut) {
-        const base = currentCheckOut.slice(0, 8);
-        proposedCheckOut = `${base}${proposedDay.toString().padStart(2, '0')}`;
+        proposedCheckOut = this._resolveProposedDate(currentCheckOut, proposedDay, monthHint);
       } else if (currentCheckOut) {
         // Fallback: "one day" / "one more" language without explicit number
         if (/(one|an)\s*(more|extra|day later|additional)/i.test(lower)) {
@@ -197,13 +206,85 @@ export class StayExtensionTool extends BaseTool {
       }
     }
 
-    // If still no proposed but "one more day" style, default to +1 on checkout
-    if (!proposedCheckOut && !proposedCheckIn && currentCheckOut && /(one more|extra|extend.*(day|night))/i.test(lower)) {
+    // If still no proposed but "one more day/night" style (even without explicit "checkout" word), default to +1 on checkout.
+    // This preserves the full booking month/year context from currentCheckOut.
+    const wantsOneMore = /(one more|an extra|extra (day|night)|extend.*(by )?(one |a )?(day|night)|stay (one |an )?(extra|more)( night| day)?)/i.test(lower);
+    if (!proposedCheckOut && !proposedCheckIn && currentCheckOut && wantsOneMore) {
       proposedCheckOut = this._addDaysStr(currentCheckOut, 1);
       type = 'later_checkout';
     }
 
     return { type, proposedCheckOut, proposedCheckIn };
+  }
+
+  /**
+   * Resolve a bare day ordinal (e.g. "28th", "the 3rd") + optional month hint
+   * into a full YYYY-MM-DD date, using the booking's reference date (checkOut or checkIn)
+   * as the source of truth for year and "current" month.
+   *
+   * This is how we get the "full context for the month and year" when the guest
+   * only says "28th" or "29th" but the reservation is "Sep 26–29 2026".
+   *
+   * Heuristic for extensions:
+   * - Default to same year+month as the reference booking date.
+   * - If an explicit month name is in the guest message, use it (and bump year if it would be in the past).
+   * - For later-checkout style, if the resulting date is not strictly after the reference,
+   *   advance to the next month (handles "extend to the 5th" when current checkout is the 29th).
+   */
+  _resolveProposedDate(referenceDateStr, day, monthHint = null) {
+    if (!referenceDateStr || !day) return null;
+
+    const ref = new Date(referenceDateStr + 'T00:00:00');
+    let year = ref.getFullYear();
+    let month = ref.getMonth() + 1; // 1-12
+
+    if (monthHint) {
+      const hinted = this._monthNameToNum(monthHint);
+      if (hinted) {
+        if (hinted < month) {
+          year += 1; // e.g. guest in late Sep says "the 3rd" meaning October 3rd
+        }
+        month = hinted;
+      }
+    }
+
+    let candidate = new Date(year, month - 1, day);
+
+    // For checkout extensions (and similar), if the candidate day would be on or before
+    // the reference checkout, treat it as the *next* occurrence of that day number.
+    // This gives sensible behavior for "checkout on the 5th" near end of month,
+    // or "the 28th" when the booking checkout is the 29th.
+    const refTime = ref.getTime();
+    while (candidate.getTime() <= refTime) {
+      candidate.setMonth(candidate.getMonth() + 1);
+      // Re-apply the day in case of month length issues (e.g. 31 → 30)
+      candidate.setDate(day);
+    }
+
+    const y = candidate.getFullYear();
+    const m = String(candidate.getMonth() + 1).padStart(2, '0');
+    const d = String(candidate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  _monthNameToNum(name) {
+    if (!name) return null;
+    const n = name.toLowerCase().replace(/\.|th|st|nd|rd/g, '').trim();
+    const map = {
+      jan: 1, january: 1,
+      feb: 2, february: 2,
+      mar: 3, march: 3,
+      apr: 4, april: 4,
+      may: 5,
+      jun: 6, june: 6,
+      jul: 7, july: 7,
+      aug: 8, august: 8,
+      sep: 9, sept: 9, september: 9,
+      oct: 10, october: 10,
+      nov: 11, november: 11,
+      dec: 12, december: 12
+    };
+    return map[n] || null;
   }
 
   _computeExtraNights(currentCheckIn, currentCheckOut, extension) {
