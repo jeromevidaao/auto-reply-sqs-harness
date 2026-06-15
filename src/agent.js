@@ -856,6 +856,26 @@ export class GuestMessagingAgent {
     // Post-first-pass safety net from early traces
     let finalDecision = decision;
 
+    // Strong safety net for pure first-post-booking intros on confirmed reservations (Emma "college roommates spring break next year" case).
+    // If the LLM misclassifies as OTHER_MESSAGE despite the prompt signals (future reservation + casual trip announcement with no question or specific ask),
+    // force NEW_RESERVATION_WELCOME + shouldReply true + confidence 1.0. This ensures we reply with the rich welcome instead of escalating.
+    // The real reservation enrichment will provide checkIn etc. so the prompt CRITICAL blocks are active, but this catches LLM drift.
+    const hasRealReservation = !!(enrichedContext.reservationId || enrichedContext.reservation_id || enrichedContext.reservation?.id);
+    const msgLower = (guestMessage || '').toLowerCase();
+    const looksLikePureFutureIntro = hasRealReservation &&
+      /(trip|spring break|next year|college roommates|favorite spots|doing a trip)/.test(msgLower) &&
+      !/\?/.test(guestMessage) &&
+      !/(can we|would it be|is it possible|do you have|can you|how about)/.test(msgLower);
+    if (looksLikePureFutureIntro && (decision.typeOfMessageReceived === 'OTHER_MESSAGE' || decision.shouldReply === false)) {
+      console.log('[Agent] → SAFETY NET: Forcing NEW_RESERVATION_WELCOME + conf 1.0 + shouldReply for pure future trip intro on confirmed reservation (Emma-style case from logs)');
+      finalDecision = {
+        ...decision,
+        typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
     if (enrichedContext.recentHostActivity && decision.shouldReply) {
       console.log('[Agent] → Recent host activity detected after first pass — forcing suppression to prevent duplicate reply');
       finalDecision = {
