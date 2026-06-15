@@ -902,13 +902,14 @@ export class GuestMessagingAgent {
       finalDecision.shouldReply === false ||
       (finalDecision.typeOfMessageReceived === 'OTHER_MESSAGE' && finalDecision.proposedResponse === 'none');
 
+    // NOTE: Escalation notification is deliberately deferred until *after* reflection + judge
+    // so the decision object passed to notifyEscalation contains the full post-pipeline trace
+    // (reflection, conversationJudge, earlyTraces, notes, revised proposedResponse if any, etc.).
+    // This guarantees that every SNS/console escalation email includes (1) reservation id,
+    // (2) the exact response that was not sent, and (3) the complete reasoning trace.
     if (shouldEscalate) {
-      console.log('[Agent] → Escalation required (no auto-reply)');
-      await this.notification.notifyEscalation({
-        decision: finalDecision,
-        guestMessage,
-        context: enrichedContext,
-      });
+      console.log('[Agent] → Will escalate at end of pipeline (pre-judge decision captured; full trace added after reflection/judge)');
+      // Do not notify here — see final block after judge.
     }
 
     // === Cleaning issue detection (separate high-priority alert) ===
@@ -981,13 +982,11 @@ export class GuestMessagingAgent {
       // === Force escalation for risky cancellations so Jerome can monitor ===
       // This ensures that any cancellation conversation with prior host statements,
       // exception requests, or other risk signals results in an email alert with the direct chat URL.
+      // We set flags here; the single rich notify (with full post-judge trace) happens once at the very end of handleMessage.
       if (cancellationInfo.needsEscalation || enrichedContext.forceCancellationEscalation) {
-        console.log('[Agent] → Risky cancellation detected — forcing escalation email to jerome.ans@gmail.com');
-        await this.notification.notifyEscalation({
-          decision: finalDecision,
-          guestMessage,
-          context: enrichedContext,
-        });
+        console.log('[Agent] → Risky cancellation detected — will force escalation (rich trace) at end of pipeline');
+        finalResult.escalated = true;
+        finalResult.forceCancellationEscalation = true;
       }
     }
 
@@ -1164,6 +1163,33 @@ export class GuestMessagingAgent {
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);
+
+    // === SINGLE RICH ESCALATION NOTIFY (post-pipeline) ===
+    // Performed exactly once, using the *final* decision object after reflection + judge.
+    // This is what guarantees the SNS (and console) "manual reply needed" messages always contain:
+    // (1) reservation ID (and conversation ID), (2) the proposedResponse that was not sent,
+    // (3) the full trace: decision flags, reflection, conversationJudge (verdict + issues + notes),
+    //     earlyTraces/safety signals, rawModelOutput, and suppression/force reasons.
+    // Previously the notify happened early (pre-judge) so emails lacked the complete reasoning.
+    const finalNeedsEscalation =
+      finalResult.escalated === true ||
+      finalResult.shouldReply === false ||
+      finalResult.forceCancellationEscalation === true ||
+      (finalResult.typeOfMessageReceived === 'OTHER_MESSAGE' && finalResult.proposedResponse === 'none');
+
+    if (finalNeedsEscalation && !finalResult._escalationNotified) {
+      console.log('[Agent] → Escalation required (no auto-reply) — notifying with FULL post-reflection/judge trace');
+      try {
+        await this.notification.notifyEscalation({
+          decision: finalResult,
+          guestMessage,
+          context: enrichedContext,
+        });
+      } catch (notifyErr) {
+        console.error('[Agent] Escalation notify failed (non-fatal):', notifyErr.message);
+      }
+      finalResult._escalationNotified = true;
+    }
 
     return finalResult;
   }

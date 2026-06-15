@@ -41,6 +41,14 @@ export class ConsoleEscalationAdapter {
       lines.push(`Listing ID: ${context.listingId}`);
     }
 
+    // IDs (user requirement: surface reservation id + conv id in all escalation outputs)
+    const reservationId =
+      context.reservationId || context.reservation_id || context.reservation?.id || 'N/A';
+    const conversationId =
+      context.conversation_id || context.airbnb_conversation_id || 'N/A';
+    lines.push(`Reservation ID: ${reservationId}`);
+    lines.push(`Conversation ID: ${conversationId}`);
+
     lines.push('');
     lines.push('Guest message:');
     lines.push('---');
@@ -48,7 +56,66 @@ export class ConsoleEscalationAdapter {
     lines.push('---');
     lines.push('');
 
-    if (decision.notes) {
+    // The response the agent produced but did not send (critical for diagnosis)
+    const proposed = (decision && typeof decision.proposedResponse === 'string') ? decision.proposedResponse : 'none';
+    lines.push('RESPONSE THAT WAS NOT SENT:');
+    lines.push('```');
+    lines.push(proposed);
+    lines.push('```');
+    lines.push('');
+
+    // Full trace section (matches the SNS email enrichment)
+    lines.push('=== FULL AGENT TRACE / REASONING (how the agent reached "no auto-reply") ===');
+    lines.push('');
+
+    const coreDecision = {
+      typeOfMessageReceived: decision?.typeOfMessageReceived,
+      shouldReply: decision?.shouldReply,
+      confidence: decision?.confidence,
+      escalated: decision?.escalated,
+      suppressedDueToRecentHost: decision?.suppressedDueToRecentHost || false,
+      judgeForcedReject: !!(decision?.conversationJudge && decision.conversationJudge.verdict === 'REJECT'),
+    };
+    lines.push('Core decision:');
+    lines.push(JSON.stringify(coreDecision, null, 2));
+    lines.push('');
+
+    if (decision?.reflection) {
+      lines.push('Reflection:');
+      lines.push(JSON.stringify(decision.reflection, null, 2));
+      if (decision.reflectionNotes) lines.push('Reflection notes: ' + decision.reflectionNotes);
+      lines.push('');
+    }
+
+    if (decision?.conversationJudge) {
+      lines.push('Conversation Judge:');
+      lines.push(JSON.stringify(decision.conversationJudge, null, 2));
+      if (decision.judgeNotes) lines.push('Judge notes: ' + decision.judgeNotes);
+      lines.push('');
+    }
+
+    const et = decision?.earlyTraces || context?.conversationTraces || null;
+    if (et) {
+      const traceSummary = {
+        hasRecentHostMessage: et.hasRecentHostMessage || et.conversationTraces?.hasRecentHostMessage,
+        duplicateRisk: et.duplicateRisk || et.conversationTraces?.duplicateRisk,
+        earlyUnitReadyOffered: et.earlyUnitReadyOffered || et.conversationTraces?.earlyUnitReadyOffered,
+        historyFetchFailed: et.historyFetchFailed || et.conversationTraces?.historyFetchFailed,
+        historySource: et.historySource || et.conversationTraces?.historySource,
+      };
+      lines.push('Early traces / safety signals:');
+      lines.push(JSON.stringify(traceSummary, null, 2));
+      lines.push('');
+    }
+
+    if (decision?.rawModelOutput) {
+      const raw = String(decision.rawModelOutput);
+      lines.push('First-pass raw model output (truncated):');
+      lines.push(raw.length > 1200 ? raw.slice(0, 1200) + '…[truncated]' : raw);
+      lines.push('');
+    }
+
+    if (decision?.notes) {
       lines.push(`Notes from agent: ${decision.notes}`);
       lines.push('');
     }

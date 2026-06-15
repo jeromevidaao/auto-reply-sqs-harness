@@ -28,6 +28,19 @@ export class SnsNotificationAdapter {
       ? `${context.checkIn} → ${context.checkOut}`
       : '';
 
+    // Extract IDs for diagnostics (user requirement: always surface reservation id in escalation emails)
+    const reservationId =
+      context.reservationId ||
+      context.reservation_id ||
+      context.reservation?.id ||
+      context.reservation?.reservation_id ||
+      'N/A';
+    const conversationId =
+      context.conversation_id ||
+      context.airbnb_conversation_id ||
+      context.conversationId ||
+      'N/A';
+
     // Build direct Airbnb link if possible.
     // Prefer real conversation_id returned by Hospitable (see getReservations).
     let airbnbLink = '';
@@ -41,10 +54,13 @@ export class SnsNotificationAdapter {
 
     const subject = `[Airbnb] Manual reply needed from ${guestName} - ${property}`;
 
+    // Human summary (kept for quick scan)
     const messageLines = [
       `Guest: ${guestName}`,
       `Property: ${property}`,
       dates ? `Dates: ${dates}` : '',
+      `Reservation ID: ${reservationId}`,
+      `Conversation ID: ${conversationId}`,
       '',
       'Reason: Agent decided not to auto-reply.',
       `Category: ${decision.typeOfMessageReceived}`,
@@ -62,7 +78,103 @@ export class SnsNotificationAdapter {
       messageLines.push('');
     }
 
+    // === THE RESPONSE THAT WAS NOT SENT (critical for diagnosis) ===
+    const proposed = (decision && typeof decision.proposedResponse === 'string')
+      ? decision.proposedResponse
+      : 'none';
+    messageLines.push('RESPONSE THAT WAS NOT SENT:');
+    messageLines.push('```');
+    messageLines.push(proposed);
+    messageLines.push('```');
+    messageLines.push('');
+
+    // === FULL TRACE OF THOUGHTS / REASONING (why we escalated / did not send) ===
+    // This is the key addition: full agent decision, reflection, judge, notes, early traces, raw output.
+    // Makes every manual-needed email self-contained for root-cause without needing CW logs first.
+    messageLines.push('=== FULL AGENT TRACE / REASONING (how the agent reached "no auto-reply") ===');
+    messageLines.push('');
+
+    // Core decision flags + any suppression/force signals
+    const coreDecision = {
+      typeOfMessageReceived: decision?.typeOfMessageReceived,
+      shouldReply: decision?.shouldReply,
+      confidence: decision?.confidence,
+      escalated: decision?.escalated,
+      suppressedDueToRecentHost: decision?.suppressedDueToRecentHost || false,
+      forceCancellationEscalation: decision?.forceCancellationEscalation || context?.forceCancellationEscalation || false,
+      inquirySendFailed: decision?.inquirySendFailed || false,
+      judgeForcedReject: !!(decision?.conversationJudge && decision.conversationJudge.verdict === 'REJECT'),
+    };
+    messageLines.push('Core decision:');
+    messageLines.push(JSON.stringify(coreDecision, null, 2));
+    messageLines.push('');
+
+    // Reflection (second-pass critique) if present
+    if (decision?.reflection) {
+      messageLines.push('Reflection:');
+      messageLines.push(JSON.stringify(decision.reflection, null, 2));
+      if (decision.reflectionNotes) {
+        messageLines.push('Reflection notes: ' + decision.reflectionNotes);
+      }
+      messageLines.push('');
+    } else {
+      messageLines.push('Reflection: (not run or not present on this decision object)');
+      messageLines.push('');
+    }
+
+    // Conversation Judge (anti-rep / accuracy / policy last pass) — often the decider for REJECT → escalate
+    if (decision?.conversationJudge) {
+      messageLines.push('Conversation Judge:');
+      messageLines.push(JSON.stringify(decision.conversationJudge, null, 2));
+      if (decision.judgeNotes) {
+        messageLines.push('Judge notes: ' + decision.judgeNotes);
+      }
+      messageLines.push('');
+    } else {
+      messageLines.push('Conversation Judge: (not run or not present)');
+      messageLines.push('');
+    }
+
+    // Early traces (pre-first-pass signals from ConversationContextTool + other cheap tools)
+    const et = decision?.earlyTraces || context?.conversationTraces || context?.earlyTraces || null;
+    if (et) {
+      // Surface the most diagnostic fields without dumping the entire (sometimes large) object
+      const traceSummary = {
+        hasRecentHostMessage: et.hasRecentHostMessage || et.conversationTraces?.hasRecentHostMessage,
+        duplicateRisk: et.duplicateRisk || et.conversationTraces?.duplicateRisk,
+        earlyUnitReadyOffered: et.earlyUnitReadyOffered || et.conversationTraces?.earlyUnitReadyOffered,
+        historyFetchFailed: et.historyFetchFailed || et.conversationTraces?.historyFetchFailed,
+        historySource: et.historySource || et.conversationTraces?.historySource,
+        recentMessageCount: et.recentMessageCount || et.conversationTraces?.recentMessageCount,
+        preApprovalDetected: et.preApprovalDetected || et.conversationTraces?.preApprovalDetected,
+        repeatedInstructionRisk: et.repeatedInstructionRisk || et.conversationTraces?.repeatedInstructionRisk,
+        recentHostGreeting: et.recentHostGreeting || et.conversationTraces?.recentHostGreeting,
+      };
+      messageLines.push('Early traces / conversation safety signals:');
+      messageLines.push(JSON.stringify(traceSummary, null, 2));
+      messageLines.push('');
+    } else {
+      messageLines.push('Early traces: (none captured on this path)');
+      messageLines.push('');
+    }
+
+    // First-pass raw model output (very useful to see exactly what the LLM emitted before post-processing/safety nets/judge)
+    if (decision?.rawModelOutput) {
+      const raw = String(decision.rawModelOutput);
+      messageLines.push('First-pass raw model output (truncated):');
+      messageLines.push(raw.length > 1800 ? raw.slice(0, 1800) + '…[truncated]' : raw);
+      messageLines.push('');
+    }
+
+    // Any other notes present on the decision
+    if (decision?.notes) {
+      messageLines.push('Decision notes: ' + decision.notes);
+      messageLines.push('');
+    }
+
     messageLines.push('Please review and reply manually.');
+    messageLines.push('');
+    messageLines.push('(Full CloudWatch logs for this request ID contain the complete enriched context, RAW EVENT, and every intermediate trace.)');
 
     const message = messageLines.join('\n');
 
