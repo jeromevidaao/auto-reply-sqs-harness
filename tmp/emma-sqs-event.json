@@ -1,0 +1,20 @@
+{
+  "Records": [
+    {
+      "messageId": "emma-test-replay-001",
+      "receiptHandle": "AQEB-test-replay-handle-for-emma",
+      "body": "{\"resource\":\"/helloworld\",\"path\":\"/helloworld\",\"httpMethod\":\"POST\",\"headers\":{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"Host\":\"g32pkusnye.execute-api.us-east-1.amazonaws.com\",\"User-Agent\":\"Hospitable\",\"X-Forwarded-For\":\"38.80.170.99\",\"X-Forwarded-Port\":\"443\",\"X-Forwarded-Proto\":\"https\"},\"queryStringParameters\":{\"act\":\"message\",\"jwt\":\"...\"},\"body\":\"{\\\"id\\\":\\\"emma-webhook-001\\\",\\\"data\\\":{\\\"id\\\":9999999999,\\\"body\\\":\\\"Hello! My college roommates and Iare doing a trip to Portland during our spring break next year! I went to Maine College of Art for a little bit years ago and haven't been back to the city/area since- your place is pretty close to all my favorite spots from then :D\\\",\\\"user\\\":{\\\"id\\\":\\\"user-emma\\\",\\\"name\\\":\\\"Emma Guest\\\",\\\"email\\\":\\\"emma@example.com\\\"},\\\"sender\\\":{\\\"locale\\\":\\\"en\\\",\\\"location\\\":\\\"\\\",\\\"full_name\\\":\\\"Emma\\\",\\\"first_name\\\":\\\"Emma\\\",\\\"picture_url\\\":\\\"\\\"},\\\"source\\\":\\\"platform\\\",\\\"listing\\\":{\\\"platform\\\":\\\"airbnb\\\",\\\"platform_id\\\":\\\"20904545\\\"},\\\"platform\\\":\\\"airbnb\\\",\\\"property\\\":{\\\"id\\\":\\\"c899481f-2e5b-402d-80c4-3167fd824d96\\\",\\\"name\\\":\\\"Downtown Studio, Walk Everywhere, Parking\\\",\\\"public_name\\\":\\\"Downtown Studio, Parking with EV charger\\\"},\\\"reactions\\\":[],\\\"created_at\\\":\\\"2026-06-20T01:33:00Z\\\",\\\"attachments\\\":[],\\\"integration\\\":null,\\\"platform_id\\\":\\\"99999999999\\\",\\\"sender_role\\\":null,\\\"sender_type\\\":\\\"guest\\\",\\\"content_type\\\":\\\"text/plain\\\",\\\"reservation_id\\\":\\\"res-emma-spring-2027\\\",\\\"conversation_id\\\":\\\"50e1ae9c-fa9f-4a27-ae30-72f206c7d3fb\\\",\\\"sent_reference_id\\\":null},\\\"action\\\":\\\"message.created\\\",\\\"created\\\":\\\"2026-06-20T01:33:10Z\\\",\\\"version\\\":\\\"v2\\\",\\\"triggers\\\":[]}\",\"isBase64Encoded\":false}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1781281410000",
+        "SenderId": "AROA-test",
+        "ApproximateFirstReceiveTimestamp": "1781281410000"
+      },
+      "messageAttributes": {},
+      "md5OfBody": "testmd5emma",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:834917996497:grok_message",
+      "awsRegion": "us-east-1"
+    }
+  ]
+}

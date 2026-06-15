@@ -1,0 +1,40 @@
+{
+  "id": "new-reservation-welcome-emma",
+  "description": "Real incident: First message after booking from Emma for Downtown Studio (1B). Guest sharing positive college connection + spring break trip next year (2027 dates, far future). Pure intro, no specific ask. The agent incorrectly escalated with 'Manual reply needed', category NEW_RESERVATION_WELCOME but confidence only 0.95 and shouldReply:false. Must classify as NEW_RESERVATION_WELCOME, reply richly with full logistics (4pm, self-check-in, parking, 3-day sentence since >>3d future), force confidence 1.0, shouldReply true. Verbatim guest message from the production escalation email.",
+  "guestMessage": "Hello! My college roommates and Iare doing a trip to Portland during our spring break next year! I went to Maine College of Art for a little bit years ago and haven't been back to the city/area since- your place is pretty close to all my favorite spots from then :D",
+  "context": {
+    "guestName": "Emma",
+    "checkIn": "2027-03-23T16:00:00-04:00",
+    "checkOut": "2027-03-25T10:00:00-04:00",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+    "bookingTimestamp": "2026-06-20T10:00:00Z",
+    "asOfDate": "2026-06-20",
+    "hasPets": false,
+    "petCount": 0,
+    "infantCount": 0,
+    "childCount": 0,
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "NEW_RESERVATION_WELCOME",
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "let me know if you have any questions",
+      "happy to hear",
+      "feel free to book",
+      "let me know if questions"
+    ],
+    "requiredPhrases": [
+      "self-check-in",
+      "4pm",
+      "parking",
+      "detailed check-in instructions 3 days before",
+      "Emma"
+    ],
+    "mustStartWithGreeting": true,
+    "greetingMustUseName": "Emma",
+    "noPetMention": true
+  },
+  "notes": "Locks the fix for the Emma incident (manual needed at 0.95 conf for clear pure welcome). Must use greeting + Emma, deliver rich future-stay welcome (3-day phrase required for far-future >=3d), no curt/minimal. The forcing in processMessage + prompt rules ensure conf=1.0 and reply. Property is the 1B Downtown Studio."
+}

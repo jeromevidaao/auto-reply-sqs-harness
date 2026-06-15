@@ -237,6 +237,19 @@ export class GuestMessagingAgent {
       if (shouldReply !== false) shouldReply = true;
     }
 
+    // For pure first-post-booking NEW_RESERVATION_WELCOME and NEW_INQUIRY_WELCOME (clear intros/sharing excitement/plans,
+    // no distinct ask — e.g. the Emma "college roommates... spring break next year... close to my favorite spots" case
+    // or abby birthday), force confidence=1.0 and shouldReply=true when a substantial response is proposed.
+    // These are the safe, high-value rich "first page" welcomes the user expects (and old system delivered). Prevents
+    // escalations at 0.95 conf or LLM conservatism on pure announcement messages. See welcome-messages.md.
+    const welcomeCategories = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'];
+    if (welcomeCategories.includes(parsed.typeOfMessageReceived) &&
+        parsed.proposedResponse && parsed.proposedResponse !== 'none' &&
+        parsed.proposedResponse.length > 30) {
+      confidence = 1.0;
+      shouldReply = true;  // Unconditionally force reply for clear welcomes (override even explicit false from conservative LLM, as in the Emma 0.95 case)
+    }
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',

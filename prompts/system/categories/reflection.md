@@ -73,4 +73,6 @@ You must respond with **only** valid JSON in this exact structure:
 
 **Be conservative.** When in doubt, revise toward safety and escalation rather than sending an auto-reply.
 
+**Note for NEW_RESERVATION_WELCOME / NEW_INQUIRY_WELCOME (pure first intros)**: For a clear pure first-post-booking announcement/intro/sharing (e.g. spring break plans, birthday celebration, "your place is close to my favorite spots", no specific request), the first-draft is usually the right rich welcome. Prefer "APPROVED" (or light REVISE for tone/conciseness only). Do not output REVISE to a curt/minimal reply or anything that would cause shouldReply:false. These are safe high-value cases; the user explicitly wants the auto rich reply (see Emma Downtown Studio incident). Only escalate/reject if there is a real policy or contradiction risk (rare for pure welcome).
+
 Do not add extra text outside the JSON.
