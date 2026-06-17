@@ -219,6 +219,25 @@ export class GuestMessagingAgent {
       }
     }
 
+    // Thermostat instructions — eval runner calls processMessage directly.
+    if (!context.earlyThermostatInfo) {
+      const thermostatTool = this.tools.get('get_thermostat_instructions');
+      if (thermostatTool) {
+        try {
+          const thermoInfo = await thermostatTool.execute(guestMessage, context);
+          if (thermoInfo?.detected) {
+            context.earlyThermostatInfo = thermoInfo;
+          }
+        } catch {
+          // non-fatal
+        }
+      }
+    }
+
+    if (this._isPreArrivalSofaLinensAsk(guestMessage, context)) {
+      context.preArrivalSofaLinensAsk = true;
+    }
+
     const system = await this.loadPrompt(context);
 
     // Build a rich user prompt (we will evolve this heavily)
@@ -275,6 +294,23 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
+    const thermostatPolicy = this._applyThermostatPolicy(parsed, context, guestMessage);
+    if (thermostatPolicy.applied) {
+      parsed.typeOfMessageReceived = thermostatPolicy.typeOfMessageReceived || 'THERMOSTAT_HEATPUMP';
+      parsed.proposedResponse = thermostatPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const sofaLinensPolicy = this._applySofaBedLinensPolicy(parsed, context, guestMessage);
+    if (sofaLinensPolicy.applied) {
+      parsed.typeOfMessageReceived = sofaLinensPolicy.typeOfMessageReceived;
+      if (sofaLinensPolicy.proposedResponse) {
+        parsed.proposedResponse = sofaLinensPolicy.proposedResponse;
+      }
+      shouldReply = true;
+    }
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',
@@ -311,6 +347,103 @@ export class GuestMessagingAgent {
     }
 
     return { applied: true, proposedResponse };
+  }
+
+  _isPreArrivalSofaLinensAsk(guestMessage = '', context = {}) {
+    const lower = guestMessage.toLowerCase();
+    const linenAsk = /sheets|blankets|pillows|linens/.test(lower) &&
+      /sofa|couch|futon|4th|fourth|extra guest|friend|sleeping on/.test(lower);
+    const inStay = /we are in the apartment|we're in the apartment|we're here|already here|checked in|can't find|cannot find|where are the (sheets|linens|blankets)/.test(lower);
+    const preArrival = /looking forward|please confirm|before (our|my) (stay|arrival|trip)|upcoming stay|will be sleeping/.test(lower);
+    const stayFuture = context.checkIn && !context.stayTiming?.includes('current') && !inStay;
+
+    return linenAsk && !inStay && (preArrival || stayFuture || context.preArrivalSofaLinensAsk);
+  }
+
+  /**
+   * Pre-arrival sofa bed linen confirmations must NOT be categorized as EXTRA_LINENS_TOWELS.
+   * EXTRA_LINENS_TOWELS is reserved for in-stay "where are the linens?" asks with lift-up instructions.
+   */
+  _applySofaBedLinensPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isPreArrivalSofaLinensAsk(guestMessage, context)) {
+      return { applied: false };
+    }
+
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const wrongCategory = categories.includes('EXTRA_LINENS_TOWELS');
+    const alreadyCorrect = categories.some(c =>
+      ['SLEEPING_ARRANGEMENTS', 'SLEEPING_ACCOMMODATION', 'SOFA_BED_SIZE'].includes(c)
+    );
+
+    if (!wrongCategory && alreadyCorrect) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    let proposedResponse = draft;
+    const lower = draft.toLowerCase();
+    const needsStorageDetail = !lower.includes('storage compartment') && !lower.includes('under the sofa');
+
+    if (needsStorageDetail) {
+      const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+      const prefix = greetingMatch ? greetingMatch[0].trimEnd() + ' ' : '';
+      proposedResponse =
+        `${prefix}yes, we provide sheets, blankets, and pillows for anyone using the sofa bed. ` +
+        `They're stored in the storage compartment under the sofa. Enjoy your stay!`;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS',
+      proposedResponse: wrongCategory || needsStorageDetail ? proposedResponse : undefined
+    };
+  }
+
+  /**
+   * Ensure THERMOSTAT_HEATPUMP replies always include the neutral remote-control wording.
+   * Uses ThermostatTool / HeatPumpTool recommended snippets when the LLM paraphrases.
+   */
+  _applyThermostatPolicy(parsed, context = {}, guestMessage = '') {
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const isThermostatCategory = categories.includes('THERMOSTAT_HEATPUMP') || categories.includes('THERMOSTAT');
+    const thermo = context.earlyThermostatInfo;
+    const hp = context.heatPumpInfo;
+
+    if (!isThermostatCategory && !thermo?.guestMessageRelevant) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+    const hasRequired = lower.includes('make sure you are using') && lower.includes('remotes on the wall');
+
+    let body = null;
+    if (hp?.suggestedResponseSnippet) {
+      body = hp.suggestedResponseSnippet;
+    } else if (!hasRequired && thermo?.recommendedResponse) {
+      body = thermo.recommendedResponse;
+    } else if (!hasRequired && thermo?.suggestedResponseSnippet) {
+      body = thermo.suggestedResponseSnippet;
+    }
+
+    if (!body) {
+      return { applied: false };
+    }
+
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const proposedResponse = greetingMatch
+      ? greetingMatch[0].trimEnd() + ' ' + body.replace(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^,!]*[,!]\s*/i, '')
+      : body;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'THERMOSTAT_HEATPUMP',
+      proposedResponse
+    };
   }
 
   _buildUserPrompt(message, context) {
@@ -537,7 +670,20 @@ export class GuestMessagingAgent {
           lines.push(`- Suggested HVAC snippet from tool: ${h.suggestedResponseSnippet}`);
         }
         lines.push(`- IMPORTANT FOR THIS RESPONSE: Your proposedResponse MUST contain the phrases 'make sure you are using' and 'remotes on the wall' (neutral control reminder) as well as 'cool down' when describing the temperature effect after the fix.`);
+      } else if (context.earlyThermostatInfo?.guestMessageRelevant) {
+        lines.push(`- IMPORTANT FOR THIS RESPONSE: Your proposedResponse MUST contain the phrases "make sure you are using" and "remotes on the wall".`);
+        if (context.earlyThermostatInfo.recommendedResponse) {
+          lines.push(`- Recommended HVAC response (greeting prefix optional): "${context.earlyThermostatInfo.recommendedResponse}"`);
+        }
       }
+    }
+
+    if (context.preArrivalSofaLinensAsk) {
+      lines.push('');
+      lines.push('=== PRE-ARRIVAL SOFA BED LINENS CONFIRMATION ===');
+      lines.push('- Category MUST be SLEEPING_ARRANGEMENTS, SLEEPING_ACCOMMODATION, or SOFA_BED_SIZE');
+      lines.push('- Category MUST NOT be EXTRA_LINENS_TOWELS (that category is only for guests already in the unit looking for linens)');
+      lines.push('- Confirm sheets/blankets/pillows are provided AND mention they are stored in the storage compartment under the sofa');
     }
 
     if (context.travelTimes) {
@@ -1230,6 +1376,22 @@ export class GuestMessagingAgent {
     if (eventPolicyFinal.applied) {
       finalResult.typeOfMessageReceived = 'EVENT_REQUEST';
       finalResult.proposedResponse = eventPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+    }
+
+    const thermostatPolicyFinal = this._applyThermostatPolicy(finalResult, enrichedContext, guestMessage);
+    if (thermostatPolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = thermostatPolicyFinal.typeOfMessageReceived || 'THERMOSTAT_HEATPUMP';
+      finalResult.proposedResponse = thermostatPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+    }
+
+    const sofaLinensPolicyFinal = this._applySofaBedLinensPolicy(finalResult, enrichedContext, guestMessage);
+    if (sofaLinensPolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = sofaLinensPolicyFinal.typeOfMessageReceived;
+      if (sofaLinensPolicyFinal.proposedResponse) {
+        finalResult.proposedResponse = sofaLinensPolicyFinal.proposedResponse;
+      }
       finalResult.shouldReply = true;
     }
 

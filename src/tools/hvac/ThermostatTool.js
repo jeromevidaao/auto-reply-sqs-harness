@@ -85,6 +85,8 @@ export class ThermostatTool extends BaseTool {
     const tempKeywords = ['hot', 'cold', 'warm', 'cool', 'temperature', 'thermostat', 'heat', 'ac', 'air conditioning', 'too warm', 'too cold', 'freezing', 'boiling', 'air', 'remotes', 'no air', 'blowing', 'unit', 'units', 'settings'];
     const seemsRelevant = tempKeywords.some(kw => lowerMsg.includes(kw));
 
+    const intent = this._detectIntent(guestMessage);
+
     return {
       detected: true,
       listingId,
@@ -93,8 +95,17 @@ export class ThermostatTool extends BaseTool {
       howTo: unitInfo.howTo,
       notes: unitInfo.notes,
       guestMessageRelevant: seemsRelevant,
+      intent,
       suggestedResponseSnippet: this._buildHelpfulSnippet(unitInfo, context.guestName),
+      recommendedResponse: this._buildRecommendedResponse(unitInfo, guestMessage, context.guestName),
     };
+  }
+
+  _detectIntent(guestMessage = '') {
+    const lower = guestMessage.toLowerCase();
+    if (/cold|heat|warm|freezing|turn up the heat|too cold/i.test(lower)) return 'heat';
+    if (/hot|cool|ac|air conditioning|no air|too warm|blowing/i.test(lower)) return 'cool';
+    return 'general';
   }
 
   _buildHelpfulSnippet(unitInfo, guestName) {
@@ -106,6 +117,22 @@ export class ThermostatTool extends BaseTool {
     }
 
     parts.push(...unitInfo.howTo);
+
+    return `${name}${parts.join(' ')}`.trim();
+  }
+
+  _buildRecommendedResponse(unitInfo, guestMessage, guestName) {
+    const name = guestName ? `${guestName}, ` : '';
+    const intent = this._detectIntent(guestMessage);
+    const parts = [unitInfo.warning];
+
+    if (intent === 'heat' && unitInfo.proactiveHeat) {
+      parts.push(unitInfo.proactiveHeat);
+    } else if (intent === 'cool' && unitInfo.proactiveCool) {
+      parts.push(unitInfo.proactiveCool);
+    } else {
+      parts.push(...unitInfo.howTo);
+    }
 
     return `${name}${parts.join(' ')}`.trim();
   }

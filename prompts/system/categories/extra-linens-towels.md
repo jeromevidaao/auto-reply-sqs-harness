@@ -1,8 +1,13 @@
 # Extra Linens & Sofa Bed Bedding
 
 **Categories covered**:
-- EXTRA_LINENS_TOWELS
-- Sofa bed linen questions (pre-arrival or in-stay)
+- EXTRA_LINENS_TOWELS (in-stay only — see below)
+- SLEEPING_ARRANGEMENTS / SLEEPING_ACCOMMODATION / SOFA_BED_SIZE (pre-arrival sofa bed linen confirmations)
+
+**ABSOLUTE RULE — do NOT use EXTRA_LINENS_TOWELS for pre-arrival confirmation asks**:
+- If the guest says they are **looking forward to their stay**, asks you to **please confirm** linens before arrival, or otherwise has **not checked in yet** → category **MUST NOT** be `EXTRA_LINENS_TOWELS`.
+- Use **SLEEPING_ARRANGEMENTS**, **SLEEPING_ACCOMMODATION**, or **SOFA_BED_SIZE** instead.
+- `EXTRA_LINENS_TOWELS` is **only** when the guest is **already in the unit** and needs to **find** linens (lift-up instructions).
 
 ## Pre-arrival: sheets / blankets / pillows for the sofa bed or couch
 
@@ -12,7 +17,7 @@ When a guest asks (before or during their stay) whether sheets, blankets, pillow
 - **MUST** mention that they are stored **in / under the sofa itself** (storage compartment). Do not stop at "we provide linens" without saying where they are.
 - Apt 2 and Apt 3: "stored in the storage compartment under the sofa" (or "right under the sofa").
 - Studio (1B): same — compartment under the sofa.
-- Prefer category **SLEEPING_ARRANGEMENTS** or **SLEEPING_ACCOMMODATION** for pre-arrival confirmation questions. Use **SOFA_BED_SIZE** when the ask is specifically about sofa bed size/capacity plus linens.
+- Category **MUST** be **SLEEPING_ARRANGEMENTS**, **SLEEPING_ACCOMMODATION**, or **SOFA_BED_SIZE** — never **EXTRA_LINENS_TOWELS** for these pre-arrival confirmation questions.
 
 **Example tone** (facts matter more than exact words):
 "Good morning Amy, yes, we provide sheets, blankets, and pillows for anyone using the sofa bed. They're stored in the storage compartment under the sofa. Enjoy your stay!"

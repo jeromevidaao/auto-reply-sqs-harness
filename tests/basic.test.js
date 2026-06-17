@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GuestMessagingAgent } from '../src/agent.js';
 import { EventRequestTool } from '../src/tools/event/EventRequestTool.js';
+import { ThermostatTool } from '../src/tools/hvac/ThermostatTool.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRootForTests = path.resolve(__dirname, '..');
@@ -31,6 +32,44 @@ describe('EventRequestTool (no LLM)', () => {
     );
     assert.equal(applied.applied, true);
     assert.ok(applied.proposedResponse.includes('not able to accommodate events or gatherings'));
+  });
+
+  it('forces thermostat neutral remote wording via _applyThermostatPolicy', async () => {
+    const thermostatTool = new ThermostatTool();
+    const thermo = await thermostatTool.execute("How do I turn up the heat? It's cold in here.", {
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      guestName: 'Casey'
+    });
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyThermostatPolicy(
+      { typeOfMessageReceived: 'THERMOSTAT_HEATPUMP', proposedResponse: 'Use the wall controls to adjust the temperature.' },
+      { earlyThermostatInfo: thermo },
+      "How do I turn up the heat? It's cold in here."
+    );
+    assert.equal(applied.applied, true);
+    assert.ok(applied.proposedResponse.includes('make sure you are using'));
+    assert.ok(applied.proposedResponse.includes('remotes on the wall'));
+  });
+
+  it('reclassifies pre-arrival sofa linens away from EXTRA_LINENS_TOWELS', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = "Hi Jerome and Ruby, we're looking forward to our stay. I just want to make sure there are sheets/blankets/pillows for our friend (our 4th) who will be sleeping on the couch. Please confirm. Thank you! -Amy";
+    const applied = agent._applySofaBedLinensPolicy(
+      {
+        typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
+        proposedResponse: 'Good morning Amy, yes, we provide sheets, blankets, and pillows for the sofa bed. They are stored in the storage compartment under the sofa.'
+      },
+      { checkIn: '2026-07-18', guestName: 'Amy' },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'SLEEPING_ARRANGEMENTS');
   });
 });
 
