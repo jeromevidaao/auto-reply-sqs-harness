@@ -3,11 +3,36 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GuestMessagingAgent } from '../src/agent.js';
+import { EventRequestTool } from '../src/tools/event/EventRequestTool.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRootForTests = path.resolve(__dirname, '..');
 
 const hasGrokKey = !!process.env.GROK_API_KEY;
+
+describe('EventRequestTool (no LLM)', () => {
+  it('detects get-together party asks', async () => {
+    const tool = new EventRequestTool();
+    const result = await tool.execute(
+      "We're thinking of having a small get-together with some friends while we're there. Is that okay?"
+    );
+    assert.equal(result.detected, true);
+    assert.ok(result.standardResponse.includes('not able to accommodate events or gatherings'));
+  });
+
+  it('forces canonical event decline via _applyEventRequestPolicy', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyEventRequestPolicy(
+      { typeOfMessageReceived: 'EVENT_REQUEST', proposedResponse: 'Sorry, parties are not allowed here.' },
+      {}
+    );
+    assert.equal(applied.applied, true);
+    assert.ok(applied.proposedResponse.includes('not able to accommodate events or gatherings'));
+  });
+});
 
 describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
   // These tests require a real GROK_API_KEY.

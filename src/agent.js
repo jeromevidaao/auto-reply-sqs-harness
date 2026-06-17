@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
 import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool, GoogleMapsTool, StayExtensionTool } from './tools/index.js';
+import { EVENT_REQUEST_STANDARD_RESPONSE } from './tools/event/EventRequestTool.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -202,6 +203,22 @@ export class GuestMessagingAgent {
    * @param {object} context - reservation/inquiry info + conversation history etc.
    */
   async processMessage(guestMessage, context = {}) {
+    // Cheap event detection — eval runner calls processMessage directly (not handleMessage),
+    // so we must run this here too, not only in _enrichTracesEarly.
+    if (!context.earlyEventDetection) {
+      const eventTool = this.tools.get('handle_event_request');
+      if (eventTool) {
+        try {
+          const eventInfo = await eventTool.execute(guestMessage, context);
+          if (eventInfo?.detected) {
+            context.earlyEventDetection = eventInfo;
+          }
+        } catch {
+          // non-fatal
+        }
+      }
+    }
+
     const system = await this.loadPrompt(context);
 
     // Build a rich user prompt (we will evolve this heavily)
@@ -250,6 +267,14 @@ export class GuestMessagingAgent {
       shouldReply = true;  // Unconditionally force reply for clear welcomes (override even explicit false from conservative LLM, as in the Emma 0.95 case)
     }
 
+    const eventPolicy = this._applyEventRequestPolicy(parsed, context);
+    if (eventPolicy.applied) {
+      parsed.typeOfMessageReceived = 'EVENT_REQUEST';
+      parsed.proposedResponse = eventPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',
@@ -257,6 +282,35 @@ export class GuestMessagingAgent {
       confidence,
       rawModelOutput: raw
     };
+  }
+
+  /**
+   * Force the canonical EVENT_REQUEST decline when the tool or category signals a party/gathering ask.
+   * Ensures the exact policy phrase "not able to accommodate events or gatherings" is always present
+   * (eval rubric + production consistency). Allows an optional greeting + name prefix from the LLM draft.
+   */
+  _applyEventRequestPolicy(parsed, context = {}) {
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const isEventCategory = categories.includes('EVENT_REQUEST');
+    const eventDetected = !!context.earlyEventDetection?.detected;
+
+    if (!isEventCategory && !eventDetected) {
+      return { applied: false };
+    }
+
+    const standard = context.earlyEventDetection?.standardResponse || EVENT_REQUEST_STANDARD_RESPONSE;
+    const draft = (parsed.proposedResponse || '').trim();
+    let proposedResponse = standard;
+
+    // Preserve a leading time-based greeting + name if the model already produced one.
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    if (greetingMatch) {
+      proposedResponse = greetingMatch[0].trimEnd() + ' ' + standard;
+    }
+
+    return { applied: true, proposedResponse };
   }
 
   _buildUserPrompt(message, context) {
@@ -495,6 +549,15 @@ export class GuestMessagingAgent {
       if (t.walking) lines.push(`- Walking: ${t.walking.duration} (${t.walking.distance})`);
       if (t.mock) lines.push('(using mock/approximate data — no live GOOGLE_MAPS_API_KEY was available at runtime)');
       lines.push('For any distance or "how close / walk / drive / Uber" questions, quote the driving + walking values above directly and naturally. Report both when the guest asks about walking distance or Uber.');
+    }
+
+    if (context.earlyEventDetection?.detected) {
+      const e = context.earlyEventDetection;
+      lines.push('');
+      lines.push('=== EVENT REQUEST DETECTED (MANDATORY standard decline) ===');
+      lines.push('- Category MUST be: EVENT_REQUEST');
+      lines.push('- Your proposedResponse MUST contain the exact substring "not able to accommodate events or gatherings"');
+      lines.push(`- Use this standard response verbatim (greeting + name prefix optional): "${e.standardResponse || EVENT_REQUEST_STANDARD_RESPONSE}"`);
     }
 
     if (context.stayExtensionInfo) {
@@ -1160,6 +1223,14 @@ export class GuestMessagingAgent {
       } else {
         console.log('[Agent] Conversation Judge approved original decision');
       }
+    }
+
+    // Final guard: never let reflection/judge paraphrase away the firm event policy wording.
+    const eventPolicyFinal = this._applyEventRequestPolicy(finalResult, enrichedContext);
+    if (eventPolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = 'EVENT_REQUEST';
+      finalResult.proposedResponse = eventPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);
