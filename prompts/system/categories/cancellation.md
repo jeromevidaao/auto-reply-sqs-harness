@@ -1,6 +1,8 @@
 # Cancellation & Refund Policy
 
-**Canonical category name(s)**: CANCELLATION_POLICY, CANCELLATION, CANCELLATION_NOTIFICATION
+**Canonical category name(s)**: CANCELLATION_POLICY, CANCELLATION_NOTIFICATION, CANCELLATION_POLICY_EXCEPTION
+
+**Never output bare `CANCELLATION`** in `typeOfMessageReceived` — always use one of the three canonical subcategories above. Use **CANCELLATION_POLICY** for refund/policy questions (including "need to cancel — what refund would we get?"). Use **CANCELLATION_NOTIFICATION** only when the guest is informing you they are canceling with no refund question. Use **CANCELLATION_POLICY_EXCEPTION** for illness/emergency exception asks.
 
 This module contains the detailed cancellation rules extracted from production.
 

@@ -126,6 +126,18 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(applied.escalated, false);
   });
 
+  it('normalizes bare CANCELLATION to CANCELLATION_POLICY for refund questions', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Hi, we actually need to cancel right away. We just booked yesterday. What refund would we get?';
+    const parsed = { typeOfMessageReceived: 'CANCELLATION', proposedResponse: 'none', shouldReply: false };
+    const applied = agent._applyCancellationCategoryPolicy(parsed, msg);
+    assert.equal(applied.applied, true);
+    assert.equal(parsed.typeOfMessageReceived, 'CANCELLATION_POLICY');
+  });
+
   it('still uses history-fetch conservative mode for Taylor-style follow-ups', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

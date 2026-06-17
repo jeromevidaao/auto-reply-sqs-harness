@@ -317,6 +317,8 @@ export class GuestMessagingAgent {
       shouldReply = true;
     }
 
+    this._applyCancellationCategoryPolicy(parsed, guestMessage);
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',
@@ -446,6 +448,35 @@ export class GuestMessagingAgent {
     }
 
     return { applied: true, shouldReply: true, confidence: 1.0, escalated: false };
+  }
+
+  /**
+   * Normalize bare CANCELLATION alias to a canonical subcategory.
+   * The modular prompt lists CANCELLATION as a legacy alias; eval + production expect
+   * CANCELLATION_POLICY / CANCELLATION_NOTIFICATION / CANCELLATION_POLICY_EXCEPTION.
+   */
+  _applyCancellationCategoryPolicy(parsed, guestMessage = '') {
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const canonical = ['CANCELLATION_POLICY', 'CANCELLATION_NOTIFICATION', 'CANCELLATION_POLICY_EXCEPTION'];
+    if (!categories.includes('CANCELLATION') || categories.some(c => canonical.includes(c))) {
+      return { applied: false };
+    }
+
+    const msg = (guestMessage || '').toLowerCase();
+    let typeOfMessageReceived = 'CANCELLATION_POLICY';
+
+    if (/illness|emergency|divorce|separation|husband|wife|sick|personal circumstances|cannot come/i.test(msg)) {
+      typeOfMessageReceived = 'CANCELLATION_POLICY_EXCEPTION';
+    } else if (/what refund|refund would|how much.*refund|cancel.*policy|money back|what if i cancel/i.test(msg)) {
+      typeOfMessageReceived = 'CANCELLATION_POLICY';
+    } else if (/i (have to|need to|am going to) cancel|won't be able to make it|cannot make it/i.test(msg)) {
+      typeOfMessageReceived = 'CANCELLATION_NOTIFICATION';
+    }
+
+    parsed.typeOfMessageReceived = typeOfMessageReceived;
+    return { applied: true, typeOfMessageReceived };
   }
 
   /**
@@ -1540,6 +1571,11 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = pureWelcomePolicyFinal.shouldReply;
       finalResult.confidence = pureWelcomePolicyFinal.confidence;
       finalResult.escalated = pureWelcomePolicyFinal.escalated;
+    }
+
+    const cancellationCategoryFinal = this._applyCancellationCategoryPolicy(finalResult, guestMessage);
+    if (cancellationCategoryFinal.applied) {
+      finalResult.typeOfMessageReceived = cancellationCategoryFinal.typeOfMessageReceived;
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);
