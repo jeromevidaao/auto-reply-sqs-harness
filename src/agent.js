@@ -279,11 +279,17 @@ export class GuestMessagingAgent {
     // These are the safe, high-value rich "first page" welcomes the user expects (and old system delivered). Prevents
     // escalations at 0.95 conf or LLM conservatism on pure announcement messages. See welcome-messages.md.
     const welcomeCategories = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'];
+    const isPureWelcomeIntro = this._isPureFirstPostBookingIntro(guestMessage, context);
     if (welcomeCategories.includes(parsed.typeOfMessageReceived) &&
         parsed.proposedResponse && parsed.proposedResponse !== 'none' &&
         parsed.proposedResponse.length > 30) {
       confidence = 1.0;
       shouldReply = true;  // Unconditionally force reply for clear welcomes (override even explicit false from conservative LLM, as in the Emma 0.95 case)
+    } else if (welcomeCategories.includes(parsed.typeOfMessageReceived) && isPureWelcomeIntro &&
+        parsed.proposedResponse && parsed.proposedResponse !== 'none' &&
+        parsed.proposedResponse.length > 20) {
+      confidence = 1.0;
+      shouldReply = true;
     }
 
     const eventPolicy = this._applyEventRequestPolicy(parsed, context);
@@ -358,6 +364,88 @@ export class GuestMessagingAgent {
     const stayFuture = context.checkIn && !context.stayTiming?.includes('current') && !inStay;
 
     return linenAsk && !inStay && (preArrival || stayFuture || context.preArrivalSofaLinensAsk);
+  }
+
+  /**
+   * Guest message looks like a short follow-up (thanks, arrival update) that may respond to an
+   * unseen prior host readiness statement — Taylor 9AM safeguard territory.
+   */
+  _looksLikePlausibleFollowUp(guestMessage = '') {
+    const msg = (guestMessage || '').trim();
+    const lower = msg.toLowerCase();
+    if (!msg) return false;
+
+    if (/^(okay\s+)?(perfect|thanks|thank you|got it|great|awesome|wonderful|sounds good)/i.test(lower) && msg.length < 140) {
+      return true;
+    }
+    if (/(arriving|arrive|be there|see you|on (our|my) way|in about an hour|in \d+ (min|minute|hour)|we will be)/i.test(lower) &&
+        /(thank|perfect|great|soon|hour)/i.test(lower)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Pure first-post-booking intro: guest sharing trip context / excitement with no distinct ask.
+   * Covers Emma, Abby, Cheryl-style welcomes — not Taylor thank-you follow-ups.
+   */
+  _isPureFirstPostBookingIntro(guestMessage = '', context = {}) {
+    const traces = context.conversationTraces || {};
+    const hasReservation = !!(context.reservationId || context.reservation_id || context.reservation?.id);
+    if (!hasReservation) return false;
+    if (traces.hasRecentHostMessage || traces.earlyUnitReadyOffered) return false;
+    if (this._looksLikePlausibleFollowUp(guestMessage)) return false;
+
+    const msg = (guestMessage || '').trim();
+    if (!msg || msg.length < 25) return false;
+    if (/\?/.test(msg)) return false;
+    if (/(can we|would it be|is it possible|do you have|can you|how about|could you|will you|are you able|where is|how do i|what is the)/i.test(msg)) {
+      return false;
+    }
+
+    const introSignals = /(visiting|first time|chose this|looking forward|booked|booking|trip|spring break|next year|college roommates|favorite spots|celebrate|birthday|excited|walk to everything|walk everywhere|portland|daughter|son|family|friends|group)/i;
+    const hasGreetingIntro = /^(hello|hi|hey|good (morning|afternoon|evening))/i.test(msg);
+    const operationalAsk = /(problem|issue|broken|not working|where is|how do|wifi|password|code|parking cost|pet fee)/i.test(msg);
+
+    return (introSignals.test(msg) || (hasGreetingIntro && msg.length > 40)) && !operationalAsk;
+  }
+
+  /**
+   * When history fetch failed, use Taylor conservative mode only for plausible follow-ups —
+   * not for pure first-post-booking welcomes where empty history is expected (Cheryl incident).
+   */
+  _shouldApplyHistoryFetchConservativeMode(guestMessage = '', context = {}) {
+    const traces = context.conversationTraces || {};
+    const fetchFailed = traces.historyFetchFailed ||
+      traces.historySource === 'live_fetch_failed' ||
+      traces.historySource === 'fallback_used_after_failure';
+    if (!fetchFailed) return false;
+    if (this._isPureFirstPostBookingIntro(guestMessage, context)) return false;
+    return true;
+  }
+
+  /**
+   * Final guard: pure first-post-booking welcomes must auto-reply even when reflection/judge
+   * withheld due to history-fetch conservatism (Cheryl Downtown Studio incident).
+   */
+  _applyPureWelcomeReplyPolicy(parsed, context = {}, guestMessage = '') {
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const welcomeCategories = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'];
+    if (!welcomeCategories.some(c => categories.includes(c))) {
+      return { applied: false };
+    }
+    if (!this._isPureFirstPostBookingIntro(guestMessage, context)) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    if (!draft || draft === 'none' || draft.length < 20) {
+      return { applied: false };
+    }
+
+    return { applied: true, shouldReply: true, confidence: 1.0, escalated: false };
   }
 
   /**
@@ -547,7 +635,18 @@ export class GuestMessagingAgent {
     // or is flying blind on prior host statements (e.g. the "We are pleased to let you know that the unit is ready
     // for you to check in now" message in the 9AM Taylor thread for 53 Pine #1B).
     const hTraces = context.conversationTraces || {};
-    if (hTraces.historyFetchFailed || hTraces.historySource === 'live_fetch_failed' || hTraces.historySource === 'fallback_used_after_failure') {
+    const historyFetchConservative = this._shouldApplyHistoryFetchConservativeMode(message, context);
+    const pureFirstWelcomeDespiteFetchFail = (hTraces.historyFetchFailed || hTraces.historySource === 'live_fetch_failed' || hTraces.historySource === 'fallback_used_after_failure') &&
+      this._isPureFirstPostBookingIntro(message, context);
+
+    if (pureFirstWelcomeDespiteFetchFail) {
+      lines.push('');
+      lines.push('⚠️ HISTORY FETCH FAILED — BUT THIS IS A PURE FIRST-POST-BOOKING WELCOME (Cheryl/Emma case)');
+      lines.push('   Source: ' + (hTraces.historySource || 'unknown') + ', count=' + (hTraces.recentMessageCount || 0));
+      lines.push('   Live history fetch failed, but the guest message is a pure intro/sharing message with no question and no prior host activity signals. Empty history is EXPECTED for the guest\'s first post-booking message — there is nothing to contradict.');
+      lines.push('   FOR THIS RESPONSE you MUST still classify as NEW_RESERVATION_WELCOME, set shouldReply:true, confidence:1.0, and deliver the FULL rich welcome (4pm, self-check-in, parking, "detailed check-in instructions 3 days before" for >=3d future stays). Do NOT suppress the reply or omit logistics because of the fetch failure.');
+      lines.push('   The Taylor conservative rules below apply ONLY to follow-up messages (thanks, "arriving in an hour"), not this first welcome.');
+    } else if (historyFetchConservative) {
       lines.push('');
       lines.push('⚠️⚠️ CRITICAL: LIVE CONVERSATION HISTORY FETCH FAILED OR INCOMPLETE');
       lines.push('   Source: ' + (hTraces.historySource || 'unknown') + ', count=' + (hTraces.recentMessageCount || 0));
@@ -559,6 +658,7 @@ export class GuestMessagingAgent {
       lines.push('   - If the current guest message sounds like a follow-up (thanks, "perfect", "arriving in about an hour", "we will be there soon") after a possible prior host readiness or ack message, use ONLY a short warm acknowledgment: "You\'re welcome, [Name]!", "Got it — see you then.", "Perfect, safe travels."');
       lines.push('   - Do not add any new information about timing, self-check-in process details, or policy.');
       lines.push('   - When in doubt about whether a prior commitment was made, do NOT reply (let it escalate) rather than risk contradicting the real thread history that we failed to fetch.');
+      lines.push('   EXCEPTION: If the guest message is clearly their *first* post-booking pure intro (sharing trip plans, "first time in Portland", "chose this place because...", birthday celebration, spring break next year — with no question mark and no operational ask), treat as NEW_RESERVATION_WELCOME and reply with the full rich welcome including 4pm + self-check-in + parking + 3-day sentence. Empty history is normal for first messages; do not skip reply.');
       lines.push('   This protects exactly the Taylor 9AM / 53 Pine #1B class of bug reported by the user.');
     } else if (context.conversationHistory?.length) {
       const src = hTraces.historySource || 'live_fetched_or_provided';
@@ -1088,24 +1188,31 @@ export class GuestMessagingAgent {
     // Post-first-pass safety net from early traces
     let finalDecision = decision;
 
-    // Strong safety net for pure first-post-booking intros on confirmed reservations (Emma "college roommates spring break next year" case).
-    // If the LLM misclassifies as OTHER_MESSAGE despite the prompt signals (future reservation + casual trip announcement with no question or specific ask),
-    // force NEW_RESERVATION_WELCOME + shouldReply true + confidence 1.0. This ensures we reply with the rich welcome instead of escalating.
-    // The real reservation enrichment will provide checkIn etc. so the prompt CRITICAL blocks are active, but this catches LLM drift.
-    const hasRealReservation = !!(enrichedContext.reservationId || enrichedContext.reservation_id || enrichedContext.reservation?.id);
-    const msgLower = (guestMessage || '').toLowerCase();
-    const looksLikePureFutureIntro = hasRealReservation &&
-      /(trip|spring break|next year|college roommates|favorite spots|doing a trip)/.test(msgLower) &&
-      !/\?/.test(guestMessage) &&
-      !/(can we|would it be|is it possible|do you have|can you|how about)/.test(msgLower);
-    if (looksLikePureFutureIntro && (decision.typeOfMessageReceived === 'OTHER_MESSAGE' || decision.shouldReply === false)) {
-      console.log('[Agent] → SAFETY NET: Forcing NEW_RESERVATION_WELCOME + conf 1.0 + shouldReply for pure future trip intro on confirmed reservation (Emma-style case from logs)');
-      finalDecision = {
-        ...decision,
-        typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
-        shouldReply: true,
-        confidence: 1.0,
-      };
+    // Strong safety net for pure first-post-booking intros on confirmed reservations (Emma, Cheryl, Abby cases).
+    // If the LLM misclassifies as OTHER_MESSAGE or withholds reply (e.g. history fetch failed conservatism),
+    // force NEW_RESERVATION_WELCOME + shouldReply true + confidence 1.0 when a substantial response exists.
+    const welcomeCategories = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'];
+    const isPureWelcomeIntro = this._isPureFirstPostBookingIntro(guestMessage, enrichedContext);
+    if (isPureWelcomeIntro) {
+      const hasSubstantialResponse = decision.proposedResponse && decision.proposedResponse !== 'none' && decision.proposedResponse.length > 20;
+      if (decision.typeOfMessageReceived === 'OTHER_MESSAGE' && hasSubstantialResponse) {
+        console.log('[Agent] → SAFETY NET: Forcing NEW_RESERVATION_WELCOME + conf 1.0 + shouldReply for pure first-post-booking intro (misclassified as OTHER_MESSAGE)');
+        finalDecision = {
+          ...decision,
+          typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+          shouldReply: true,
+          confidence: 1.0,
+        };
+      } else if (welcomeCategories.includes(decision.typeOfMessageReceived) && hasSubstantialResponse && decision.shouldReply === false) {
+        console.log('[Agent] → SAFETY NET: Forcing shouldReply for pure first-post-booking welcome (history-fetch conservatism override, Cheryl-style case)');
+        finalDecision = {
+          ...decision,
+          shouldReply: true,
+          confidence: 1.0,
+        };
+      } else if (welcomeCategories.includes(decision.typeOfMessageReceived) && decision.shouldReply === false && (!decision.proposedResponse || decision.proposedResponse === 'none')) {
+        console.log('[Agent] → Pure first-post-booking welcome detected but first-pass proposed none — reflection/judge must supply response');
+      }
     }
 
     if (enrichedContext.recentHostActivity && decision.shouldReply) {
@@ -1336,6 +1443,15 @@ export class GuestMessagingAgent {
         finalResult.typeOfMessageReceived = reflection.revisedType || finalDecision.typeOfMessageReceived;
         finalResult.proposedResponse = reflection.revisedResponse;
         finalResult.reflectionNotes = reflection.notes;
+        const revCat = reflection.revisedType || finalDecision.typeOfMessageReceived;
+        if (['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'].includes(revCat) &&
+            this._isPureFirstPostBookingIntro(guestMessage, enrichedContext) &&
+            reflection.revisedResponse.length > 20) {
+          console.log('[Agent] → Reflection revised pure welcome — forcing shouldReply true (Cheryl/Emma safeguard)');
+          finalResult.shouldReply = true;
+          finalResult.confidence = 1.0;
+          finalResult.escalated = false;
+        }
       } else {
         console.log('[Agent] Reflection approved original decision');
       }
@@ -1416,6 +1532,14 @@ export class GuestMessagingAgent {
         finalResult.proposedResponse = sofaLinensPolicyFinal.proposedResponse;
       }
       finalResult.shouldReply = true;
+    }
+
+    const pureWelcomePolicyFinal = this._applyPureWelcomeReplyPolicy(finalResult, enrichedContext, guestMessage);
+    if (pureWelcomePolicyFinal.applied) {
+      console.log('[Agent] → Pure welcome reply policy applied (override withhold/escalate from history-fetch conservatism)');
+      finalResult.shouldReply = pureWelcomePolicyFinal.shouldReply;
+      finalResult.confidence = pureWelcomePolicyFinal.confidence;
+      finalResult.escalated = pureWelcomePolicyFinal.escalated;
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);

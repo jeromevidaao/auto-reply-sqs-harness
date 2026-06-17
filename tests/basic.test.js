@@ -86,6 +86,60 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(applied.proposedResponse.includes('remotes on the wall'));
   });
 
+  it('detects pure first-post-booking intro (Cheryl case) despite history fetch failed', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = "Hello Ruby and Jerome,\n\nI am visiting with my young adult daughter and her friend. It will be my first time (not theirs) in Portland. I chose this place because we can walk to everything.\n\nThank you,\nCheryl";
+    const ctx = {
+      reservationId: '390bc10a-7b33-484e-b3a0-f23241e3c158',
+      conversationTraces: { historyFetchFailed: true, historySource: 'live_fetch_failed', hasRecentHostMessage: false }
+    };
+    assert.equal(agent._isPureFirstPostBookingIntro(msg, ctx), true);
+    assert.equal(agent._shouldApplyHistoryFetchConservativeMode(msg, ctx), false);
+    assert.equal(agent._looksLikePlausibleFollowUp(msg), false);
+  });
+
+  it('forces shouldReply via _applyPureWelcomeReplyPolicy when welcome withheld', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = "Hello Ruby and Jerome,\n\nI am visiting with my young adult daughter and her friend. It will be my first time (not theirs) in Portland. I chose this place because we can walk to everything.\n\nThank you,\nCheryl";
+    const ctx = {
+      reservationId: '390bc10a-7b33-484e-b3a0-f23241e3c158',
+      conversationTraces: { historyFetchFailed: true, historySource: 'live_fetch_failed', hasRecentHostMessage: false }
+    };
+    const applied = agent._applyPureWelcomeReplyPolicy(
+      {
+        typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+        proposedResponse: 'Hi Cheryl, welcome! Check-in is at 4pm with self-check-in and parking.',
+        shouldReply: false,
+        escalated: true
+      },
+      ctx,
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, true);
+    assert.equal(applied.escalated, false);
+  });
+
+  it('still uses history-fetch conservative mode for Taylor-style follow-ups', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = "Ahh that's perfect!! We will be arriving in about an hour! Thank you";
+    const ctx = {
+      reservationId: '390bc10a-7b33-484e-b3a0-f23241e3c158',
+      conversationTraces: { historyFetchFailed: true, historySource: 'live_fetch_failed', hasRecentHostMessage: false }
+    };
+    assert.equal(agent._looksLikePlausibleFollowUp(msg), true);
+    assert.equal(agent._shouldApplyHistoryFetchConservativeMode(msg, ctx), true);
+  });
+
   it('reclassifies pre-arrival sofa linens away from EXTRA_LINENS_TOWELS', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

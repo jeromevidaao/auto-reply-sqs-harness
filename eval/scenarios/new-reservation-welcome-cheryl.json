@@ -1,0 +1,50 @@
+{
+  "id": "new-reservation-welcome-cheryl",
+  "description": "Real incident: Cheryl's first post-booking message for Downtown Studio. Pure intro about visiting Portland with daughter + friend, chose place for walkability. History fetch failed in prod (live_fetch_failed, count=0) causing shouldReply:false despite NEW_RESERVATION_WELCOME. Must still auto-reply with rich welcome including 4pm, self-check-in, parking, 3-day sentence.",
+  "guestMessage": "Hello Ruby and Jerome,\n\nI am visiting with my young adult daughter and her friend. It will be my first time (not theirs) in Portland. I chose this place because we can walk to everything.\n\nThank you,\nCheryl",
+  "context": {
+    "guestName": "Cheryl",
+    "reservationId": "390bc10a-7b33-484e-b3a0-f23241e3c158",
+    "conversation_id": "5b0e6d0f-1e06-45a6-8468-78386699efca",
+    "checkIn": "2026-07-17T16:00:00-04:00",
+    "checkOut": "2026-07-19T10:00:00-04:00",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+    "bookingTimestamp": "2026-06-17T10:00:00Z",
+    "asOfDate": "2026-06-17",
+    "hasPets": false,
+    "petCount": 0,
+    "infantCount": 0,
+    "childCount": 0,
+    "conversationHistory": [],
+    "conversationTraces": {
+      "historyFetchFailed": true,
+      "historySource": "live_fetch_failed",
+      "recentMessageCount": 0,
+      "hasRecentHostMessage": false,
+      "earlyUnitReadyOffered": false,
+      "duplicateRisk": false
+    }
+  },
+  "rubric": {
+    "expectedCategory": "NEW_RESERVATION_WELCOME",
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "let me know if you have any questions",
+      "happy to hear",
+      "feel free to book",
+      "let me know if questions"
+    ],
+    "requiredPhrases": [
+      "self-check-in",
+      "4pm",
+      "parking",
+      "detailed check-in instructions 3 days before",
+      "Cheryl"
+    ],
+    "mustStartWithGreeting": true,
+    "greetingMustUseName": "Cheryl",
+    "noPetMention": true
+  },
+  "notes": "Locks the Cheryl incident: history fetch failed must NOT suppress pure first-post-booking NEW_RESERVATION_WELCOME. Code _isPureFirstPostBookingIntro + _applyPureWelcomeReplyPolicy + prompt exception block."
+}
