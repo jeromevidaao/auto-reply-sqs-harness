@@ -413,7 +413,26 @@ export class GuestMessagingAgent {
     const thermo = context.earlyThermostatInfo;
     const hp = context.heatPumpInfo;
 
-    if (!isThermostatCategory && !thermo?.guestMessageRelevant) {
+    // Never stomp welcome, hotel, or other unrelated categories with HVAC boilerplate.
+    const protectedCategories = [
+      'NEW_RESERVATION_WELCOME',
+      'NEW_INQUIRY_WELCOME',
+      'HOTEL_RECOMMENDATION',
+      'DINNER_RECOMMENDATION',
+      'LUNCH_RECOMMENDATION',
+      'LOBSTER_RECOMMENDATION',
+      'EVENT_REQUEST',
+      'PACK_AND_PLAY_BRAND',
+      'SLEEPING_ARRANGEMENTS',
+      'SLEEPING_ACCOMMODATION',
+      'SOFA_BED_SIZE',
+    ];
+    if (categories.some((c) => protectedCategories.includes(c))) {
+      return { applied: false };
+    }
+
+    const hvacRelevant = thermo?.guestMessageRelevant || hp?.guestMessageRelevant || hp?.detected;
+    if (!isThermostatCategory || !hvacRelevant) {
       return { applied: false };
     }
 
@@ -860,15 +879,19 @@ export class GuestMessagingAgent {
     // (the root cause behind "AC says on but no air" when heads disagree on heat vs cool)
     const heatPumpTool = this.tools.get('get_heat_pump_status');
     if (heatPumpTool && enrichedContext.earlyThermostatInfo?.guestMessageRelevant) {
-      try {
-        const hpInfo = await heatPumpTool.execute(guestMessage, enrichedContext);
-        if (hpInfo && (hpInfo.liveStatus || hpInfo.detected)) {
-          enrichedContext.heatPumpInfo = hpInfo;
-          const fixed = hpInfo.actionTaken?.fixed ? ' (auto-fix applied)' : '';
-          console.log('[Agent] → Live heat pump status fetched' + fixed);
+      if (enrichedContext.heatPumpInfo?.liveStatus || enrichedContext.heatPumpInfo?.suggestedResponseSnippet) {
+        console.log('[Agent] → Using pre-injected heat pump info (skipping live Kumo fetch)');
+      } else {
+        try {
+          const hpInfo = await heatPumpTool.execute(guestMessage, enrichedContext);
+          if (hpInfo && (hpInfo.liveStatus || hpInfo.detected)) {
+            enrichedContext.heatPumpInfo = hpInfo;
+            const fixed = hpInfo.actionTaken?.fixed ? ' (auto-fix applied)' : '';
+            console.log('[Agent] → Live heat pump status fetched' + fixed);
+          }
+        } catch (err) {
+          // Non-fatal — we still want to reply even if Kumo is unreachable
         }
-      } catch (err) {
-        // Non-fatal — we still want to reply even if Kumo is unreachable
       }
     }
 
@@ -1194,8 +1217,7 @@ export class GuestMessagingAgent {
       // We set flags here; the single rich notify (with full post-judge trace) happens once at the very end of handleMessage.
       if (cancellationInfo.needsEscalation || enrichedContext.forceCancellationEscalation) {
         console.log('[Agent] → Risky cancellation detected — will force escalation (rich trace) at end of pipeline');
-        finalResult.escalated = true;
-        finalResult.forceCancellationEscalation = true;
+        enrichedContext.forceCancellationEscalation = true;
       }
     }
 
@@ -1240,7 +1262,8 @@ export class GuestMessagingAgent {
 
     const finalResult = {
       ...finalDecision,
-      escalated: shouldEscalate,
+      escalated: shouldEscalate || !!enrichedContext.forceCancellationEscalation,
+      forceCancellationEscalation: !!enrichedContext.forceCancellationEscalation,
       cleaningIssueDetected: cleaningIssue.detected,
       thermostatInfo,
       heatPumpInfo,

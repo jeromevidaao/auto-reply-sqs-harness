@@ -34,6 +34,38 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(applied.proposedResponse.includes('not able to accommodate events or gatherings'));
   });
 
+  it('does not false-positive on Airbnb booking intros or hotel recommendations', async () => {
+    const tool = new ThermostatTool();
+    const abby = await tool.execute(
+      'Hello! We are booking this Airbnb to celebrate my boyfriend and his twin\'s 30th birthday! We look forward to exploring Portland! Thanks!',
+      { listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd' }
+    );
+    const hotel = await tool.execute(
+      'Do you have any hotel recommendations in the area?',
+      { listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d' }
+    );
+    assert.equal(abby.guestMessageRelevant, false);
+    assert.equal(hotel.guestMessageRelevant, false);
+  });
+
+  it('does not apply thermostat policy to NEW_RESERVATION_WELCOME', async () => {
+    const thermostatTool = new ThermostatTool();
+    const thermo = await thermostatTool.execute(
+      'Hello! We are booking this Airbnb to celebrate my boyfriend and his twin\'s 30th birthday!',
+      { listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd', guestName: 'Abby' }
+    );
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyThermostatPolicy(
+      { typeOfMessageReceived: 'NEW_RESERVATION_WELCOME', proposedResponse: 'Good afternoon Abby, welcome! Check-in is at 4pm with self-check-in and parking.' },
+      { earlyThermostatInfo: thermo },
+      'Hello! We are booking this Airbnb...'
+    );
+    assert.equal(applied.applied, false);
+  });
+
   it('forces thermostat neutral remote wording via _applyThermostatPolicy', async () => {
     const thermostatTool = new ThermostatTool();
     const thermo = await thermostatTool.execute("How do I turn up the heat? It's cold in here.", {

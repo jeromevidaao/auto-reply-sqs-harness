@@ -80,10 +80,7 @@ export class ThermostatTool extends BaseTool {
       };
     }
 
-    // Simple heuristic: did the guest message seem related to temperature?
-    const lowerMsg = guestMessage.toLowerCase();
-    const tempKeywords = ['hot', 'cold', 'warm', 'cool', 'temperature', 'thermostat', 'heat', 'ac', 'air conditioning', 'too warm', 'too cold', 'freezing', 'boiling', 'air', 'remotes', 'no air', 'blowing', 'unit', 'units', 'settings'];
-    const seemsRelevant = tempKeywords.some(kw => lowerMsg.includes(kw));
+    const seemsRelevant = this._isGuestMessageHvacRelevant(guestMessage);
 
     const intent = this._detectIntent(guestMessage);
 
@@ -101,10 +98,53 @@ export class ThermostatTool extends BaseTool {
     };
   }
 
+  /**
+   * Detect genuine HVAC / comfort complaints. Uses word boundaries and phrase patterns
+   * to avoid false positives (e.g. "hot" inside "hotel", "air" inside "Airbnb").
+   */
+  _isGuestMessageHvacRelevant(guestMessage = '') {
+    const m = (guestMessage || '').toLowerCase();
+
+    // Clear non-HVAC intents — never treat these as thermostat messages.
+    if (/\bhotel recommendations?\b/.test(m) || /\brecommend(?:ations?)?\b.*\bhotels?\b/.test(m) || /\bhotels?\b.*\brecommend/.test(m)) {
+      return false;
+    }
+    if (/\bairbnb\b/.test(m) && !this._hasExplicitHvacLanguage(m.replace(/\bairbnb\b/g, ' '))) {
+      return false;
+    }
+
+    return this._hasExplicitHvacLanguage(m);
+  }
+
+  _hasExplicitHvacLanguage(m = '') {
+    const hvacPatterns = [
+      /\bthermostat\b/,
+      /\btemperature\b/,
+      /\btoo (?:hot|cold|warm|cool)\b/,
+      /\b(?:cold|hot|freezing) in (?:here|the)\b/,
+      /\bit'?s (?:cold|hot|freezing|boiling)\b/,
+      /\bturn(?:ing)? (?:up|down) the heat\b/,
+      /\bheat pump\b/,
+      /\bair conditioning\b/,
+      /\bno air\b/,
+      /\b(?:ac|a\/c)\b/,
+      /\bheat(?:ing)?\b/,
+      /\bfreezing\b/,
+      /\bnest\b/,
+      /\bremotes?\b/,
+      /\bno air coming\b/,
+      /\b(?:either|both).{0,40}\bunits?\b/,
+      /\bunits?\b.{0,30}(?:on|off|air|ac|heat|cool|remote|setting|blowing)/,
+      /\bcool down\b/,
+      /\bwarm up\b/,
+    ];
+    return hvacPatterns.some((p) => p.test(m));
+  }
+
   _detectIntent(guestMessage = '') {
     const lower = guestMessage.toLowerCase();
-    if (/cold|heat|warm|freezing|turn up the heat|too cold/i.test(lower)) return 'heat';
-    if (/hot|cool|ac|air conditioning|no air|too warm|blowing/i.test(lower)) return 'cool';
+    if (/\b(?:cold|freezing|turn up the heat|too cold)\b/.test(lower) || /\bit'?s cold\b/.test(lower)) return 'heat';
+    if (/\b(?:too hot|too warm|no air|air conditioning|cool down)\b/.test(lower) || /\b(?:ac|a\/c)\b/.test(lower) || /\bit'?s hot\b/.test(lower)) return 'cool';
     return 'general';
   }
 
