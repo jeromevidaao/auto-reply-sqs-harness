@@ -16,9 +16,10 @@
 - Recommend walking or Uber instead of driving/parking downtown (can be difficult and expensive).
 - Suggest SpotHero for paid parking if needed.
 
-**SOFA_BED_SIZE** (Studio only):
+**SOFA_BED_SIZE** (all units with a sofa bed):
 - The queen size sofa bed comfortably sleeps 2.
-- Linens and pillows are stored in the compartment under the sofa.
+- Linens and pillows are stored in the storage compartment under the sofa (in the sofa itself).
+- When the guest asks about sheets/blankets/pillows for the couch/sofa bed, confirm we provide them and include the storage location — do not reply with only "yes, we provide linens" without mentioning they are under/in the sofa.
 
 **PACK_AND_PLAY_BRAND**:
 - Use this specific category whenever the guest directly asks about crib / Pack and Play / portable crib / baby bed availability — even if the message is the very first post-booking communication from the guest and includes birthday/celebration intro language.

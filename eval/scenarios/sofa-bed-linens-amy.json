@@ -1,0 +1,33 @@
+{
+  "id": "sofa-bed-linens-amy",
+  "description": "Pre-arrival guest asks to confirm sheets/blankets/pillows for a 4th guest sleeping on the couch. Must confirm linens are provided AND mention they are stored in/under the sofa itself (storage compartment) — not just a bare yes. Real production case (Amy).",
+  "guestMessage": "Hi Jerome and Ruby, we're looking forward to our stay. I just want to make sure there are sheets/blankets/pillows for our friend (our 4th) who will be sleeping on the couch. Please confirm. Thank you! -Amy",
+  "context": {
+    "guestName": "Amy",
+    "checkIn": "2026-07-18",
+    "checkOut": "2026-07-21",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-06-10T10:00:00Z",
+    "guestCount": 4,
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": ["SLEEPING_ARRANGEMENTS", "SLEEPING_ACCOMMODATION", "SOFA_BED_SIZE"],
+    "shouldReply": true,
+    "requiredPhrases": [
+      "sheets",
+      "blankets",
+      "pillows",
+      "sofa",
+      "storage compartment",
+      "under the sofa"
+    ],
+    "forbiddenPhrases": [
+      "manual reply needed"
+    ],
+    "mustStartWithGreeting": true,
+    "greetingMustUseName": "Amy"
+  },
+  "notes": "Production incident: reply was good but omitted that linens are in the sofa storage compartment. Matches auto-reply-grok-sqs SLEEPING_ARRANGEMENTS / SOFA_BED_SIZE behavior."
+}
