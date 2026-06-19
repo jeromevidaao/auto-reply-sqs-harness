@@ -138,6 +138,56 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(parsed.typeOfMessageReceived, 'CANCELLATION_POLICY');
   });
 
+  it('deterministic judge guard REVISEs duplicate welcome on post-welcome thanks', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Thank you so much! I appreciate your prompt response! We are super excited!';
+    const ctx = {
+      guestName: 'Rene',
+      conversationHistory: [
+        { sender_type: 'host', body: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and parking.' }
+      ],
+      conversationTraces: { recentWelcomeSent: true, hasRecentHostMessage: true }
+    };
+    const decision = {
+      typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+      proposedResponse: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and the $30 pet fee is already included.',
+      shouldReply: true
+    };
+    const guarded = agent._applyDeterministicJudgeGuards(
+      { verdict: 'APPROVE', notes: 'LLM missed it' },
+      decision,
+      ctx,
+      msg
+    );
+    assert.equal(guarded.verdict, 'REVISE');
+    assert.equal(guarded.deterministicGuard, true);
+    assert.match(guarded.revisedResponse, /you're welcome, rene/i);
+    assert.doesNotMatch(guarded.revisedResponse, /4pm|pet fee/i);
+  });
+
+  it('judge prompt uses enriched conversationHistory not empty webhook history', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const prompt = await agent._buildConversationJudgePrompt(
+      { typeOfMessageReceived: 'THANK_YOU_MESSAGE', proposedResponse: "You're welcome, Rene!", shouldReply: true },
+      { conversationContext: { recentWelcomeSent: true, lastHostMessagePreview: 'Check-in is at 4pm with self-check-in' } },
+      {
+        originalMessage: 'Thank you so much!',
+        conversationHistory: [
+          { sender_type: 'host', body: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and parking.' }
+        ]
+      }
+    );
+    assert.match(prompt, /RECENT CONVERSATION HISTORY/);
+    assert.match(prompt, /Check-in is at 4pm with self-check-in and parking/);
+    assert.match(prompt, /POST-WELCOME THANK-YOU/);
+  });
+
   it('replaces duplicate welcome logistics with short thank-you ack (Rene incident)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

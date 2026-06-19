@@ -48,5 +48,5 @@
       "You're welcome"
     ]
   },
-  "notes": "Exact reproduction of the Rene duplicate-welcome incident on 53 Pine #1B Downtown Studio (Jun 29–Jul 2, 2026). First host message already covered logistics + recommendations. Thanks follow-up must be short ack only. ConversationContextTool recentWelcomeSent + _applyPostWelcomeThankYouPolicy + CRITICAL block + judge rule must prevent re-sending welcome. In prod prior host welcome comes via live getConversationMessages."
+  "notes": "Exact reproduction of the Rene duplicate-welcome incident on 53 Pine #1B Downtown Studio (Jun 29–Jul 2, 2026). Root cause of judge miss in prod: handleMessage passed context.conversationHistory (webhook, empty) to the judge instead of enrichedContext.conversationHistory (live fetch) — judge never saw the 12:48 welcome. Fixed + deterministic judge guard. Thanks follow-up must be short ack only."
 }

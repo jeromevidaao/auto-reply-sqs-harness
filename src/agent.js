@@ -1539,10 +1539,11 @@ export class GuestMessagingAgent {
         travelTimes: enrichedContext.travelTimes || null,
       };
 
+      // Use enrichedContext.conversationHistory (live-fetched thread). Do NOT pass context.conversationHistory
+      // from the webhook — it is usually empty/current-message-only and blinds reflection to prior host turns.
       const reflectionContext = {
         ...enrichedContext,
         originalMessage: guestMessage,
-        conversationHistory: context.conversationHistory || [],
       };
 
       const reflection = await this.reflectOnDecision(finalDecision, toolResults, reflectionContext);
@@ -1595,13 +1596,15 @@ export class GuestMessagingAgent {
         toolResults.policyDataForReview = toolResults.airbnbPolicy;
       }
 
+      // Use enrichedContext.conversationHistory (live-fetched thread). Passing context.conversationHistory
+      // was the Rene judge miss: judge never saw the prior welcome host message to flag duplication.
       const judgeContext = {
         ...enrichedContext,
         originalMessage: guestMessage,
-        conversationHistory: context.conversationHistory || [],
       };
 
-      const judgeResult = await this.runConversationJudge(finalDecision, toolResults, judgeContext);
+      let judgeResult = await this.runConversationJudge(finalDecision, toolResults, judgeContext);
+      judgeResult = this._applyDeterministicJudgeGuards(judgeResult, finalDecision, judgeContext, guestMessage);
 
       finalResult.conversationJudge = judgeResult;
 
@@ -1797,6 +1800,62 @@ export class GuestMessagingAgent {
    * Runs a dedicated Conversation Judge focused on anti-repetition and consistency.
    * This is more powerful than basic reflection for catching the agent repeating itself.
    */
+  /**
+   * Deterministic backstop when the LLM judge APPROVEs (or lacks history) but the draft clearly
+   * re-sends welcome logistics on a post-welcome thank-you. Does not depend on Grok seeing history.
+   */
+  _applyDeterministicJudgeGuards(llmJudgeResult = {}, firstDecision = {}, context = {}, guestMessage = '') {
+    if (!this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
+      return llmJudgeResult;
+    }
+
+    const draft = (firstDecision.proposedResponse || '').trim();
+    const repeatsLogistics = /4\s*pm|self-check-in|parking|pet fee|3 days before|check-in instructions|off-street|not allowed on the bed/i.test(draft);
+    const wrongCategory = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'].includes(firstDecision.typeOfMessageReceived);
+
+    const revised = (llmJudgeResult.revisedResponse || '').trim();
+    const llmAlreadyFixed = llmJudgeResult.verdict === 'REVISE' && revised &&
+      /you're welcome|you are welcome/i.test(revised) &&
+      !/4\s*pm|self-check-in|pet fee|3 days before/i.test(revised);
+
+    if (llmAlreadyFixed) {
+      return llmJudgeResult;
+    }
+
+    if (!repeatsLogistics && !wrongCategory && llmJudgeResult.verdict === 'REJECT') {
+      return llmJudgeResult;
+    }
+
+    if (!repeatsLogistics && !wrongCategory && llmJudgeResult.verdict !== 'APPROVE') {
+      return llmJudgeResult;
+    }
+
+    if (!repeatsLogistics && !wrongCategory) {
+      return llmJudgeResult;
+    }
+
+    const policy = this._applyPostWelcomeThankYouPolicy(
+      { ...firstDecision, proposedResponse: draft, typeOfMessageReceived: firstDecision.typeOfMessageReceived },
+      context,
+      guestMessage
+    );
+
+    console.log('[Agent] → Deterministic judge guard: duplicate welcome on post-welcome thank-you (LLM judge missed or lacked history)');
+
+    return {
+      ...llmJudgeResult,
+      verdict: 'REVISE',
+      revisedResponse: policy.proposedResponse,
+      notes: (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+        'Deterministic guard: prior welcome logistics already sent; guest thanks only — revise to short You\'re welcome ack.',
+      issues: [
+        ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+        'Repeated welcome logistics on post-welcome thank-you — guest already received full welcome (deterministic judge guard).'
+      ],
+      deterministicGuard: true,
+    };
+  }
+
   async runConversationJudge(firstDecision, toolResults = {}, context = {}) {
     if (!this.enableConversationJudge) {
       return { verdict: 'APPROVE', notes: 'Conversation Judge disabled' };
@@ -1874,12 +1933,32 @@ export class GuestMessagingAgent {
       }
     }
 
+    const traces = toolResults.conversationContext || context.conversationTraces || {};
+    if (traces.historySource) {
+      lines.push(`=== HISTORY SOURCE FOR JUDGE ===`);
+      lines.push(`historySource=${traces.historySource}, recentMessageCount=${traces.recentMessageCount || 0}, historyFetchFailed=${!!traces.historyFetchFailed}`);
+      lines.push('');
+    }
+
+    if (traces.recentWelcomeSent) {
+      lines.push('=== CRITICAL JUDGE SIGNAL: POST-WELCOME THANK-YOU ===');
+      lines.push('conversationTraces.recentWelcomeSent=true: A prior host message already delivered full welcome logistics. Guest message is thanks-only. Any draft that re-sends 4pm/self-check-in/parking/pet fee/3-day instructions or is NEW_RESERVATION_WELCOME MUST be REVISEd to a brief "You\'re welcome, [Name]!" only.');
+      if (traces.lastHostMessagePreview) {
+        lines.push(`Prior host welcome preview: "${traces.lastHostMessagePreview}"`);
+      }
+      lines.push('');
+    }
+
     if (context.conversationHistory?.length) {
-      lines.push('=== RECENT CONVERSATION HISTORY ===');
+      lines.push('=== RECENT CONVERSATION HISTORY (newest last) ===');
       context.conversationHistory.slice(-8).forEach(m => {
         const who = m.sender_type === 'guest' ? 'Guest' : 'Host';
         lines.push(`${who}: ${m.body}`);
       });
+      lines.push('');
+    } else if (traces.lastHostMessagePreview) {
+      lines.push('=== PRIOR HOST MESSAGE PREVIEW (no full history in judge context) ===');
+      lines.push(`Host: ${traces.lastHostMessagePreview}`);
       lines.push('');
     }
 
