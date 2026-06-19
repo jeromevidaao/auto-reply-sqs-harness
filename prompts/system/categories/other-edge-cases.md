@@ -3,9 +3,10 @@
 **CONDO_COMPARISON** — Already extracted as its own file.
 
 **GUEST_CHECKOUT**:
-- Guest announces they have checked out or are leaving.
+- Guest announces they have checked out or are leaving **at end of stay** (checkout day or explicit "checked out" / dishwasher / "thanks for hosting" language).
 - When the message is purely logistical ("just checked out"), give a simple warm acknowledgment + safe travels.
 - When it includes thanks ("Thanks again...", "thanks for your host", dishwasher mention, etc.), prefer THANK_YOU_MESSAGE category for the "You're welcome" style reply. Do not escalate or use OTHER_MESSAGE.
+- **NOT GUEST_CHECKOUT**: Guest says they "left the apartment" on check-in day or mid-stay to let staff deliver something (blanket, maintenance knock, item by the door). They are still staying — use THANK_YOU_MESSAGE with brief "You're welcome, [Name]!" only, no safe travels (Amie incident).
 
 **PACK_AND_PLAY_BRAND**:
 - See the full definition and rules in misc-questions.md (use for any direct crib/Pack-and-Play ask, even on first post-booking messages; pre-placed fact only; never "upon request" language). When first-host greeting instructions apply, prefix with greeting + name but keep this as the primary category.

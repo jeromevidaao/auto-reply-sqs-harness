@@ -242,6 +242,81 @@ describe('EventRequestTool (no LLM)', () => {
     assert.match(prompt, /POST-WELCOME THANK-YOU/);
   });
 
+  it('strips safe travels from in-stay temporary departure thank-you (Amie blanket incident)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Thank you we just left the apartment!';
+    const ctx = {
+      guestName: 'Amie',
+      checkIn: '2026-06-19',
+      checkOut: '2026-06-21',
+      asOfDate: '2026-06-19',
+      listingId: 'c899481f-2e5b-402d-80c4-3167fd824d96'
+    };
+    const parsed = {
+      typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+      proposedResponse: "You're welcome, Amie! Safe travels.",
+      shouldReply: true
+    };
+    const applied = agent._applyInStayDepartureThankYouPolicy(parsed, ctx, msg);
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'THANK_YOU_MESSAGE');
+    assert.match(applied.proposedResponse, /you're welcome, amie/i);
+    assert.doesNotMatch(applied.proposedResponse, /safe travels/i);
+  });
+
+  it('deterministic judge guard removes safe travels on in-stay step-out thanks', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Thank you we just left the apartment!';
+    const ctx = {
+      guestName: 'Amie',
+      checkIn: '2026-06-19',
+      checkOut: '2026-06-21',
+      asOfDate: '2026-06-19'
+    };
+    const decision = {
+      typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+      proposedResponse: "You're welcome, Amie! Safe travels.",
+      shouldReply: true
+    };
+    const guarded = agent._applyDeterministicJudgeGuards(
+      { verdict: 'APPROVE', notes: 'LLM missed it' },
+      decision,
+      ctx,
+      msg
+    );
+    assert.equal(guarded.verdict, 'REVISE');
+    assert.equal(guarded.deterministicGuard, true);
+    assert.match(guarded.revisedResponse, /you're welcome, amie/i);
+    assert.doesNotMatch(guarded.revisedResponse, /safe travels/i);
+  });
+
+  it('still allows safe travels on actual checkout-day thank-you', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Hi Jerome, we just checked out and started the dishwasher. Thanks again for your host!';
+    const ctx = {
+      guestName: 'David',
+      checkIn: '2026-05-24',
+      checkOut: '2026-05-31',
+      asOfDate: '2026-05-31'
+    };
+    assert.equal(agent._isTemporaryDepartureDuringStay(msg, ctx), false);
+    const applied = agent._applyInStayDepartureThankYouPolicy(
+      { typeOfMessageReceived: 'THANK_YOU_MESSAGE', proposedResponse: "You're welcome, David! Safe travels." },
+      ctx,
+      msg
+    );
+    assert.equal(applied.applied, false);
+  });
+
   it('replaces duplicate welcome logistics with short thank-you ack (Rene incident)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

@@ -1,0 +1,59 @@
+{
+  "id": "amie-temporary-departure-thanks",
+  "description": "Amie · Booker on check-in day Jun 19 (checkout Jun 21). Richard/PM found a futon blanket and knocked; guest stepped out: 'Thank you we just left the apartment!' Auto incorrectly replied 'You're welcome, Amie! Safe travels.' — guest is still staying tonight. Must be brief You're welcome only, no end-of-stay farewell.",
+  "guestMessage": "Thank you we just left the apartment!",
+  "context": {
+    "guestName": "Amie",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "53 Pine #1B · Downtown Studio, Parking with EV charger",
+    "checkIn": "2026-06-19",
+    "checkOut": "2026-06-21",
+    "asOfDate": "2026-06-19",
+    "reservationId": "35f4f0d6-facc-4c7b-87ab-12906608a78f",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi is there an extra blanket available for the futon?"
+      },
+      {
+        "sender_type": "host",
+        "body": "Amie, the linens and blanket for the futon should be in the drawers under the TV in the main bedroom. Let me know if you can find them!"
+      },
+      {
+        "sender_type": "guest",
+        "body": "We looked there but were only able to find the sheets"
+      },
+      {
+        "sender_type": "guest",
+        "body": "No blanket"
+      },
+      {
+        "sender_type": "host",
+        "body": "Let us talk to Richard our property manager of we have a spare one in the storage."
+      },
+      {
+        "sender_type": "host",
+        "body": "I found 1 blanket. I tried knocking on the door . The blanket is in a black bag."
+      },
+      {
+        "sender_type": "guest",
+        "body": "Thank you we just left the apartment!"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "THANK_YOU_MESSAGE",
+    "shouldReply": true,
+    "requiredPhrases": [
+      "You're welcome"
+    ],
+    "forbiddenPhrases": [
+      "safe travels",
+      "Safe travels",
+      "hope you enjoyed",
+      "have a great trip",
+      "glad you had a good stay"
+    ]
+  },
+  "notes": "Regression for in-stay temporary departure vs checkout. _isTemporaryDepartureDuringStay + _applyInStayDepartureThankYouPolicy + CRITICAL prompt injection + judge rule + deterministic judge guard must prevent safe-travels on step-out thanks during active stay."
+}

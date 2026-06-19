@@ -334,6 +334,12 @@ export class GuestMessagingAgent {
       confidence = postWelcomeThanksPolicy.confidence;
     }
 
+    const inStayDeparturePolicy = this._applyInStayDepartureThankYouPolicy(parsed, context, guestMessage);
+    if (inStayDeparturePolicy.applied) {
+      shouldReply = inStayDeparturePolicy.shouldReply;
+      confidence = inStayDeparturePolicy.confidence;
+    }
+
     const preCheckInParkingPolicy = this._applyPreCheckInParkingPolicy(parsed, context, guestMessage);
     if (preCheckInParkingPolicy.applied) {
       shouldReply = preCheckInParkingPolicy.shouldReply;
@@ -421,6 +427,99 @@ export class GuestMessagingAgent {
   _guestDisplayFirstName(context = {}) {
     const raw = context.guestDisplayName || context.guestName || 'there';
     return String(raw).split(/[·(]/)[0].trim().split(/\s+/)[0] || 'there';
+  }
+
+  _todayDateStr(context = {}) {
+    const anchor = context.asOfDate || context.simulatedToday || context.today;
+    if (anchor) return String(anchor).slice(0, 10);
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  }
+
+  /**
+   * Guest is on check-in day or mid-stay (not past checkout).
+   */
+  _isCurrentStay(context = {}) {
+    if (context.stayTiming === 'current') return true;
+    const checkIn = (context.checkIn || '').slice(0, 10);
+    const checkOut = (context.checkOut || '').slice(0, 10);
+    if (!checkIn) return false;
+    const today = this._todayDateStr(context);
+    return checkIn <= today && (!checkOut || checkOut > today);
+  }
+
+  /**
+   * Guest message signals actual checkout / end-of-stay departure (not a brief step-out).
+   */
+  _looksLikeActualCheckout(guestMessage = '', context = {}) {
+    const lower = (guestMessage || '').toLowerCase();
+    if (/checked out|check(?:ing)? out|starting the dishwasher|thanks again for your host|thanks for (?:being|your) (?:a great |such a )?host|departed|on our way (?:home|back)|heading home|end of (?:our|the) stay|about to check out/i.test(lower)) {
+      return true;
+    }
+    const checkOut = (context.checkOut || '').slice(0, 10);
+    const today = this._todayDateStr(context);
+    if (checkOut && checkOut === today && /left|leaving|we(?:'re| are) out|headed out/i.test(lower)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Guest stepped out temporarily during an active stay (e.g. so PM can deliver a blanket).
+   * Amie incident: "Thank you we just left the apartment!" on check-in day — NOT checkout.
+   */
+  _isTemporaryDepartureDuringStay(guestMessage = '', context = {}) {
+    const lower = (guestMessage || '').toLowerCase();
+    if (!this._isCurrentStay(context)) return false;
+    if (this._looksLikeActualCheckout(guestMessage, context)) return false;
+
+    return /left the (apartment|unit|place|flat)|step(?:ped|ping) out|we(?:'re| are) out|heading out|gone out|went out|just left(?: the)?|left so you can|left to let/i.test(lower);
+  }
+
+  _stripEndOfStayFarewell(text = '') {
+    return String(text || '')
+      .replace(/\s*[-—,]?\s*safe travels[!.]*/gi, '')
+      .replace(/\s*[-—,]?\s*hope you enjoyed[^!.]*[!.]*/gi, '')
+      .replace(/\s*[-—,]?\s*glad you had a good stay[^!.]*[!.]*/gi, '')
+      .replace(/\s*[-—,]?\s*have a (?:great|wonderful|safe) trip[^!.]*[!.]*/gi, '')
+      .replace(/\s*[-—,]?\s*enjoyed your stay[^!.]*[!.]*/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s+([!,?.])/g, '$1')
+      .trim();
+  }
+
+  _applyInStayDepartureThankYouPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isTemporaryDepartureDuringStay(guestMessage, context)) {
+      return { applied: false };
+    }
+
+    const naturalName = this._guestDisplayFirstName(context);
+    const draft = (parsed.proposedResponse || '').trim();
+    const hasEndOfStayFarewell = /safe travels|hope you enjoyed|glad you had a good stay|have a (?:great|wonderful|safe) trip|enjoyed your stay/i.test(draft);
+
+    let proposedResponse = draft;
+    if (!draft || draft === 'none' || hasEndOfStayFarewell ||
+        !/you're welcome|you are welcome/i.test(draft)) {
+      proposedResponse = `You're welcome, ${naturalName}!`;
+    } else {
+      proposedResponse = this._stripEndOfStayFarewell(draft);
+      if (!proposedResponse || !/you're welcome|you are welcome/i.test(proposedResponse)) {
+        proposedResponse = `You're welcome, ${naturalName}!`;
+      } else if (!/[!.]$/.test(proposedResponse)) {
+        proposedResponse += '!';
+      }
+    }
+
+    parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+    };
   }
 
   /**
@@ -779,6 +878,10 @@ export class GuestMessagingAgent {
     }
     if (daysUntilCheckIn !== null) lines.push(`- Days until check-in: ${daysUntilCheckIn}`);
     lines.push(`- Stay timing: ${stayTiming} (current = check-in day or in-stay; future = upcoming)`);
+
+    if (this._isTemporaryDepartureDuringStay(message, context)) {
+      lines.push('- CRITICAL IN-STAY TEMPORARY DEPARTURE (Amie incident): Guest is currently IN their stay (check-in day or mid-stay, NOT checkout day). They said they "left the apartment/unit" temporarily (e.g. stepped out so a property manager could knock, deliver a blanket, or leave an item by the door). This is NOT checkout and they are returning tonight. Classify as THANK_YOU_MESSAGE. proposedResponse MUST be a brief warm "You\'re welcome, [Name]!" only. MUST NOT say "safe travels", "hope you enjoyed your stay", "have a great trip", or any end-of-stay farewell.');
+    }
 
     // Strong signal for the 3-day check-in instructions rule + 4pm key info on future NEW_RESERVATION_WELCOME cases (e.g. abby birthday scenario).
     // This is injected directly into the user prompt Context so the first-pass LLM (processMessage / eval) cannot miss it.
@@ -1787,6 +1890,16 @@ export class GuestMessagingAgent {
       finalResult.escalated = postWelcomeThanksPolicyFinal.escalated;
     }
 
+    const inStayDeparturePolicyFinal = this._applyInStayDepartureThankYouPolicy(finalResult, enrichedContext, guestMessage);
+    if (inStayDeparturePolicyFinal.applied) {
+      console.log('[Agent] → In-stay temporary departure policy applied (no safe-travels on step-out thanks)');
+      finalResult.typeOfMessageReceived = inStayDeparturePolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = inStayDeparturePolicyFinal.proposedResponse;
+      finalResult.shouldReply = inStayDeparturePolicyFinal.shouldReply;
+      finalResult.confidence = inStayDeparturePolicyFinal.confidence;
+      finalResult.escalated = inStayDeparturePolicyFinal.escalated;
+    }
+
     const cancellationCategoryFinal = this._applyCancellationCategoryPolicy(finalResult, guestMessage);
     if (cancellationCategoryFinal.applied) {
       finalResult.typeOfMessageReceived = cancellationCategoryFinal.typeOfMessageReceived;
@@ -1935,6 +2048,36 @@ export class GuestMessagingAgent {
    * re-sends welcome logistics on a post-welcome thank-you. Does not depend on Grok seeing history.
    */
   _applyDeterministicJudgeGuards(llmJudgeResult = {}, firstDecision = {}, context = {}, guestMessage = '') {
+    if (this._isTemporaryDepartureDuringStay(guestMessage, context)) {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const hasEndOfStayFarewell = /safe travels|hope you enjoyed|glad you had a good stay|have a (?:great|wonderful|safe) trip|enjoyed your stay/i.test(draft);
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const llmAlreadyFixed = llmJudgeResult.verdict === 'REVISE' && revised &&
+        /you're welcome|you are welcome/i.test(revised) &&
+        !/safe travels|hope you enjoyed|glad you had a good stay/i.test(revised);
+
+      if (hasEndOfStayFarewell && !llmAlreadyFixed) {
+        const policy = this._applyInStayDepartureThankYouPolicy(
+          { ...firstDecision, proposedResponse: draft },
+          context,
+          guestMessage
+        );
+        console.log('[Agent] → Deterministic judge guard: end-of-stay farewell on in-stay temporary departure (Amie incident)');
+        return {
+          ...llmJudgeResult,
+          verdict: 'REVISE',
+          revisedResponse: policy.proposedResponse,
+          notes: (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+            'Deterministic guard: guest stepped out temporarily during active stay — revise to short You\'re welcome without safe travels.',
+          issues: [
+            ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+            'End-of-stay farewell on in-stay temporary departure — guest is still staying tonight (Amie incident).'
+          ],
+          deterministicGuard: true,
+        };
+      }
+    }
+
     if (!this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
       return llmJudgeResult;
     }
