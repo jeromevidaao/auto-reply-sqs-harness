@@ -5,6 +5,7 @@ import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
 import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool, GoogleMapsTool, StayExtensionTool } from './tools/index.js';
 import { EVENT_REQUEST_STANDARD_RESPONSE } from './tools/event/EventRequestTool.js';
+import { ConversationHistoryRequiredError } from './errors/ConversationHistoryRequiredError.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,11 @@ export class GuestMessagingAgent {
     // With very low volume (~4-5 messages/day), we run the judge on every message by default
     // when enabled. This gives strong protection against repetition and bad cancellation answers.
     this.enableConversationJudge = options.enableConversationJudge !== false; // on by default
+
+    // Production Lambda sets hospitableClient; live history is required by default there.
+    // Eval/simulator pass requireLiveConversationHistory: false to use scenario-provided history.
+    this.hospitableClient = options.hospitableClient || null;
+    this.requireLiveConversationHistory = options.requireLiveConversationHistory;
 
     this.systemPrompt = null;
 
@@ -1068,9 +1074,51 @@ export class GuestMessagingAgent {
    * Design goals:
    * - Run cheap, high-signal tools early by default.
    * - Keep expensive calls conditional.
-   * - Fail open (non-fatal) so we never break the main flow.
+   * - Conversation history fetch failures are fatal in production (requireLiveConversationHistory).
    * - Make it easy to extend over time.
    */
+  _shouldRequireLiveConversationHistory(context = {}) {
+    if (context.requireLiveConversationHistory === false) return false;
+    if (context.requireLiveConversationHistory === true) return true;
+    if (this.requireLiveConversationHistory === false) return false;
+    if (this.requireLiveConversationHistory === true) return true;
+    return !!this.hospitableClient;
+  }
+
+  _enforceLiveConversationHistory(enrichedContext) {
+    if (!this._shouldRequireLiveConversationHistory(enrichedContext)) return;
+
+    const traces = enrichedContext.conversationTraces || {};
+    const historySource = traces.historySource || 'unknown';
+
+    if (traces.historyFetchFailed || historySource === 'live_fetch_failed') {
+      const msg = `CRITICAL: Live conversation history fetch failed (historySource=${historySource}). Refusing to process message without thread visibility.`;
+      throw new ConversationHistoryRequiredError(msg, {
+        conversationId: enrichedContext.conversation_id || enrichedContext.conversationId || null,
+        reservationId: enrichedContext.reservationId || enrichedContext.reservation_id || null,
+        historySource,
+      });
+    }
+
+    if (historySource === 'no_conversation_id_in_context') {
+      const msg = 'CRITICAL: Live conversation history required but no conversation_id in context.';
+      throw new ConversationHistoryRequiredError(msg, {
+        conversationId: null,
+        reservationId: enrichedContext.reservationId || enrichedContext.reservation_id || null,
+        historySource,
+      });
+    }
+
+    if (this.hospitableClient && historySource !== 'live_fetched') {
+      const msg = `CRITICAL: Live conversation history was not fetched (historySource=${historySource}).`;
+      throw new ConversationHistoryRequiredError(msg, {
+        conversationId: enrichedContext.conversation_id || enrichedContext.conversationId || null,
+        reservationId: enrichedContext.reservationId || enrichedContext.reservation_id || null,
+        historySource,
+      });
+    }
+  }
+
   async _enrichTracesEarly(enrichedContext, guestMessage) {
     // Layer 1: Core safety traces (always run)
     await this._runCoreSafetyTraces(enrichedContext, guestMessage);
@@ -1091,34 +1139,28 @@ export class GuestMessagingAgent {
 
     if (!conversationContextTool) return;
 
-    try {
-      const traces = await conversationContextTool.execute(guestMessage, enrichedContext);
-      if (traces) {
-        enrichedContext.conversationTraces = traces;
+    const traces = await conversationContextTool.execute(guestMessage, enrichedContext);
+    if (traces) {
+      enrichedContext.conversationTraces = traces;
 
-        const summary = [];
-        if (traces.hasRecentHostMessage) {
-          const mins = traces.minutesSinceLastHostMessage ? ` (${traces.minutesSinceLastHostMessage}m ago)` : '';
-          summary.push(`recent host message${mins}`);
-        }
-        if (traces.duplicateRisk) summary.push('duplicate risk');
-        if (traces.preApprovalDetected) summary.push('pre-approval detected');
-        if (traces.historyFetchFailed) summary.push('HISTORY FETCH FAILED');
-        if (traces.traces?.length) summary.push(...traces.traces);
-
-        // Always log the history fetch status explicitly (prevents "silent" failures for history-dependent logic like Taylor anti-contradiction).
-        const histSrc = traces.historySource || 'unknown';
-        const histCount = traces.recentMessageCount || (traces.recentConversationMessages?.length || 0);
-        console.log(`[Agent] → Conversation history status: source=${histSrc}, count=${histCount}${traces.historyFetchFailed ? ' (FAILED — see CRITICAL log above)' : ''}`);
-
-        if (summary.length > 0) {
-          console.log('[Agent] → Early trace enrichment complete:', summary.join(' | '));
-        } else {
-          console.log('[Agent] → Early trace enrichment complete (no special signals)');
-        }
+      const summary = [];
+      if (traces.hasRecentHostMessage) {
+        const mins = traces.minutesSinceLastHostMessage ? ` (${traces.minutesSinceLastHostMessage}m ago)` : '';
+        summary.push(`recent host message${mins}`);
       }
-    } catch (err) {
-      console.warn('[Agent] Core safety trace enrichment failed (non-fatal):', err.message);
+      if (traces.duplicateRisk) summary.push('duplicate risk');
+      if (traces.preApprovalDetected) summary.push('pre-approval detected');
+      if (traces.traces?.length) summary.push(...traces.traces);
+
+      const histSrc = traces.historySource || 'unknown';
+      const histCount = traces.recentMessageCount || (traces.recentConversationMessages?.length || 0);
+      console.log(`[Agent] → Conversation history status: source=${histSrc}, count=${histCount}`);
+
+      if (summary.length > 0) {
+        console.log('[Agent] → Early trace enrichment complete:', summary.join(' | '));
+      } else {
+        console.log('[Agent] → Early trace enrichment complete (no special signals)');
+      }
     }
   }
 
@@ -1312,12 +1354,18 @@ export class GuestMessagingAgent {
 
     console.log('[Agent] handleMessage started for guest:', enrichedContext.guestDisplayName || enrichedContext.guestName || 'Unknown');
 
+    enrichedContext.requireLiveConversationHistory = this._shouldRequireLiveConversationHistory(context);
+    if (enrichedContext.requireLiveConversationHistory) {
+      console.log('[Agent] → Live conversation history is REQUIRED for this invocation (production mode)');
+    }
+
     // === Pre-processing / Trace Enrichment Step ===
     // Run lightweight tools and safety checks *before* the first LLM pass.
     // This ensures the main generation, reflection, and judge all start with the richest possible signals
     // (pre-approval status, recent host activity, unit readiness hints, etc.).
     // This is the dedicated early enrichment phase for highest-quality multipass responses.
     await this._enrichTracesEarly(enrichedContext, guestMessage);
+    this._enforceLiveConversationHistory(enrichedContext);
 
     // If the context tool fetched live messages, surface them as conversationHistory so that
     // _buildUserPrompt includes the actual recent thread (Host: ..., Guest: ...) for the LLM.

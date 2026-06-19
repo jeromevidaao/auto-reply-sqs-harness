@@ -37,7 +37,9 @@ async function main() {
   const agentOptions = {
     llm: 'auto',
     projectRoot: path.resolve(__dirname, '..'),
-    useModularPrompt: mode === 'modular'
+    useModularPrompt: mode === 'modular',
+    // Eval provides conversationHistory in scenarios; no live Hospitable fetch.
+    requireLiveConversationHistory: false,
   };
 
   if (mode === 'raw' && rawPromptPath) {

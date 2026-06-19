@@ -1,4 +1,5 @@
 import { BaseTool } from '../BaseTool.js';
+import { ConversationHistoryRequiredError } from '../../errors/ConversationHistoryRequiredError.js';
 import { getTimeBasedGreeting, analyzeGreetingContext } from '../../utils/timeGreeting.js';
 
 /**
@@ -87,6 +88,18 @@ export class ConversationContextTool extends BaseTool {
     let recentHostMessages = [];
     let allRecentMessages = [];
 
+    const requireLiveHistory = context.requireLiveConversationHistory === true;
+
+    if (requireLiveHistory && this.hospitableClient && !conversationId) {
+      const msg = `CRITICAL: Live conversation history required but no conversation_id available (reservationId=${reservationId || 'none'}). Cannot safely process guest message without thread visibility.`;
+      console.error(`[ConversationContextTool] ${msg}`);
+      throw new ConversationHistoryRequiredError(msg, {
+        conversationId: null,
+        reservationId,
+        historySource: 'no_conversation_id_in_context',
+      });
+    }
+
     if (this.hospitableClient && conversationId) {
       try {
         result.traces.push(`Fetching conversation messages via conversation_id=${conversationId} (reservationId=${reservationId || 'none'})`);
@@ -153,13 +166,27 @@ export class ConversationContextTool extends BaseTool {
           result.traces.push('Live history fetched but no host messages in the recent window');
         }
       } catch (e) {
+        const errDetail = e?.message || String(e);
+        console.error(`[ConversationContextTool] CRITICAL HISTORY FETCH FAILURE: getConversationMessages failed for conversationId=${conversationId} (reservationId in context=${reservationId || 'none'}, webhook conversation_id=${context.conversation_id || context.airbnb_conversation_id || 'none'}). Error: ${errDetail}`);
+
+        if (requireLiveHistory) {
+          if (e?.name === 'CriticalHospitableError' || e?.name === 'ConversationHistoryRequiredError') {
+            throw e;
+          }
+          const msg = `CRITICAL: Live conversation history fetch failed for conversationId=${conversationId}. ${errDetail}`;
+          throw new ConversationHistoryRequiredError(msg, {
+            conversationId,
+            reservationId,
+            historySource: 'live_fetch_failed',
+            originalError: e,
+          });
+        }
+
         result.historySource = 'live_fetch_failed';
         result.historyFetchFailed = true;
         result.recentMessageCount = 0;
-        const errDetail = e?.message || String(e);
         result.traces.push('Live message history fetch failed (using fallback)');
-        // Loud, non-silent error so CloudWatch + logs make it obvious when history (and thus anti-contradiction for Taylor-style cases) is at risk.
-        console.error(`[ConversationContextTool] CRITICAL HISTORY FETCH FAILURE (anti-contradiction / greeting / duplicate risk at risk): getConversationMessages failed for conversationId=${conversationId} (reservationId in context=${reservationId || 'none'}, webhook conversation_id=${context.conversation_id || context.airbnb_conversation_id || 'none'}). Error: ${errDetail}. The Taylor-style bug (host said "unit is ready for you to check in now" then auto-reply contradicted with 4pm) can recur if prior host messages are invisible. Will fall back to any context.conversationHistory provided in the event (usually empty for webhook guest messages).`);
+        console.error(`[ConversationContextTool] Will fall back to any context.conversationHistory provided in the event (usually empty for webhook guest messages). Anti-contradiction / duplicate-risk safeguards may be impaired.`);
       }
     } else {
       result.historySource = this.hospitableClient ? 'no_conversation_id_in_context' : 'no_hospitable_client';

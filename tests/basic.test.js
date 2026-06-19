@@ -303,6 +303,86 @@ describe('EventRequestTool (no LLM)', () => {
   });
 });
 
+describe('Conversation history hard-fail (no LLM)', () => {
+  it('throws ConversationHistoryRequiredError when live fetch fails and history is required', async () => {
+    const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
+    const tool = new ConversationContextTool({
+      hospitableClient: {
+        getConversationMessages: async () => {
+          throw new Error('404 Not Found');
+        },
+      },
+    });
+
+    await assert.rejects(
+      () => tool.execute('Thank you!', {
+        conversation_id: 'f3495ee2-2c2a-46e8-b8cd-49d661bee627',
+        reservationId: '17e9d5b0-3493-4dc0-b218-0c81677551c1',
+        requireLiveConversationHistory: true,
+      }),
+      (err) => err.name === 'ConversationHistoryRequiredError'
+    );
+  });
+
+  it('throws ConversationHistoryRequiredError when conversation_id is missing and history is required', async () => {
+    const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
+    const tool = new ConversationContextTool({
+      hospitableClient: {
+        getConversationMessages: async () => [],
+      },
+    });
+
+    await assert.rejects(
+      () => tool.execute('Hello!', {
+        reservationId: '17e9d5b0-3493-4dc0-b218-0c81677551c1',
+        requireLiveConversationHistory: true,
+      }),
+      (err) => err.name === 'ConversationHistoryRequiredError'
+    );
+  });
+
+  it('falls back when live fetch fails but history is not required (eval mode)', async () => {
+    const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
+    const tool = new ConversationContextTool({
+      hospitableClient: {
+        getConversationMessages: async () => {
+          throw new Error('404 Not Found');
+        },
+      },
+    });
+
+    const result = await tool.execute('Thank you!', {
+      conversation_id: 'f3495ee2-2c2a-46e8-b8cd-49d661bee627',
+      requireLiveConversationHistory: false,
+    });
+    assert.equal(result.historyFetchFailed, true);
+    assert.equal(result.historySource, 'live_fetch_failed');
+  });
+
+  it('handleMessage hard-fails when hospitableClient cannot fetch history', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+      hospitableClient: {
+        getConversationMessages: async () => {
+          throw new Error('503 Service Unavailable');
+        },
+      },
+      requireLiveConversationHistory: true,
+    });
+
+    await assert.rejects(
+      () => agent.handleMessage('Thank you so much!', {
+        guestName: 'Rene',
+        conversation_id: 'f3495ee2-2c2a-46e8-b8cd-49d661bee627',
+        reservationId: '17e9d5b0-3493-4dc0-b218-0c81677551c1',
+        sender_type: 'guest',
+      }),
+      (err) => err.name === 'ConversationHistoryRequiredError'
+    );
+  });
+});
+
 describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
   // These tests require a real GROK_API_KEY.
   // The mock LLM has been permanently removed (even for unit tests).
