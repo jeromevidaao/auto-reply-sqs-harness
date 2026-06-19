@@ -22,8 +22,8 @@ export class ConversationContextTool extends BaseTool {
   }
 
   /**
-   * Hospitable GET /conversations/{id}/messages requires the conversation UUID.
-   * Never pass reservationId here (Rene incident: 404 when 17e9d5b0… was used instead of f3495ee2…).
+   * Resolve reservation + conversation IDs from webhook context.
+   * For booked stays, history is fetched via GET /reservations/{id}/messages (see getReservationMessages).
    */
   async resolveConversationIdForMessages(context = {}) {
     const reservationId = context.reservationId || context.reservation_id || null;
@@ -106,16 +106,16 @@ export class ConversationContextTool extends BaseTool {
         const fetchViaReservation = !!reservationId;
         result.traces.push(
           fetchViaReservation
-            ? `Fetching conversation messages via reservationId=${reservationId} (conversation_id=${conversationId || 'none'})`
-            : `Fetching conversation messages via conversation_id=${conversationId} (inquiry / no reservation)`
+            ? `Fetching reservation messages via GET /reservations/${reservationId}/messages (conversation_id=${conversationId || 'none'})`
+            : `Fetching inquiry messages via conversation_id=${conversationId}`
         );
         // Fetch a generous recent window so that "full history" for short/medium threads (e.g. the Taylor readiness + thanks case)
         // and prior host statements are reliably included. We still only surface recent slices to the LLM to control tokens,
         // but the raw list is used for scans (earlyUnitReadyOffered, greeting, duplicate, etc.) and copied to conversationHistory.
-        // Reservations must use GET /reservations/{id}/messages — /conversations/{id}/messages 404s for booked stays.
-        const messages = fetchViaReservation
-          ? await this.hospitableClient.getReservationMessages(reservationId, 20)
-          : await this.hospitableClient.getConversationMessages(conversationId, 20);
+        const messages = await this.hospitableClient.getThreadMessages(
+          { reservationId: fetchViaReservation ? reservationId : null, conversationId: fetchViaReservation ? null : conversationId },
+          20
+        );
         allRecentMessages = messages || [];
         recentHostMessages = allRecentMessages
           .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))

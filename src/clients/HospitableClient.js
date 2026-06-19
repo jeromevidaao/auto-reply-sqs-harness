@@ -377,9 +377,14 @@ export class HospitableClient {
   }
 
   /**
-   * Get recent messages for a reservation thread.
-   * This is the reliable Hospitable endpoint for booked stays — symmetric to sendMessageToReservation.
-   * GET /conversations/{conversation_id}/messages returns 404 for reservation threads (Rene incident).
+   * Get messages for a reservation thread.
+   *
+   * Official API: GET /v2/reservations/{reservationUuid}/messages
+   * @see https://developer.hospitable.com/docs/public-api-docs/n6jr1z9iwhm8w-get-reservation-messages
+   * Required scope: message:read
+   *
+   * Use this (not GET /conversations/{id}/messages) for all booked stays — the conversation
+   * endpoint returns 404 on reservation threads (Rene incident).
    */
   async getReservationMessages(reservationId, limit = 10) {
     if (!reservationId) throw new Error('reservationId is required for getReservationMessages');

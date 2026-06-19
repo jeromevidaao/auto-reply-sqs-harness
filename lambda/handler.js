@@ -760,11 +760,11 @@ export const handler = async (event, context) => {
         try {
           let recentForGuard = null;
           if (reservationId && !msgContext.isInquiry) {
-            recentForGuard = await hospitableClient.getReservationMessages(reservationId, 4);
+            recentForGuard = await hospitableClient.getThreadMessages({ reservationId }, 4);
           } else {
             const verifyConvForGuard = convId || (reservationId ? await hospitableClient.getConversationIdForReservation(reservationId).catch(() => null) : null);
             if (verifyConvForGuard) {
-              recentForGuard = await hospitableClient.getConversationMessages(verifyConvForGuard, 4);
+              recentForGuard = await hospitableClient.getThreadMessages({ conversationId: verifyConvForGuard }, 4);
             }
           }
 
@@ -824,7 +824,7 @@ export const handler = async (event, context) => {
 
             let recentMessages = null;
             if (reservationId && !msgContext.isInquiry) {
-              recentMessages = await hospitableClient.getReservationMessages(reservationId, 5);
+              recentMessages = await hospitableClient.getThreadMessages({ reservationId }, 5);
             } else {
               // Resolve conversation_id if we only have reservationId (inquiries / legacy paths)
               let verifyConvId = convId;
@@ -839,7 +839,7 @@ export const handler = async (event, context) => {
               if (!verifyConvId) {
                 console.warn('⚠️ No conversation_id available for post-send verification (send itself succeeded).');
               } else {
-                recentMessages = await hospitableClient.getConversationMessages(verifyConvId, 5);
+                recentMessages = await hospitableClient.getThreadMessages({ conversationId: verifyConvId }, 5);
               }
             }
 

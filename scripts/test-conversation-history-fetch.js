@@ -2,6 +2,10 @@
 /**
  * Live integration test: verify conversation history fetch works against Hospitable.
  *
+ * Uses the official Get Reservation Messages API:
+ *   GET /v2/reservations/{reservationUuid}/messages
+ *   https://developer.hospitable.com/docs/public-api-docs/n6jr1z9iwhm8w-get-reservation-messages
+ *
  * Usage:
  *   node scripts/test-conversation-history-fetch.js
  *   node scripts/test-conversation-history-fetch.js --reservation <uuid>

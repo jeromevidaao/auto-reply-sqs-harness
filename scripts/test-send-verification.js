@@ -117,7 +117,9 @@ async function main() {
     await sleep(3000);
 
     console.log('🔍 Fetching recent messages for verification...');
-    const recentMessages = await client.getConversationMessages(verifyConvId, 8);
+    const recentMessages = targetType === 'reservation'
+      ? await client.getReservationMessages(targetId, 8)
+      : await client.getConversationMessages(verifyConvId, 8);
     const found = recentMessages.some(m => m.body && m.body.includes(testMessage));
 
     console.log('\n═══════════════════════════════════════════════════════════════');

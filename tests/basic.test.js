@@ -303,18 +303,34 @@ describe('EventRequestTool (no LLM)', () => {
   });
 });
 
+function mockHospitableClient({ getReservationMessages, getConversationMessages } = {}) {
+  return {
+    async getReservationMessages(...args) {
+      return getReservationMessages(...args);
+    },
+    async getConversationMessages(...args) {
+      return getConversationMessages(...args);
+    },
+    async getThreadMessages({ reservationId, conversationId } = {}, limit) {
+      if (reservationId) return getReservationMessages(reservationId, limit);
+      if (conversationId) return getConversationMessages(conversationId, limit);
+      throw new Error('reservationId or conversationId is required for getThreadMessages');
+    },
+  };
+}
+
 describe('Conversation history hard-fail (no LLM)', () => {
   it('throws ConversationHistoryRequiredError when live fetch fails and history is required', async () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
     const tool = new ConversationContextTool({
-      hospitableClient: {
+      hospitableClient: mockHospitableClient({
         getReservationMessages: async () => {
           throw new Error('503 Service Unavailable');
         },
         getConversationMessages: async () => {
           throw new Error('404 Not Found');
         },
-      },
+      }),
     });
 
     await assert.rejects(
@@ -331,7 +347,7 @@ describe('Conversation history hard-fail (no LLM)', () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
     let usedReservationEndpoint = false;
     const tool = new ConversationContextTool({
-      hospitableClient: {
+      hospitableClient: mockHospitableClient({
         getReservationMessages: async (reservationId) => {
           usedReservationEndpoint = true;
           assert.equal(reservationId, '17e9d5b0-3493-4dc0-b218-0c81677551c1');
@@ -342,7 +358,7 @@ describe('Conversation history hard-fail (no LLM)', () => {
         getConversationMessages: async () => {
           throw new Error('should not call conversation endpoint for reservations');
         },
-      },
+      }),
     });
 
     const result = await tool.execute('Thank you!', {
@@ -359,10 +375,10 @@ describe('Conversation history hard-fail (no LLM)', () => {
   it('throws ConversationHistoryRequiredError when neither reservationId nor conversation_id is available', async () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
     const tool = new ConversationContextTool({
-      hospitableClient: {
+      hospitableClient: mockHospitableClient({
         getReservationMessages: async () => [],
         getConversationMessages: async () => [],
-      },
+      }),
     });
 
     await assert.rejects(
@@ -376,11 +392,14 @@ describe('Conversation history hard-fail (no LLM)', () => {
   it('falls back when live fetch fails but history is not required (eval mode)', async () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
     const tool = new ConversationContextTool({
-      hospitableClient: {
+      hospitableClient: mockHospitableClient({
+        getReservationMessages: async () => {
+          throw new Error('should not call reservation endpoint without reservationId');
+        },
         getConversationMessages: async () => {
           throw new Error('404 Not Found');
         },
-      },
+      }),
     });
 
     const result = await tool.execute('Thank you!', {
@@ -395,14 +414,14 @@ describe('Conversation history hard-fail (no LLM)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' },
-      hospitableClient: {
+      hospitableClient: mockHospitableClient({
         getReservationMessages: async () => {
           throw new Error('503 Service Unavailable');
         },
         getConversationMessages: async () => {
           throw new Error('404 Not Found');
         },
-      },
+      }),
       requireLiveConversationHistory: true,
     });
 
