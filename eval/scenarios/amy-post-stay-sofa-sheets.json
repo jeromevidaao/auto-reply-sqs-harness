@@ -8,17 +8,35 @@
     "propertyName": "Cozy, Central 2 Bd Apt, Parking",
     "checkIn": "2026-06-18",
     "checkOut": "2026-06-19",
+    "asOfDate": "2026-06-19",
     "reservationId": "46285156-89b5-4db9-9b93-3b84f9ee05e1",
-    "conversation_id": "ee09cc34-496b-4192-b12d-d0aa0f95c900"
+    "conversation_id": "ee09cc34-496b-4192-b12d-d0aa0f95c900",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi Jerome and Ruby, we're looking forward to our stay. I just want to make sure there are sheets/blankets/pillows for our friend (our 4th) who will be sleeping on the couch. Please confirm. Thank you! -Amy"
+      },
+      {
+        "sender_type": "host",
+        "body": "Good morning Amy, yes, we provide sheets, blankets, and pillows for anyone using the sofa bed. They're stored in the storage compartment under the sofa. Enjoy your stay!"
+      },
+      {
+        "sender_type": "host",
+        "body": "Hi Amy,\n\nIt was a pleasure hosting you; I hope you had a great time in Portland and staying with us.\nIt would really mean a lot to me and will help enable other great guests like yourself to find my place on Airbnb if you give me a 5 star review. I hope you feel that I earned it.\nSafe travel back to Boston and I hope to welcome you back to Portland in the near future!\n\nJerome & Ruby"
+      }
+    ]
   },
-  "expectations": {
-    "shouldReply": true,
-    "escalated": false,
-    "cleaningIssueDetected": true,
+  "rubric": {
     "expectedCategory": "REVIEW_SUBMITTED",
-    "requiredPhrases": ["heads up about the sofa bed", "Safe travels"],
-    "mustNotContain": ["storage compartment", "under the sofa"],
-    "mustNotEscalate": true
+    "shouldReply": true,
+    "requiredPhrases": [
+      "heads up about the sofa bed",
+      "Safe travels"
+    ],
+    "forbiddenPhrases": [
+      "storage compartment",
+      "under the sofa"
+    ]
   },
-  "notes": "Production incident: cleaning alert was missing (CleaningIssueTool missed 'no sheets'). Auto-reply was blocked by pre-send guard. Manual-reply escalation is NOT desired for this case."
+  "notes": "Production incident: cleaning alert was missing (CleaningIssueTool missed 'no sheets'). Auto-reply was blocked by pre-send guard. Policy must override SLEEPING_ARRANGEMENTS misclassification from sofa-bed keywords."
 }

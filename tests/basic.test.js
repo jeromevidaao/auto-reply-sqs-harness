@@ -572,6 +572,42 @@ describe('Post-stay housekeeping feedback (no LLM)', () => {
     assert.equal(escalated.escalated, true);
   });
 
+  it('applies post-stay housekeeping policy in processMessage (eval runner path)', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: {
+        complete: async () => JSON.stringify({
+          typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS',
+          proposedResponse: "You're welcome, Amy!",
+          shouldReply: true,
+          confidence: 0.9,
+        }),
+      },
+    });
+    const msg = 'We had a lovely stay. Happy to give 5 starts. The only thing was that there were no sheets for the sofa bed. Just an fyi for the next folks. Thanks for your hospitality! Best, amy';
+    const result = await agent.processMessage(msg, {
+      guestName: 'Amy',
+      checkIn: '2026-06-18',
+      checkOut: '2026-06-19',
+      asOfDate: '2026-06-19',
+      listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+    });
+    assert.equal(result.typeOfMessageReceived, 'REVIEW_SUBMITTED');
+    assert.equal(result.shouldReply, true);
+    assert.ok(result.proposedResponse.includes('heads up about the sofa bed'));
+    assert.ok(result.proposedResponse.includes('Safe travels'));
+    assert.ok(!result.proposedResponse.includes('storage compartment'));
+  });
+
+  it('does not treat post-stay housekeeping feedback as pre-arrival sofa linens ask', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const msg = 'We had a lovely stay. The only thing was that there were no sheets for the sofa bed. Thanks!';
+    assert.equal(agent._isPreArrivalSofaLinensAsk(msg, { checkIn: '2026-06-18', checkOut: '2026-06-19' }), false);
+  });
+
   it('does not treat post-stay housekeeping feedback as post-welcome thank-you in ConversationContextTool', async () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
     const tool = new ConversationContextTool({

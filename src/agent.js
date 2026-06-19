@@ -346,6 +346,14 @@ export class GuestMessagingAgent {
       confidence = preCheckInParkingPolicy.confidence;
     }
 
+    const postStayFeedbackPolicy = this._applyPostStayHousekeepingFeedbackPolicy(parsed, context, guestMessage);
+    if (postStayFeedbackPolicy.applied) {
+      parsed.typeOfMessageReceived = postStayFeedbackPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = postStayFeedbackPolicy.proposedResponse;
+      shouldReply = postStayFeedbackPolicy.shouldReply;
+      confidence = postStayFeedbackPolicy.confidence;
+    }
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',
@@ -385,6 +393,9 @@ export class GuestMessagingAgent {
   }
 
   _isPreArrivalSofaLinensAsk(guestMessage = '', context = {}) {
+    if (this._isPostStayHousekeepingFeedback(guestMessage)) {
+      return false;
+    }
     const lower = guestMessage.toLowerCase();
     const linenAsk = /sheets|blankets|pillows|linens/.test(lower) &&
       /sofa|couch|futon|4th|fourth|extra guest|friend|sleeping on/.test(lower);
