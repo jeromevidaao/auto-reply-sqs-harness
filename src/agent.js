@@ -423,7 +423,7 @@ export class GuestMessagingAgent {
 
   /**
    * Post-checkout feedback that includes a housekeeping/setup issue (Amy incident).
-   * Not a pure thank-you — needs manual reply + cleaning alert.
+   * Not a pure thank-you — auto-reply with warm ack is fine; cleaning alert still required.
    */
   _isPostStayHousekeepingFeedback(guestMessage = '') {
     const lower = (guestMessage || '').toLowerCase();
@@ -433,8 +433,12 @@ export class GuestMessagingAgent {
     return (postStay && (missingSetup || fyiIssue)) || (fyiIssue && missingSetup);
   }
 
-  _applyCleaningIssueEscalationPolicy(parsed, cleaningIssue = {}) {
+  _applyCleaningIssueEscalationPolicy(parsed, cleaningIssue = {}, guestMessage = '') {
     if (!cleaningIssue.detected) {
+      return { applied: false };
+    }
+    // Post-stay review + housekeeping FYI: cleaning alert only — auto-reply is fine (Amy incident).
+    if (this._isPostStayHousekeepingFeedback(guestMessage)) {
       return { applied: false };
     }
 
@@ -450,7 +454,7 @@ export class GuestMessagingAgent {
     };
   }
 
-  _applyPostStayHousekeepingFeedbackPolicy(parsed, guestMessage = '') {
+  _applyPostStayHousekeepingFeedbackPolicy(parsed, context = {}, guestMessage = '') {
     if (!this._isPostStayHousekeepingFeedback(guestMessage)) {
       return { applied: false };
     }
@@ -458,17 +462,28 @@ export class GuestMessagingAgent {
     const lower = (guestMessage || '').toLowerCase();
     const hasReview = /(lovely|great|wonderful|good|nice|amazing)\s+stay|had a (?:great|lovely|wonderful|good) (?:time|stay)|\d+\s*star/i.test(lower);
     const typeOfMessageReceived = hasReview ? 'REVIEW_SUBMITTED' : (parsed.typeOfMessageReceived || 'OTHER_MESSAGE');
+    const name = this._guestDisplayFirstName(context);
+    const draft = (parsed.proposedResponse || '').trim();
+
+    const tooBare = !draft || draft === 'none' ||
+      /^you're welcome,?\s+\w+!?\s*$/i.test(draft) ||
+      (draft.length < 80 && !/heads up|sofa bed|note that|lovely stay/i.test(draft));
+
+    let proposedResponse = draft;
+    if (tooBare) {
+      proposedResponse = `You're welcome, ${name}! Glad you had a lovely stay — thanks for the heads up about the sofa bed, I'll note that for the team. Safe travels!`;
+    }
 
     parsed.typeOfMessageReceived = typeOfMessageReceived;
-    parsed.proposedResponse = 'none';
+    parsed.proposedResponse = proposedResponse;
 
     return {
       applied: true,
       typeOfMessageReceived,
-      proposedResponse: 'none',
-      shouldReply: false,
+      proposedResponse,
+      shouldReply: true,
       confidence: 1.0,
-      escalated: true,
+      escalated: false,
     };
   }
 
@@ -938,7 +953,7 @@ export class GuestMessagingAgent {
     }
 
     if (this._isPostStayHousekeepingFeedback(message)) {
-      lines.push('- CRITICAL POST-STAY HOUSEKEEPING FEEDBACK (Amy incident): Guest checked out and is sending post-stay feedback that includes a housekeeping/setup issue (e.g. missing sofa bed sheets, linens not stocked). This is NOT a pure thank-you. Classify as REVIEW_SUBMITTED or OTHER_MESSAGE. shouldReply MUST be false and proposedResponse MUST be "none" — Jerome must reply manually with a thoughtful personal thank-you. A cleaning alert will be sent separately; do not auto-reply with "You\'re welcome" or repeat sofa-bed linen instructions.');
+      lines.push('- CRITICAL POST-STAY HOUSEKEEPING FEEDBACK (Amy incident): Guest checked out and is sending post-stay feedback that includes a housekeeping/setup issue (e.g. missing sofa bed sheets, linens not stocked). Classify as REVIEW_SUBMITTED. shouldReply MUST be true. Reply warmly acknowledging their stay and the FYI — e.g. "You\'re welcome, [Name]! Glad you had a lovely stay — thanks for the heads up about the sofa bed, I\'ll note that for the team. Safe travels!" A cleaning alert is sent separately. Do NOT repeat sofa-bed linen storage instructions from earlier in the thread.');
     }
 
     // Strong signal for the 3-day check-in instructions rule + 4pm key info on future NEW_RESERVATION_WELCOME cases (e.g. abby birthday scenario).
@@ -1972,9 +1987,9 @@ export class GuestMessagingAgent {
       finalResult.confidence = preCheckInParkingPolicyFinal.confidence;
     }
 
-    const postStayFeedbackPolicyFinal = this._applyPostStayHousekeepingFeedbackPolicy(finalResult, guestMessage);
+    const postStayFeedbackPolicyFinal = this._applyPostStayHousekeepingFeedbackPolicy(finalResult, enrichedContext, guestMessage);
     if (postStayFeedbackPolicyFinal.applied) {
-      console.log('[Agent] → Post-stay housekeeping feedback policy applied (manual reply required)');
+      console.log('[Agent] → Post-stay housekeeping feedback policy applied (auto-reply + cleaning alert)');
       finalResult.typeOfMessageReceived = postStayFeedbackPolicyFinal.typeOfMessageReceived;
       finalResult.proposedResponse = postStayFeedbackPolicyFinal.proposedResponse;
       finalResult.shouldReply = postStayFeedbackPolicyFinal.shouldReply;
@@ -1982,7 +1997,7 @@ export class GuestMessagingAgent {
       finalResult.escalated = postStayFeedbackPolicyFinal.escalated;
     }
 
-    const cleaningEscalationPolicyFinal = this._applyCleaningIssueEscalationPolicy(finalResult, cleaningIssue);
+    const cleaningEscalationPolicyFinal = this._applyCleaningIssueEscalationPolicy(finalResult, cleaningIssue, guestMessage);
     if (cleaningEscalationPolicyFinal.applied) {
       console.log('[Agent] → Cleaning issue escalation policy applied (manual reply required)');
       finalResult.typeOfMessageReceived = cleaningEscalationPolicyFinal.typeOfMessageReceived;

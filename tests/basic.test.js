@@ -526,7 +526,7 @@ describe('Post-stay housekeeping feedback (no LLM)', () => {
     assert.equal(result.matchedPhrase, 'no sheets');
   });
 
-  it('escalates post-stay housekeeping feedback instead of auto-replying (Amy incident)', () => {
+  it('auto-replies to post-stay housekeeping feedback with warm ack (Amy incident)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' },
@@ -536,29 +536,40 @@ describe('Post-stay housekeeping feedback (no LLM)', () => {
     assert.equal(agent._isPostWelcomeThankYouFollowUp(msg, { conversationTraces: { recentWelcomeSent: true } }), false);
 
     const applied = agent._applyPostStayHousekeepingFeedbackPolicy(
-      { typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS', proposedResponse: "You're welcome, Amy! Safe travels!" },
+      { typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS', proposedResponse: "You're welcome, Amy!" },
+      { guestName: 'Amy' },
       msg
     );
     assert.equal(applied.applied, true);
-    assert.equal(applied.shouldReply, false);
-    assert.equal(applied.proposedResponse, 'none');
-    assert.equal(applied.escalated, true);
+    assert.equal(applied.shouldReply, true);
+    assert.equal(applied.escalated, false);
     assert.equal(applied.typeOfMessageReceived, 'REVIEW_SUBMITTED');
+    assert.ok(applied.proposedResponse.includes('heads up about the sofa bed'));
+    assert.ok(applied.proposedResponse.includes('Safe travels'));
   });
 
-  it('forces cleaning-issue escalation policy to manual reply', () => {
+  it('skips cleaning-issue escalation for post-stay housekeeping FYI but still escalates in-stay complaints', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' },
     });
-    const applied = agent._applyCleaningIssueEscalationPolicy(
+    const amyMsg = 'We had a lovely stay. The only thing was that there were no sheets for the sofa bed. Thanks!';
+    const skipped = agent._applyCleaningIssueEscalationPolicy(
       { typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS', proposedResponse: "You're welcome, Amy!" },
-      { detected: true, matchedPhrase: 'no sheets' }
+      { detected: true, matchedPhrase: 'no sheets' },
+      amyMsg
     );
-    assert.equal(applied.applied, true);
-    assert.equal(applied.shouldReply, false);
-    assert.equal(applied.proposedResponse, 'none');
-    assert.equal(applied.escalated, true);
+    assert.equal(skipped.applied, false);
+
+    const escalated = agent._applyCleaningIssueEscalationPolicy(
+      { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'Sorry about that.' },
+      { detected: true, matchedPhrase: 'hair in the shower' },
+      'There was hair in the shower when we arrived.'
+    );
+    assert.equal(escalated.applied, true);
+    assert.equal(escalated.shouldReply, false);
+    assert.equal(escalated.proposedResponse, 'none');
+    assert.equal(escalated.escalated, true);
   });
 
   it('does not treat post-stay housekeeping feedback as post-welcome thank-you in ConversationContextTool', async () => {

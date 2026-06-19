@@ -775,9 +775,13 @@ export const handler = async (event, context) => {
               .map(m => (m.body || '').trim().toLowerCase());
 
             const proposedLower = result.proposedResponse.trim().toLowerCase();
+            const isBareWelcomeAck = (text) =>
+              text.length < 60 &&
+              /you're welcome|you are welcome/i.test(text) &&
+              !/heads up|sofa bed|note that|lovely stay|for the team/i.test(text);
             const isDuplicateShortReply = veryRecentHostReplies.some(r =>
               r === proposedLower ||
-              (proposedLower.includes("you're welcome") && r.includes("you're welcome")) ||
+              (isBareWelcomeAck(proposedLower) && isBareWelcomeAck(r)) ||
               (proposedLower.length < 40 && r === proposedLower)
             );
 
