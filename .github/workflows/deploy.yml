@@ -46,7 +46,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'npm'
 
       - name: Install dependencies
@@ -85,13 +85,36 @@ jobs:
       - name: Deploy to Lambda
         run: |
           FUNCTION_NAME="guest-messaging-agent-harness"
+          RUNTIME="nodejs24.x"
 
           aws lambda update-function-code \
             --function-name $FUNCTION_NAME \
             --zip-file fileb://guest-messaging-harness.zip \
             --region us-east-1
 
-          echo "Deployment of $FUNCTION_NAME completed."
+          aws lambda wait function-updated \
+            --function-name $FUNCTION_NAME \
+            --region us-east-1
+
+          CURRENT_RUNTIME=$(aws lambda get-function-configuration \
+            --function-name $FUNCTION_NAME \
+            --region us-east-1 \
+            --query 'Runtime' --output text)
+
+          if [ "$CURRENT_RUNTIME" != "$RUNTIME" ]; then
+            echo "Updating runtime from $CURRENT_RUNTIME to $RUNTIME"
+            aws lambda update-function-configuration \
+              --function-name $FUNCTION_NAME \
+              --runtime $RUNTIME \
+              --region us-east-1
+            aws lambda wait function-updated \
+              --function-name $FUNCTION_NAME \
+              --region us-east-1
+          else
+            echo "Runtime already $RUNTIME"
+          fi
+
+          echo "Deployment of $FUNCTION_NAME completed (runtime: $RUNTIME)."
 
       - name: Deployment summary
         run: |

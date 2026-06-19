@@ -35,6 +35,6 @@
     "@aws-sdk/client-sns": "^3.1056.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   }
 }

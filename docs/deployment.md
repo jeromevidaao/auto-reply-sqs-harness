@@ -25,6 +25,7 @@ Add these two secrets:
 
 These keys need at minimum the following permissions:
 - `lambda:UpdateFunctionCode`
+- `lambda:UpdateFunctionConfiguration` (required to keep the Node.js 24 runtime in sync)
 - `lambda:GetFunction` (optional but useful)
 
 ### Option 2: Recommended — GitHub OIDC (No long-lived keys)
@@ -90,6 +91,7 @@ Attach a policy with at minimum:
       "Effect": "Allow",
       "Action": [
         "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
         "lambda:GetFunction"
       ],
       "Resource": "arn:aws:lambda:us-east-1:834917996497:function:guest-messaging-agent-harness"
@@ -151,6 +153,7 @@ If you ever need to deploy without pushing code (rare):
 - **Function name**: `guest-messaging-agent-harness`
 - **Region**: `us-east-1`
 - **Handler**: `lambda/handler.handler`
+- **Runtime**: `nodejs24.x` (updated automatically on deploy)
 
 ## Future Improvements (when ready)
 
