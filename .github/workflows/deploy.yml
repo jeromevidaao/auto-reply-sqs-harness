@@ -5,8 +5,10 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 on:
-  # Automatic deployment on every push to main
-  push:
+  # Deploy only after CI passes on main (fail-fast: no deploy if tests/eval failed)
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
 
   # Manual trigger (useful for emergency/hotfix deploys or rollbacks)
@@ -24,6 +26,10 @@ on:
 jobs:
   deploy:
     name: Deploy guest-messaging-agent-harness
+    # Skip deploy when CI failed or was cancelled (manual workflow_dispatch always runs)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     env:
       # Force Node 24 runtime for actions that still declare node20 internally.
@@ -42,6 +48,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Deploy the exact commit that passed CI (workflow_run), not a newer push
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

@@ -37,6 +37,7 @@ jobs:
 
   eval:
     name: Run Evaluation Suite
+    needs: test
     runs-on: ubuntu-latest
     env:
       # Force Node 24 runtime for actions that still declare node20 internally.
@@ -61,12 +62,13 @@ jobs:
         run: npm ci
 
       - name: Run evaluation harness
-        run: npm run eval
+        run: npm run eval -- --fail-fast
 
   # Optional: Build the Lambda package as an artifact on main
   # This is useful even before full CD is set up
   build-lambda:
     name: Build Lambda Package
+    needs: eval
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

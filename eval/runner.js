@@ -24,6 +24,7 @@ async function main() {
   const args = process.argv.slice(2);
   const mode = args.find(a => a.startsWith('--mode='))?.split('=')[1] || 'modular';
   const rawPromptPath = args.find(a => a.startsWith('--raw-prompt='))?.split('=')[1];
+  const failFast = args.includes('--fail-fast');
 
   console.log(`🧪 Running evaluation suite (mode: ${mode})\n`);
 
@@ -142,6 +143,12 @@ async function main() {
       passed++;
     } else {
       failed++;
+      if (failFast) {
+        console.log('\n⛔ Fail-fast: stopping after first scenario failure');
+        results.push({ id: scenario.id || file, score, maxScore, passed: passedScenario });
+        process.exitCode = 1;
+        break;
+      }
     }
 
     results.push({ id: scenario.id || file, score, maxScore, passed: passedScenario });
