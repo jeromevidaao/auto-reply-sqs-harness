@@ -1,0 +1,23 @@
+{
+  "id": "amy-post-stay-sofa-sheets",
+  "description": "Post-checkout guest sends positive review + housekeeping FYI about missing sofa bed sheets. Must trigger cleaning alert and manual-reply escalation — not auto-reply with 'You're welcome'. Real production case (Amy, Apt 2, Jun 19 2026).",
+  "guestMessage": "We had a lovely stay.  Happy to give 5 starts.  The only thing was that there were no sheets for the sofa bed.  Just an fyi for the next folks. Thanks for your hospitality! Best, amy",
+  "context": {
+    "guestName": "Amy",
+    "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "propertyName": "Cozy, Central 2 Bd Apt, Parking",
+    "checkIn": "2026-06-18",
+    "checkOut": "2026-06-19",
+    "reservationId": "46285156-89b5-4db9-9b93-3b84f9ee05e1",
+    "conversation_id": "ee09cc34-496b-4192-b12d-d0aa0f95c900"
+  },
+  "expectations": {
+    "shouldReply": false,
+    "escalated": true,
+    "cleaningIssueDetected": true,
+    "expectedCategory": ["REVIEW_SUBMITTED", "OTHER_MESSAGE"],
+    "mustNotContain": ["You're welcome", "storage compartment", "under the sofa"],
+    "mustNotAutoReply": true
+  },
+  "notes": "Production incident: agent classified as SLEEPING_ARRANGEMENTS, shouldReply=true, cleaningIssueDetected=false, no escalation email. Root cause: CleaningIssueTool missed 'no sheets'; post-welcome thank-you false positive from prior check-in welcome in thread."
+}

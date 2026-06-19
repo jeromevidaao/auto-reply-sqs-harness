@@ -404,6 +404,8 @@ export class GuestMessagingAgent {
     const lower = msg.toLowerCase();
     if (!msg) return false;
 
+    if (this._isPostStayHousekeepingFeedback(msg)) return false;
+
     if (/^(okay\s+)?(perfect|thanks|thank you|got it|great|awesome|wonderful|sounds good)/i.test(lower) && msg.length < 140) {
       return true;
     }
@@ -417,6 +419,57 @@ export class GuestMessagingAgent {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Post-checkout feedback that includes a housekeeping/setup issue (Amy incident).
+   * Not a pure thank-you — needs manual reply + cleaning alert.
+   */
+  _isPostStayHousekeepingFeedback(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    const postStay = /(lovely|great|wonderful|good|nice|amazing)\s+stay|had a (?:great|lovely|wonderful|good|nice|amazing) (?:time|stay)|happy to give.*\d+\s*star|give (?:you |me )?\d+\s*star/i.test(lower);
+    const missingSetup = /(no sheets|no sheet|were no sheets|missing sheets|no linens|no blankets|no pillows|not stocked|wasn't stocked|was not stocked)/i.test(lower);
+    const fyiIssue = /(only thing|one thing|just an fyi|fyi for|for the next)/i.test(lower);
+    return (postStay && (missingSetup || fyiIssue)) || (fyiIssue && missingSetup);
+  }
+
+  _applyCleaningIssueEscalationPolicy(parsed, cleaningIssue = {}) {
+    if (!cleaningIssue.detected) {
+      return { applied: false };
+    }
+
+    parsed.proposedResponse = 'none';
+
+    return {
+      applied: true,
+      typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
+      proposedResponse: 'none',
+      shouldReply: false,
+      confidence: 1.0,
+      escalated: true,
+    };
+  }
+
+  _applyPostStayHousekeepingFeedbackPolicy(parsed, guestMessage = '') {
+    if (!this._isPostStayHousekeepingFeedback(guestMessage)) {
+      return { applied: false };
+    }
+
+    const lower = (guestMessage || '').toLowerCase();
+    const hasReview = /(lovely|great|wonderful|good|nice|amazing)\s+stay|had a (?:great|lovely|wonderful|good) (?:time|stay)|\d+\s*star/i.test(lower);
+    const typeOfMessageReceived = hasReview ? 'REVIEW_SUBMITTED' : (parsed.typeOfMessageReceived || 'OTHER_MESSAGE');
+
+    parsed.typeOfMessageReceived = typeOfMessageReceived;
+    parsed.proposedResponse = 'none';
+
+    return {
+      applied: true,
+      typeOfMessageReceived,
+      proposedResponse: 'none',
+      shouldReply: false,
+      confidence: 1.0,
+      escalated: true,
+    };
   }
 
   _hostMessageLooksLikeWelcome(body = '') {
@@ -584,6 +637,7 @@ export class GuestMessagingAgent {
   _isPostWelcomeThankYouFollowUp(guestMessage = '', context = {}) {
     const msg = (guestMessage || '').trim();
     if (!msg || /\?/.test(msg)) return false;
+    if (this._isPostStayHousekeepingFeedback(msg)) return false;
     if (!this._looksLikePlausibleFollowUp(msg) &&
         !(/^(thank you|thanks)/i.test(msg.toLowerCase()) && /(appreciate|excited)/i.test(msg.toLowerCase()))) {
       return false;
@@ -881,6 +935,10 @@ export class GuestMessagingAgent {
 
     if (this._isTemporaryDepartureDuringStay(message, context)) {
       lines.push('- CRITICAL IN-STAY TEMPORARY DEPARTURE (Amie incident): Guest is currently IN their stay (check-in day or mid-stay, NOT checkout day). They said they "left the apartment/unit" temporarily (e.g. stepped out so a property manager could knock, deliver a blanket, or leave an item by the door). This is NOT checkout and they are returning tonight. Classify as THANK_YOU_MESSAGE. proposedResponse MUST be a brief warm "You\'re welcome, [Name]!" only. MUST NOT say "safe travels", "hope you enjoyed your stay", "have a great trip", or any end-of-stay farewell.');
+    }
+
+    if (this._isPostStayHousekeepingFeedback(message)) {
+      lines.push('- CRITICAL POST-STAY HOUSEKEEPING FEEDBACK (Amy incident): Guest checked out and is sending post-stay feedback that includes a housekeeping/setup issue (e.g. missing sofa bed sheets, linens not stocked). This is NOT a pure thank-you. Classify as REVIEW_SUBMITTED or OTHER_MESSAGE. shouldReply MUST be false and proposedResponse MUST be "none" — Jerome must reply manually with a thoughtful personal thank-you. A cleaning alert will be sent separately; do not auto-reply with "You\'re welcome" or repeat sofa-bed linen instructions.');
     }
 
     // Strong signal for the 3-day check-in instructions rule + 4pm key info on future NEW_RESERVATION_WELCOME cases (e.g. abby birthday scenario).
@@ -1912,6 +1970,26 @@ export class GuestMessagingAgent {
       finalResult.proposedResponse = preCheckInParkingPolicyFinal.proposedResponse;
       finalResult.shouldReply = preCheckInParkingPolicyFinal.shouldReply;
       finalResult.confidence = preCheckInParkingPolicyFinal.confidence;
+    }
+
+    const postStayFeedbackPolicyFinal = this._applyPostStayHousekeepingFeedbackPolicy(finalResult, guestMessage);
+    if (postStayFeedbackPolicyFinal.applied) {
+      console.log('[Agent] → Post-stay housekeeping feedback policy applied (manual reply required)');
+      finalResult.typeOfMessageReceived = postStayFeedbackPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = postStayFeedbackPolicyFinal.proposedResponse;
+      finalResult.shouldReply = postStayFeedbackPolicyFinal.shouldReply;
+      finalResult.confidence = postStayFeedbackPolicyFinal.confidence;
+      finalResult.escalated = postStayFeedbackPolicyFinal.escalated;
+    }
+
+    const cleaningEscalationPolicyFinal = this._applyCleaningIssueEscalationPolicy(finalResult, cleaningIssue);
+    if (cleaningEscalationPolicyFinal.applied) {
+      console.log('[Agent] → Cleaning issue escalation policy applied (manual reply required)');
+      finalResult.typeOfMessageReceived = cleaningEscalationPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = cleaningEscalationPolicyFinal.proposedResponse;
+      finalResult.shouldReply = cleaningEscalationPolicyFinal.shouldReply;
+      finalResult.confidence = cleaningEscalationPolicyFinal.confidence;
+      finalResult.escalated = cleaningEscalationPolicyFinal.escalated;
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);

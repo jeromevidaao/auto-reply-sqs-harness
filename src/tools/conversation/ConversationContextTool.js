@@ -412,7 +412,10 @@ export class ConversationContextTool extends BaseTool {
       : (context.conversationHistory || []).filter(m => (m.sender_type === 'host' || (m.sender && m.sender.type === 'host')));
     const welcomeMarkers = /check-?in|self-check-in|parking|pet fee|looking forward to hosting|detailed check-in instructions|3 days before|delighted to host|glad to host/i;
     const recentWelcomeHost = hostMsgsForWelcomeScan.find(m => welcomeMarkers.test(m.body || ''));
-    if (recentWelcomeHost && /thank|thanks|appreciate/i.test(input || '')) {
+    const guestHasOperationalFeedback = /(only thing|one thing|just an fyi|fyi for|for the next)/i.test(input || '') ||
+      /(no sheets|no sheet|missing sheets|no linens|no blankets|not clean|dirty|hair|stain)/i.test(input || '') ||
+      /(lovely|great|wonderful|good|nice|amazing)\s+stay|had a (?:great|lovely|wonderful|good) (?:time|stay)/i.test(input || '');
+    if (recentWelcomeHost && /thank|thanks|appreciate/i.test(input || '') && !guestHasOperationalFeedback) {
       result.recentWelcomeSent = true;
       result.duplicateRisk = true;
       result.duplicateReason = 'Full welcome/logistics already sent — guest thanks only; do not repeat check-in/pet/parking info';

@@ -31,6 +31,19 @@ export class CleaningIssueTool extends BaseTool {
       'wasn’t cleaned',
       'left hair',
       'found hair',
+      // Housekeeping setup failures (cleaning team responsibility — Amy incident)
+      'no sheets',
+      'no sheet',
+      'were no sheets',
+      'missing sheets',
+      'no linens',
+      'no blankets',
+      'no pillows',
+      'no towels',
+      'forgot to',
+      'not stocked',
+      'wasn\'t stocked',
+      'was not stocked',
     ];
   }
 

@@ -512,6 +512,76 @@ describe('Conversation history hard-fail (no LLM)', () => {
   });
 });
 
+describe('Post-stay housekeeping feedback (no LLM)', () => {
+  it('detects missing sofa bed sheets as a cleaning issue (Amy incident)', async () => {
+    const { CleaningIssueTool } = await import('../src/tools/CleaningIssueTool.js');
+    const tool = new CleaningIssueTool();
+    const msg = 'We had a lovely stay. Happy to give 5 starts. The only thing was that there were no sheets for the sofa bed. Just an fyi for the next folks. Thanks for your hospitality! Best, amy';
+    const result = await tool.execute(msg, {
+      guestName: 'Amy',
+      reservationId: '46285156-89b5-4db9-9b93-3b84f9ee05e1',
+      propertyName: 'Cozy, Central 2 Bd Apt, Parking',
+    });
+    assert.equal(result.detected, true);
+    assert.equal(result.matchedPhrase, 'no sheets');
+  });
+
+  it('escalates post-stay housekeeping feedback instead of auto-replying (Amy incident)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const msg = 'We had a lovely stay. Happy to give 5 starts. The only thing was that there were no sheets for the sofa bed. Just an fyi for the next folks. Thanks for your hospitality! Best, amy';
+    assert.equal(agent._isPostStayHousekeepingFeedback(msg), true);
+    assert.equal(agent._isPostWelcomeThankYouFollowUp(msg, { conversationTraces: { recentWelcomeSent: true } }), false);
+
+    const applied = agent._applyPostStayHousekeepingFeedbackPolicy(
+      { typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS', proposedResponse: "You're welcome, Amy! Safe travels!" },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, false);
+    assert.equal(applied.proposedResponse, 'none');
+    assert.equal(applied.escalated, true);
+    assert.equal(applied.typeOfMessageReceived, 'REVIEW_SUBMITTED');
+  });
+
+  it('forces cleaning-issue escalation policy to manual reply', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyCleaningIssueEscalationPolicy(
+      { typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS', proposedResponse: "You're welcome, Amy!" },
+      { detected: true, matchedPhrase: 'no sheets' }
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, false);
+    assert.equal(applied.proposedResponse, 'none');
+    assert.equal(applied.escalated, true);
+  });
+
+  it('does not treat post-stay housekeeping feedback as post-welcome thank-you in ConversationContextTool', async () => {
+    const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
+    const tool = new ConversationContextTool({
+      hospitableClient: mockHospitableClient({
+        getReservationMessages: async () => [
+          { sender_type: 'host', body: 'Good morning Amy, check-in is at 4pm with self-check-in and parking.', created_at: new Date().toISOString() },
+        ],
+      }),
+    });
+
+    const msg = 'We had a lovely stay. The only thing was that there were no sheets for the sofa bed. Thanks for your hospitality!';
+    const result = await tool.execute(msg, {
+      conversation_id: 'ee09cc34-496b-4192-b12d-d0aa0f95c900',
+      reservationId: '46285156-89b5-4db9-9b93-3b84f9ee05e1',
+      requireLiveConversationHistory: true,
+    });
+
+    assert.equal(result.recentWelcomeSent, undefined);
+  });
+});
+
 describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
   // These tests require a real GROK_API_KEY.
   // The mock LLM has been permanently removed (even for unit tests).
