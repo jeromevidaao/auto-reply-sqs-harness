@@ -138,6 +138,48 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(parsed.typeOfMessageReceived, 'CANCELLATION_POLICY');
   });
 
+  it('rejects premature designated-spot confirmation before check-in (Amie incident)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Hi are we able to park in the designated spot before the check in time at 4?';
+    const ctx = {
+      guestName: 'Amie',
+      checkIn: '2026-06-18',
+      conversationTraces: { earlyUnitReadyOffered: false }
+    };
+    const parsed = {
+      typeOfMessageReceived: 'PARKING',
+      proposedResponse: "Good morning, Amie, yes the designated spot is available for you. If the cleaning team is still there when you arrive we'll message you as soon as it's free.",
+      shouldReply: true
+    };
+    const applied = agent._applyPreCheckInParkingPolicy(parsed, ctx, msg);
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /4pm/i);
+    assert.match(applied.proposedResponse, /cleaning team/i);
+    assert.match(applied.proposedResponse, /message you/i);
+    assert.doesNotMatch(applied.proposedResponse, /spot is available/i);
+  });
+
+  it('does not apply pre-check-in parking policy when host already offered unit ready', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Hi are we able to park in the designated spot before the check in time at 4?';
+    const ctx = {
+      guestName: 'Amie',
+      conversationTraces: { earlyUnitReadyOffered: true }
+    };
+    const applied = agent._applyPreCheckInParkingPolicy(
+      { typeOfMessageReceived: 'PARKING', proposedResponse: 'Yes, you can use the spot now.' },
+      ctx,
+      msg
+    );
+    assert.equal(applied.applied, false);
+  });
+
   it('resolves conversation_id for messages API instead of reservationId (Rene 404 bug)', async () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
     const tool = new ConversationContextTool({ hospitableClient: null });

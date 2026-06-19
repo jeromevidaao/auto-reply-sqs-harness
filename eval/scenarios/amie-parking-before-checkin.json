@@ -1,0 +1,34 @@
+{
+  "id": "amie-parking-before-checkin",
+  "description": "Amie asks to park in the designated spot before 4pm check-in. No prior host message said the unit is ready. Auto incorrectly said 'yes the designated spot is available for you'. Must NOT confirm early parking — say check-in at 4pm, can't guarantee spot, cleaning team may be using it, we'll message when ready.",
+  "guestMessage": "Hi are we able to park in the designated spot before the check in time at 4?",
+  "context": {
+    "guestName": "Amie",
+    "checkIn": "2026-06-18T16:00:00-04:00",
+    "checkOut": "2026-06-20T10:00:00-04:00",
+    "asOfDate": "2026-06-18",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+    "conversationHistory": [],
+    "conversationTraces": {
+      "earlyUnitReadyOffered": false,
+      "hasRecentHostMessage": false
+    }
+  },
+  "rubric": {
+    "expectedCategory": ["PARKING", "EARLY_CHECKIN", "EARLY_CHECKIN_QUESTION", "CHECK_IN_TIME_QUESTION"],
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "spot is available",
+      "designated spot is available",
+      "yes, the designated spot",
+      "yes the designated spot is available"
+    ],
+    "requiredPhrases": [
+      "4pm",
+      "cleaning team",
+      "message you"
+    ]
+  },
+  "notes": "Production Amie incident. _applyPreCheckInParkingPolicy + parking.md + judge rule must prevent confirming designated spot before check-in when earlyUnitReadyOffered is false."
+}

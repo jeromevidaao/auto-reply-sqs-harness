@@ -11,7 +11,8 @@
 - All units have one dedicated off-street parking spot.
 
 **Special cases**:
-- On check-in day (stay timing = current): The cleaning team may be using the spot. Tell the guest the spot will be available once cleaning finishes and that **we will message you** when it's ready. Use phrasing close to "the cleaning team is preparing the unit" when appropriate.
+- **Pre-check-in parking (Amie incident)**: If the guest asks to park in the designated spot *before* 4pm / before check-in time, and no prior host message said the unit is ready for check-in now (`earlyUnitReadyOffered` is false), you **must not** say "yes", "the designated spot is available", or otherwise confirm they can park early. Say check-in is at 4pm; we **can't guarantee** the spot before then; the **cleaning team** may still be using it; **we'll message you** when the spot is ready. Only confirm early parking if the host already told them the unit is ready.
+- On check-in day (stay timing = current): The cleaning team may be using the spot. Tell the guest the spot will be available once cleaning finishes and that **we will message you** when it's ready. Use phrasing close to "the cleaning team is preparing the unit" when appropriate. Do **not** say the spot is available now unless unit readiness was already communicated by a prior host message.
 - When a golden requires "message you", include that exact phrasing.
 - Temporary parking / non-guest use: Decline politely — cleaning team needs the spot.
 - Additional cars: Recommend paid options like Vaughan Street (192-234). Use specific language from the golden when required (e.g. "192-234").

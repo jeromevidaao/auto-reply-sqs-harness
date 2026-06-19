@@ -328,6 +328,12 @@ export class GuestMessagingAgent {
       confidence = postWelcomeThanksPolicy.confidence;
     }
 
+    const preCheckInParkingPolicy = this._applyPreCheckInParkingPolicy(parsed, context, guestMessage);
+    if (preCheckInParkingPolicy.applied) {
+      shouldReply = preCheckInParkingPolicy.shouldReply;
+      confidence = preCheckInParkingPolicy.confidence;
+    }
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',
@@ -404,6 +410,66 @@ export class GuestMessagingAgent {
   _hostMessageLooksLikeWelcome(body = '') {
     const welcomeMarkers = /check-?in|self-check-in|parking|pet fee|looking forward to hosting|detailed check-in instructions|3 days before|delighted to host|glad to host/i;
     return welcomeMarkers.test(body || '');
+  }
+
+  _guestDisplayFirstName(context = {}) {
+    const raw = context.guestDisplayName || context.guestName || 'there';
+    return String(raw).split(/[·(]/)[0].trim().split(/\s+/)[0] || 'there';
+  }
+
+  /**
+   * Guest asks to use the designated parking spot before 4pm check-in.
+   * Amie incident: must NOT confirm availability unless host already said unit is ready.
+   */
+  _isPreCheckInParkingAsk(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    const parkingAsk = /park|parking|designated spot/.test(lower);
+    const beforeCheckIn = /before.*(check-?in|4\s*pm|4pm)|prior to check|park.*before|before the check|ahead of check|earlier than 4/.test(lower);
+    return parkingAsk && beforeCheckIn;
+  }
+
+  _hostAlreadyOfferedUnitReady(context = {}) {
+    return !!(context.conversationTraces?.earlyUnitReadyOffered || context.earlyUnitReadyOffered);
+  }
+
+  _applyPreCheckInParkingPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isPreCheckInParkingAsk(guestMessage)) {
+      return { applied: false };
+    }
+    if (this._hostAlreadyOfferedUnitReady(context)) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const prematurelyConfirms = /spot is available|designated spot is available|yes[,!]?\s+(the\s+)?designated spot|you can park (in |at )?the (designated )?spot|parking spot is available/i.test(draft);
+
+    const name = this._guestDisplayFirstName(context);
+    const g = context.conversationTraces?.greeting;
+    const greetingPrefix = (g?.shouldUseGreeting && g?.timeBasedGreeting)
+      ? `${g.timeBasedGreeting}, ${name},`
+      : (draft.match(/^(Good (?:morning|afternoon|evening)),?\s+\w+,?/i)?.[0]?.trim() || `Hi ${name},`);
+
+    const policyBody = 'check-in is at 4pm, so we can\'t guarantee the designated parking spot before then. The cleaning team may still be using it while the unit is being prepared. We\'ll message you as soon as the spot is ready for you.';
+
+    let proposedResponse = `${greetingPrefix} ${policyBody}`;
+    proposedResponse = proposedResponse.replace(/\s+/g, ' ').replace(/ ,/g, ',').trim();
+
+    if (!prematurelyConfirms && draft.length > 40 &&
+        /can't guarantee|cannot guarantee|can\'t guarantee|cleaning team/i.test(draft) &&
+        !/spot is available|designated spot is available/i.test(draft)) {
+      return { applied: false };
+    }
+
+    parsed.typeOfMessageReceived = 'PARKING';
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'PARKING',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
   }
 
   /**
@@ -871,6 +937,10 @@ export class GuestMessagingAgent {
 
     if (context.conversationTraces?.recentWelcomeSent || this._isPostWelcomeThankYouFollowUp(message, context)) {
       lines.push('- CRITICAL POST-WELCOME THANK-YOU (Rene incident): A prior host message already delivered the full welcome with logistics (check-in, self-check-in, parking, pet fee, 3-day instructions, recommendations, etc.). The guest is now sending a pure thank-you / appreciation / excitement follow-up with no new question. Classify as THANK_YOU_MESSAGE. proposedResponse MUST be a brief warm "You\'re welcome, [Name]!" only. MUST NOT repeat 4pm, self-check-in, parking, pet fee, check-in instructions, pets on bed/sofa rules, or any welcome logistics. Repeating the welcome block is a hard failure.');
+    }
+
+    if (this._isPreCheckInParkingAsk(message) && !this._hostAlreadyOfferedUnitReady(context)) {
+      lines.push('- CRITICAL PRE-CHECK-IN PARKING (Amie incident): Guest asks to park in the designated spot BEFORE 4pm check-in. No prior host message said the unit is ready (earlyUnitReadyOffered=false). You MUST NOT say "yes", "the designated spot is available", or confirm they can park before check-in. Correct answer: check-in is at 4pm; we can\'t guarantee the spot before then; cleaning team may still be using it; we\'ll message you when the spot is ready. Only confirm early parking if a prior host message explicitly said the unit is ready for check-in now.');
     }
 
     // Live tool results from early traces (visible to first-pass LLM so it can use exact data + any auto-actions)
@@ -1669,6 +1739,15 @@ export class GuestMessagingAgent {
     const cancellationCategoryFinal = this._applyCancellationCategoryPolicy(finalResult, guestMessage);
     if (cancellationCategoryFinal.applied) {
       finalResult.typeOfMessageReceived = cancellationCategoryFinal.typeOfMessageReceived;
+    }
+
+    const preCheckInParkingPolicyFinal = this._applyPreCheckInParkingPolicy(finalResult, enrichedContext, guestMessage);
+    if (preCheckInParkingPolicyFinal.applied) {
+      console.log('[Agent] → Pre-check-in parking policy applied (cannot confirm spot before unit ready)');
+      finalResult.typeOfMessageReceived = preCheckInParkingPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = preCheckInParkingPolicyFinal.proposedResponse;
+      finalResult.shouldReply = preCheckInParkingPolicyFinal.shouldReply;
+      finalResult.confidence = preCheckInParkingPolicyFinal.confidence;
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);
