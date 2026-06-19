@@ -1100,11 +1100,14 @@ export class GuestMessagingAgent {
       });
     }
 
-    if (historySource === 'no_conversation_id_in_context') {
-      const msg = 'CRITICAL: Live conversation history required but no conversation_id in context.';
+    if (historySource === 'no_thread_id_in_context' || historySource === 'no_conversation_id_in_context') {
+      const reservationId = enrichedContext.reservationId || enrichedContext.reservation_id || null;
+      const msg = reservationId
+        ? 'CRITICAL: Live conversation history required but fetch did not run despite reservationId in context.'
+        : 'CRITICAL: Live conversation history required but no reservationId or conversation_id in context.';
       throw new ConversationHistoryRequiredError(msg, {
-        conversationId: null,
-        reservationId: enrichedContext.reservationId || enrichedContext.reservation_id || null,
+        conversationId: enrichedContext.conversation_id || enrichedContext.conversationId || null,
+        reservationId,
         historySource,
       });
     }

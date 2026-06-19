@@ -308,6 +308,9 @@ describe('Conversation history hard-fail (no LLM)', () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
     const tool = new ConversationContextTool({
       hospitableClient: {
+        getReservationMessages: async () => {
+          throw new Error('503 Service Unavailable');
+        },
         getConversationMessages: async () => {
           throw new Error('404 Not Found');
         },
@@ -324,17 +327,46 @@ describe('Conversation history hard-fail (no LLM)', () => {
     );
   });
 
-  it('throws ConversationHistoryRequiredError when conversation_id is missing and history is required', async () => {
+  it('fetches reservation thread via getReservationMessages when reservationId is present (not conversation endpoint)', async () => {
+    const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
+    let usedReservationEndpoint = false;
+    const tool = new ConversationContextTool({
+      hospitableClient: {
+        getReservationMessages: async (reservationId) => {
+          usedReservationEndpoint = true;
+          assert.equal(reservationId, '17e9d5b0-3493-4dc0-b218-0c81677551c1');
+          return [
+            { sender_type: 'host', body: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and parking.', created_at: new Date().toISOString() },
+          ];
+        },
+        getConversationMessages: async () => {
+          throw new Error('should not call conversation endpoint for reservations');
+        },
+      },
+    });
+
+    const result = await tool.execute('Thank you!', {
+      conversation_id: 'f3495ee2-2c2a-46e8-b8cd-49d661bee627',
+      reservationId: '17e9d5b0-3493-4dc0-b218-0c81677551c1',
+      requireLiveConversationHistory: true,
+    });
+
+    assert.equal(usedReservationEndpoint, true);
+    assert.equal(result.historySource, 'live_fetched');
+    assert.equal(result.recentWelcomeSent, true);
+  });
+
+  it('throws ConversationHistoryRequiredError when neither reservationId nor conversation_id is available', async () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
     const tool = new ConversationContextTool({
       hospitableClient: {
+        getReservationMessages: async () => [],
         getConversationMessages: async () => [],
       },
     });
 
     await assert.rejects(
       () => tool.execute('Hello!', {
-        reservationId: '17e9d5b0-3493-4dc0-b218-0c81677551c1',
         requireLiveConversationHistory: true,
       }),
       (err) => err.name === 'ConversationHistoryRequiredError'
@@ -364,8 +396,11 @@ describe('Conversation history hard-fail (no LLM)', () => {
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' },
       hospitableClient: {
-        getConversationMessages: async () => {
+        getReservationMessages: async () => {
           throw new Error('503 Service Unavailable');
+        },
+        getConversationMessages: async () => {
+          throw new Error('404 Not Found');
         },
       },
       requireLiveConversationHistory: true,

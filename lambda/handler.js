@@ -758,10 +758,18 @@ export const handler = async (event, context) => {
 
         // === Pre-send guard: prevent sending duplicate short replies (e.g. "You're welcome!" twice) ===
         try {
-          const verifyConvForGuard = convId || (reservationId ? await hospitableClient.getConversationIdForReservation(reservationId).catch(() => null) : null);
-          if (verifyConvForGuard) {
-            const recent = await hospitableClient.getConversationMessages(verifyConvForGuard, 4);
-            const veryRecentHostReplies = recent
+          let recentForGuard = null;
+          if (reservationId && !msgContext.isInquiry) {
+            recentForGuard = await hospitableClient.getReservationMessages(reservationId, 4);
+          } else {
+            const verifyConvForGuard = convId || (reservationId ? await hospitableClient.getConversationIdForReservation(reservationId).catch(() => null) : null);
+            if (verifyConvForGuard) {
+              recentForGuard = await hospitableClient.getConversationMessages(verifyConvForGuard, 4);
+            }
+          }
+
+          if (recentForGuard) {
+            const veryRecentHostReplies = recentForGuard
               .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
               .slice(0, 3)
               .map(m => (m.body || '').trim().toLowerCase());
@@ -814,20 +822,28 @@ export const handler = async (event, context) => {
           try {
             await new Promise(resolve => setTimeout(resolve, 3000)); // slightly longer sleep for consistency
 
-            // Resolve conversation_id if we only have reservationId
-            let verifyConvId = convId;
-            if (!verifyConvId && reservationId) {
-              try {
-                verifyConvId = await hospitableClient.getConversationIdForReservation(reservationId);
-              } catch (e) {
-                console.warn('[Handler] Could not resolve conversation_id for verification:', e.message);
+            let recentMessages = null;
+            if (reservationId && !msgContext.isInquiry) {
+              recentMessages = await hospitableClient.getReservationMessages(reservationId, 5);
+            } else {
+              // Resolve conversation_id if we only have reservationId (inquiries / legacy paths)
+              let verifyConvId = convId;
+              if (!verifyConvId && reservationId) {
+                try {
+                  verifyConvId = await hospitableClient.getConversationIdForReservation(reservationId);
+                } catch (e) {
+                  console.warn('[Handler] Could not resolve conversation_id for verification:', e.message);
+                }
+              }
+
+              if (!verifyConvId) {
+                console.warn('⚠️ No conversation_id available for post-send verification (send itself succeeded).');
+              } else {
+                recentMessages = await hospitableClient.getConversationMessages(verifyConvId, 5);
               }
             }
 
-            if (!verifyConvId) {
-              console.warn('⚠️ No conversation_id available for post-send verification (send itself succeeded).');
-            } else {
-              const recentMessages = await hospitableClient.getConversationMessages(verifyConvId, 5);
+            if (recentMessages) {
               const latestMessage = recentMessages[0];
 
               if (latestMessage && latestMessage.body && latestMessage.body.includes(sentPreview)) {

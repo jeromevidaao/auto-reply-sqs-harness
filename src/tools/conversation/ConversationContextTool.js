@@ -89,24 +89,33 @@ export class ConversationContextTool extends BaseTool {
     let allRecentMessages = [];
 
     const requireLiveHistory = context.requireLiveConversationHistory === true;
+    const canFetchLiveHistory = !!(reservationId || conversationId);
 
-    if (requireLiveHistory && this.hospitableClient && !conversationId) {
-      const msg = `CRITICAL: Live conversation history required but no conversation_id available (reservationId=${reservationId || 'none'}). Cannot safely process guest message without thread visibility.`;
+    if (requireLiveHistory && this.hospitableClient && !canFetchLiveHistory) {
+      const msg = `CRITICAL: Live conversation history required but no reservationId or conversation_id available. Cannot safely process guest message without thread visibility.`;
       console.error(`[ConversationContextTool] ${msg}`);
       throw new ConversationHistoryRequiredError(msg, {
         conversationId: null,
         reservationId,
-        historySource: 'no_conversation_id_in_context',
+        historySource: 'no_thread_id_in_context',
       });
     }
 
-    if (this.hospitableClient && conversationId) {
+    if (this.hospitableClient && canFetchLiveHistory) {
       try {
-        result.traces.push(`Fetching conversation messages via conversation_id=${conversationId} (reservationId=${reservationId || 'none'})`);
+        const fetchViaReservation = !!reservationId;
+        result.traces.push(
+          fetchViaReservation
+            ? `Fetching conversation messages via reservationId=${reservationId} (conversation_id=${conversationId || 'none'})`
+            : `Fetching conversation messages via conversation_id=${conversationId} (inquiry / no reservation)`
+        );
         // Fetch a generous recent window so that "full history" for short/medium threads (e.g. the Taylor readiness + thanks case)
         // and prior host statements are reliably included. We still only surface recent slices to the LLM to control tokens,
         // but the raw list is used for scans (earlyUnitReadyOffered, greeting, duplicate, etc.) and copied to conversationHistory.
-        const messages = await this.hospitableClient.getConversationMessages(conversationId, 20);
+        // Reservations must use GET /reservations/{id}/messages — /conversations/{id}/messages 404s for booked stays.
+        const messages = fetchViaReservation
+          ? await this.hospitableClient.getReservationMessages(reservationId, 20)
+          : await this.hospitableClient.getConversationMessages(conversationId, 20);
         allRecentMessages = messages || [];
         recentHostMessages = allRecentMessages
           .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
@@ -167,7 +176,10 @@ export class ConversationContextTool extends BaseTool {
         }
       } catch (e) {
         const errDetail = e?.message || String(e);
-        console.error(`[ConversationContextTool] CRITICAL HISTORY FETCH FAILURE: getConversationMessages failed for conversationId=${conversationId} (reservationId in context=${reservationId || 'none'}, webhook conversation_id=${context.conversation_id || context.airbnb_conversation_id || 'none'}). Error: ${errDetail}`);
+        const fetchTarget = reservationId
+          ? `reservationId=${reservationId}`
+          : `conversationId=${conversationId}`;
+        console.error(`[ConversationContextTool] CRITICAL HISTORY FETCH FAILURE: live thread fetch failed for ${fetchTarget} (webhook conversation_id=${context.conversation_id || context.airbnb_conversation_id || 'none'}). Error: ${errDetail}`);
 
         if (requireLiveHistory) {
           if (e?.name === 'CriticalHospitableError' || e?.name === 'ConversationHistoryRequiredError') {
@@ -189,7 +201,9 @@ export class ConversationContextTool extends BaseTool {
         console.error(`[ConversationContextTool] Will fall back to any context.conversationHistory provided in the event (usually empty for webhook guest messages). Anti-contradiction / duplicate-risk safeguards may be impaired.`);
       }
     } else {
-      result.historySource = this.hospitableClient ? 'no_conversation_id_in_context' : 'no_hospitable_client';
+      result.historySource = !this.hospitableClient
+        ? 'no_hospitable_client'
+        : 'no_thread_id_in_context';
       result.traces.push(`History fetch not attempted (source=${result.historySource}) — relying on provided context.conversationHistory if any`);
     }
 

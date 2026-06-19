@@ -377,8 +377,35 @@ export class HospitableClient {
   }
 
   /**
-   * Get recent messages for a conversation (inquiry or reservation).
-   * Useful for pre-approval detection and recent host message checks.
+   * Get recent messages for a reservation thread.
+   * This is the reliable Hospitable endpoint for booked stays — symmetric to sendMessageToReservation.
+   * GET /conversations/{conversation_id}/messages returns 404 for reservation threads (Rene incident).
+   */
+  async getReservationMessages(reservationId, limit = 10) {
+    if (!reservationId) throw new Error('reservationId is required for getReservationMessages');
+
+    return this._withRetry('getReservationMessages', async () => {
+      const token = await this.getToken();
+
+      const response = await axios.get(`${this.baseUrl}/reservations/${reservationId}/messages`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        params: {
+          limit
+        },
+        timeout: 8000
+      });
+
+      return response.data?.data || [];
+    });
+  }
+
+  /**
+   * Get recent messages for a conversation (primarily pre-booking inquiries).
+   * For reservations, prefer getReservationMessages — this endpoint 404s on reservation threads.
    */
   async getConversationMessages(conversationId, limit = 10) {
     return this._withRetry('getConversationMessages', async () => {
@@ -398,6 +425,20 @@ export class HospitableClient {
 
       return response.data?.data || [];
     });
+  }
+
+  /**
+   * Fetch thread messages using the correct Hospitable endpoint for the context.
+   * Reservations → GET /reservations/{id}/messages; inquiries → GET /conversations/{id}/messages.
+   */
+  async getThreadMessages({ reservationId, conversationId } = {}, limit = 10) {
+    if (reservationId) {
+      return this.getReservationMessages(reservationId, limit);
+    }
+    if (conversationId) {
+      return this.getConversationMessages(conversationId, limit);
+    }
+    throw new Error('reservationId or conversationId is required for getThreadMessages');
   }
 
   /**
