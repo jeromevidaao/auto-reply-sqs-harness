@@ -280,7 +280,10 @@ export class GuestMessagingAgent {
     // escalations at 0.95 conf or LLM conservatism on pure announcement messages. See welcome-messages.md.
     const welcomeCategories = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'];
     const isPureWelcomeIntro = this._isPureFirstPostBookingIntro(guestMessage, context);
+    const isPostWelcomeThanks = this._isPostWelcomeThankYouFollowUp(guestMessage, context);
     if (welcomeCategories.includes(parsed.typeOfMessageReceived) &&
+        !this._looksLikePlausibleFollowUp(guestMessage) &&
+        !isPostWelcomeThanks &&
         parsed.proposedResponse && parsed.proposedResponse !== 'none' &&
         parsed.proposedResponse.length > 30) {
       confidence = 1.0;
@@ -318,6 +321,12 @@ export class GuestMessagingAgent {
     }
 
     this._applyCancellationCategoryPolicy(parsed, guestMessage);
+
+    const postWelcomeThanksPolicy = this._applyPostWelcomeThankYouPolicy(parsed, context, guestMessage);
+    if (postWelcomeThanksPolicy.applied) {
+      shouldReply = postWelcomeThanksPolicy.shouldReply;
+      confidence = postWelcomeThanksPolicy.confidence;
+    }
 
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
@@ -380,11 +389,77 @@ export class GuestMessagingAgent {
     if (/^(okay\s+)?(perfect|thanks|thank you|got it|great|awesome|wonderful|sounds good)/i.test(lower) && msg.length < 140) {
       return true;
     }
+    if (/^(thank you|thanks)/i.test(lower) && !/\?/.test(msg) &&
+        /(appreciate|prompt response|super excited|so excited|wonderful|we are excited)/i.test(lower) &&
+        msg.length < 220) {
+      return true;
+    }
     if (/(arriving|arrive|be there|see you|on (our|my) way|in about an hour|in \d+ (min|minute|hour)|we will be)/i.test(lower) &&
         /(thank|perfect|great|soon|hour)/i.test(lower)) {
       return true;
     }
     return false;
+  }
+
+  _hostMessageLooksLikeWelcome(body = '') {
+    const welcomeMarkers = /check-?in|self-check-in|parking|pet fee|looking forward to hosting|detailed check-in instructions|3 days before|delighted to host|glad to host/i;
+    return welcomeMarkers.test(body || '');
+  }
+
+  /**
+   * Guest sent a pure thanks after we already delivered the full welcome/logistics.
+   * Rene incident: duplicate 4pm/pet/parking block on "Thank you so much! I appreciate your prompt response!"
+   */
+  _isPostWelcomeThankYouFollowUp(guestMessage = '', context = {}) {
+    const msg = (guestMessage || '').trim();
+    if (!msg || /\?/.test(msg)) return false;
+    if (!this._looksLikePlausibleFollowUp(msg) &&
+        !(/^(thank you|thanks)/i.test(msg.toLowerCase()) && /(appreciate|excited)/i.test(msg.toLowerCase()))) {
+      return false;
+    }
+
+    const traces = context.conversationTraces || {};
+    if (traces.recentWelcomeSent) return true;
+
+    const history = context.conversationHistory || [];
+    const hostMsgs = history.filter(m => m.sender_type === 'host' || m.sender?.type === 'host');
+    if (hostMsgs.some(m => this._hostMessageLooksLikeWelcome(m.body))) return true;
+
+    if (traces.lastHostMessagePreview && this._hostMessageLooksLikeWelcome(traces.lastHostMessagePreview)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  _applyPostWelcomeThankYouPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
+      return { applied: false };
+    }
+
+    const rawName = context.guestName || context.guestDisplayName || 'there';
+    const naturalName = String(rawName).split(/[·(]/)[0].trim().split(/\s+/)[0] || 'there';
+    const draft = (parsed.proposedResponse || '').trim();
+    const repeatsLogistics = /4\s*pm|self-check-in|parking|pet fee|3 days before|check-in instructions|off-street|not allowed on the bed/i.test(draft);
+    const welcomeCategory = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'].includes(parsed.typeOfMessageReceived);
+
+    let proposedResponse = draft;
+    if (!draft || draft === 'none' || repeatsLogistics || welcomeCategory ||
+        !/you're welcome|you are welcome/i.test(draft)) {
+      proposedResponse = `You're welcome, ${naturalName}!`;
+    }
+
+    parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+    };
   }
 
   /**
@@ -792,6 +867,10 @@ export class GuestMessagingAgent {
     if (context.conversationTraces?.recentHostGreeting) {
       const mins = context.conversationTraces.recentHostGreetingMinutesAgo;
       lines.push('- CRITICAL ANTI-REPETITION (RECENT HOST GREETING): A prior host message (human or previous auto-reply) in this thread sent only ' + (mins != null ? `~${mins} minutes` : 'a few minutes') + ' ago already opened with a time-based greeting + name (e.g. "Good morning, Olivia," or equivalent). On this rapid follow-up (e.g. guest "No problem, we’ll move it. Thanks for the quick response!" 2 min later), your proposedResponse MUST NOT start with "Good morning, Olivia," / "Good afternoon," or any other formal time-of-day greeting. Use a short warm acknowledgment only: "You\'re welcome, Olivia!" or "You\'re welcome!" (name is fine; repeating the "Good X" opener is weird/robotic and must be avoided). The Conversation Judge (rule on repetition of prior host style) will flag any repeated greeting and require REVISE to the minimal natural ack. See conversationHistory for the exact prior host greeting text.');
+    }
+
+    if (context.conversationTraces?.recentWelcomeSent || this._isPostWelcomeThankYouFollowUp(message, context)) {
+      lines.push('- CRITICAL POST-WELCOME THANK-YOU (Rene incident): A prior host message already delivered the full welcome with logistics (check-in, self-check-in, parking, pet fee, 3-day instructions, recommendations, etc.). The guest is now sending a pure thank-you / appreciation / excitement follow-up with no new question. Classify as THANK_YOU_MESSAGE. proposedResponse MUST be a brief warm "You\'re welcome, [Name]!" only. MUST NOT repeat 4pm, self-check-in, parking, pet fee, check-in instructions, pets on bed/sofa rules, or any welcome logistics. Repeating the welcome block is a hard failure.');
     }
 
     // Live tool results from early traces (visible to first-pass LLM so it can use exact data + any auto-actions)
@@ -1246,7 +1325,8 @@ export class GuestMessagingAgent {
       }
     }
 
-    if (enrichedContext.recentHostActivity && decision.shouldReply) {
+    if (enrichedContext.recentHostActivity && decision.shouldReply &&
+        !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext)) {
       console.log('[Agent] → Recent host activity detected after first pass — forcing suppression to prevent duplicate reply');
       finalDecision = {
         ...decision,
@@ -1571,6 +1651,16 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = pureWelcomePolicyFinal.shouldReply;
       finalResult.confidence = pureWelcomePolicyFinal.confidence;
       finalResult.escalated = pureWelcomePolicyFinal.escalated;
+    }
+
+    const postWelcomeThanksPolicyFinal = this._applyPostWelcomeThankYouPolicy(finalResult, enrichedContext, guestMessage);
+    if (postWelcomeThanksPolicyFinal.applied) {
+      console.log('[Agent] → Post-welcome thank-you policy applied (short ack only, no duplicate logistics)');
+      finalResult.typeOfMessageReceived = postWelcomeThanksPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = postWelcomeThanksPolicyFinal.proposedResponse;
+      finalResult.shouldReply = postWelcomeThanksPolicyFinal.shouldReply;
+      finalResult.confidence = postWelcomeThanksPolicyFinal.confidence;
+      finalResult.escalated = postWelcomeThanksPolicyFinal.escalated;
     }
 
     const cancellationCategoryFinal = this._applyCancellationCategoryPolicy(finalResult, guestMessage);

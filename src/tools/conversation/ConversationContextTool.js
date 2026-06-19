@@ -341,6 +341,19 @@ export class ConversationContextTool extends BaseTool {
       result.traces.push('Greeting context analysis failed (non-fatal)');
     }
 
+    // Post-welcome thank-you detection (Rene incident): full welcome already sent, guest now thanks only.
+    const hostMsgsForWelcomeScan = recentHostMessages.length > 0
+      ? recentHostMessages
+      : (context.conversationHistory || []).filter(m => (m.sender_type === 'host' || (m.sender && m.sender.type === 'host')));
+    const welcomeMarkers = /check-?in|self-check-in|parking|pet fee|looking forward to hosting|detailed check-in instructions|3 days before|delighted to host|glad to host/i;
+    const recentWelcomeHost = hostMsgsForWelcomeScan.find(m => welcomeMarkers.test(m.body || ''));
+    if (recentWelcomeHost && /thank|thanks|appreciate/i.test(input || '')) {
+      result.recentWelcomeSent = true;
+      result.duplicateRisk = true;
+      result.duplicateReason = 'Full welcome/logistics already sent — guest thanks only; do not repeat check-in/pet/parking info';
+      result.traces.push('[CONVERSATION_CONTEXT] Recent welcome with logistics + guest thanks — post-welcome thank-you flow (short ack only)');
+    }
+
     // Fallback to provided conversationHistory if live fetch wasn't possible or failed
     if (!result.hasRecentHostMessage && context.conversationHistory && context.conversationHistory.length > 0) {
       const recentHost = context.conversationHistory

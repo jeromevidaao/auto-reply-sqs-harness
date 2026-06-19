@@ -1,0 +1,52 @@
+{
+  "id": "rene-welcome-thanks",
+  "description": "Rene · Booker regression: Full welcome sent at 12:48 PM with pet fee, 4pm, self-check-in, parking, 3-day instructions, and Old Port recommendations. Guest thanked at 12:49 ('Thank you so much! I appreciate your prompt response! We are super excited!'). Auto at 12:50 incorrectly re-sent the same logistics block. Must classify THANK_YOU_MESSAGE and reply only with brief 'You're welcome, Rene!' — no duplicate welcome.",
+  "guestMessage": "Thank you so much! I appreciate your prompt response! We are super excited!",
+  "context": {
+    "guestName": "Rene",
+    "checkIn": "2026-06-29T16:00:00-04:00",
+    "checkOut": "2026-07-02T10:00:00-04:00",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio, Parking with EV charger",
+    "hasPets": true,
+    "petCount": 1,
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi Ruby & Jerome! I am so excited to come and stay at your rental! My partner and I are driving from Michigan and it's our first time in Maine. We would love to have some recommendations of things to do and places to eat. We will be bringing our dog Rosie! Thank you so much!"
+      },
+      {
+        "sender_type": "host",
+        "body": "Good afternoon, Rene,\n\nThanks for the note — sounds like a wonderful first trip to Maine! We're delighted to host you and Rosie. The $30 pet fee is already included in your reservation. Please remember pets are not allowed on the bed or sofa.\n\nCheck-in is at 4pm with self-check-in and you have one dedicated off-street parking spot. I will send the detailed check-in instructions 3 days before your arrival.\n\nFor recommendations on things to do and places to eat, the Old Port and waterfront area have lots of great options within a short walk or drive. Looking forward to hosting you in Portland.\n\nJerome & Ruby"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Thank you so much! I appreciate your prompt response! We are super excited!"
+      }
+    ],
+    "conversationTraces": {
+      "recentWelcomeSent": true,
+      "hasRecentHostMessage": true,
+      "minutesSinceLastHostMessage": 1,
+      "duplicateRisk": true,
+      "duplicateReason": "Full welcome/logistics already sent — guest thanks only"
+    }
+  },
+  "rubric": {
+    "expectedCategory": "THANK_YOU_MESSAGE",
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "4pm",
+      "self-check-in",
+      "pet fee",
+      "parking",
+      "3 days before",
+      "not allowed on the bed",
+      "Good afternoon, Rene"
+    ],
+    "requiredPhrases": [
+      "You're welcome"
+    ]
+  },
+  "notes": "Exact reproduction of the Rene duplicate-welcome incident on 53 Pine #1B Downtown Studio (Jun 29–Jul 2, 2026). First host message already covered logistics + recommendations. Thanks follow-up must be short ack only. ConversationContextTool recentWelcomeSent + _applyPostWelcomeThankYouPolicy + CRITICAL block + judge rule must prevent re-sending welcome. In prod prior host welcome comes via live getConversationMessages."
+}

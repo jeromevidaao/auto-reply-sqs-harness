@@ -138,6 +138,34 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(parsed.typeOfMessageReceived, 'CANCELLATION_POLICY');
   });
 
+  it('replaces duplicate welcome logistics with short thank-you ack (Rene incident)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Thank you so much! I appreciate your prompt response! We are super excited!';
+    const ctx = {
+      guestName: 'Rene',
+      conversationHistory: [
+        {
+          sender_type: 'host',
+          body: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and you have one dedicated off-street parking spot. The $30 pet fee is already included.'
+        }
+      ],
+      conversationTraces: { recentWelcomeSent: true, hasRecentHostMessage: true }
+    };
+    const parsed = {
+      typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+      proposedResponse: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and the $30 pet fee is already included.',
+      shouldReply: true
+    };
+    const applied = agent._applyPostWelcomeThankYouPolicy(parsed, ctx, msg);
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'THANK_YOU_MESSAGE');
+    assert.match(applied.proposedResponse, /you're welcome, rene/i);
+    assert.doesNotMatch(applied.proposedResponse, /4pm|self-check-in|pet fee/i);
+  });
+
   it('still uses history-fetch conservative mode for Taylor-style follow-ups', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
