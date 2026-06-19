@@ -138,6 +138,18 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(parsed.typeOfMessageReceived, 'CANCELLATION_POLICY');
   });
 
+  it('resolves conversation_id for messages API instead of reservationId (Rene 404 bug)', async () => {
+    const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
+    const tool = new ConversationContextTool({ hospitableClient: null });
+    const { conversationId, reservationId } = await tool.resolveConversationIdForMessages({
+      reservationId: '17e9d5b0-3493-4dc0-b218-0c81677551c1',
+      conversation_id: 'f3495ee2-2c2a-46e8-b8cd-49d661bee627'
+    });
+    assert.equal(conversationId, 'f3495ee2-2c2a-46e8-b8cd-49d661bee627');
+    assert.equal(reservationId, '17e9d5b0-3493-4dc0-b218-0c81677551c1');
+    assert.notEqual(conversationId, reservationId);
+  });
+
   it('deterministic judge guard REVISEs duplicate welcome on post-welcome thanks', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

@@ -20,11 +20,34 @@ export class ConversationContextTool extends BaseTool {
     this.hospitableClient = hospitableClient;
   }
 
+  /**
+   * Hospitable GET /conversations/{id}/messages requires the conversation UUID.
+   * Never pass reservationId here (Rene incident: 404 when 17e9d5b0… was used instead of f3495ee2…).
+   */
+  async resolveConversationIdForMessages(context = {}) {
+    const reservationId = context.reservationId || context.reservation_id || null;
+    let conversationId =
+      context.conversation_id ||
+      context.airbnb_conversation_id ||
+      context.conversationId ||
+      context.inquiryId ||
+      context.inquiry_id ||
+      null;
+
+    if (!conversationId && reservationId && this.hospitableClient?.getConversationIdForReservation) {
+      try {
+        conversationId = await this.hospitableClient.getConversationIdForReservation(reservationId);
+      } catch (_) {
+        // Caller logs fetch failure if messages still cannot be loaded.
+      }
+    }
+
+    return { conversationId, reservationId };
+  }
+
   async execute(input, context = {}) {
-    const reservationId = context.reservationId || context.conversation_id || context.airbnb_conversation_id;
-    const inquiryId = context.inquiryId || (context.reservationId === null ? (context.conversation_id || context.airbnb_conversation_id) : null);
-    const conversationId = inquiryId || reservationId;
-    const isInquiry = !context.reservationId && !!inquiryId;
+    const { conversationId, reservationId } = await this.resolveConversationIdForMessages(context);
+    const isInquiry = !reservationId && !!conversationId;
 
     // Local helper (mirrors the one in the Lambda handler). See comments there for rationale.
     function inferPetCountFromMessage(text) {
@@ -66,6 +89,7 @@ export class ConversationContextTool extends BaseTool {
 
     if (this.hospitableClient && conversationId) {
       try {
+        result.traces.push(`Fetching conversation messages via conversation_id=${conversationId} (reservationId=${reservationId || 'none'})`);
         // Fetch a generous recent window so that "full history" for short/medium threads (e.g. the Taylor readiness + thanks case)
         // and prior host statements are reliably included. We still only surface recent slices to the LLM to control tokens,
         // but the raw list is used for scans (earlyUnitReadyOffered, greeting, duplicate, etc.) and copied to conversationHistory.
@@ -135,7 +159,7 @@ export class ConversationContextTool extends BaseTool {
         const errDetail = e?.message || String(e);
         result.traces.push('Live message history fetch failed (using fallback)');
         // Loud, non-silent error so CloudWatch + logs make it obvious when history (and thus anti-contradiction for Taylor-style cases) is at risk.
-        console.error(`[ConversationContextTool] CRITICAL HISTORY FETCH FAILURE (anti-contradiction / greeting / duplicate risk at risk): getConversationMessages failed for conversationId=${conversationId}. Error: ${errDetail}. The Taylor-style bug (host said "unit is ready for you to check in now" then auto-reply contradicted with 4pm) can recur if prior host messages are invisible. Will fall back to any context.conversationHistory provided in the event (usually empty for webhook guest messages).`);
+        console.error(`[ConversationContextTool] CRITICAL HISTORY FETCH FAILURE (anti-contradiction / greeting / duplicate risk at risk): getConversationMessages failed for conversationId=${conversationId} (reservationId in context=${reservationId || 'none'}, webhook conversation_id=${context.conversation_id || context.airbnb_conversation_id || 'none'}). Error: ${errDetail}. The Taylor-style bug (host said "unit is ready for you to check in now" then auto-reply contradicted with 4pm) can recur if prior host messages are invisible. Will fall back to any context.conversationHistory provided in the event (usually empty for webhook guest messages).`);
       }
     } else {
       result.historySource = this.hospitableClient ? 'no_conversation_id_in_context' : 'no_hospitable_client';
@@ -385,9 +409,9 @@ export class ConversationContextTool extends BaseTool {
     }
 
     // Pre-approval detection for inquiries (high value from old production system)
-    if (isInquiry && this.hospitableClient && inquiryId) {
+    if (isInquiry && this.hospitableClient && conversationId) {
       try {
-        const inquiry = await this.hospitableClient.getInquiryDetails(inquiryId);
+        const inquiry = await this.hospitableClient.getInquiryDetails(conversationId);
 
         if (inquiry) {
           const status = inquiry.status;
@@ -460,7 +484,7 @@ export class ConversationContextTool extends BaseTool {
 
           // Also try to fetch recent messages to look for explicit pre-approval language
           try {
-            const messages = await this.hospitableClient.getConversationMessages(inquiryId, 8);
+            const messages = await this.hospitableClient.getConversationMessages(conversationId, 8);
             const recentHostPreApproval = messages
               .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
               .find(m => /pre.?approv|approved your request/i.test(m.body || ''));
