@@ -409,8 +409,39 @@ export class HospitableClient {
   }
 
   /**
-   * Get recent messages for a conversation (primarily pre-booking inquiries).
-   * For reservations, prefer getReservationMessages — this endpoint 404s on reservation threads.
+   * Get messages for an inquiry thread (pre-booking / no reservation_id).
+   *
+   * Hospitable exposes inquiry messages on GET /v2/inquiries/{inquiryUuid}?include=messages.
+   * POST /inquiries/{id}/messages is send-only (GET returns 405). Webhook inquiry events use
+   * the inquiry UUID as conversation_id; GET /conversations/{id}/messages 404s (Jun 2026 incident).
+   */
+  async getInquiryMessages(inquiryId, limit = 10) {
+    if (!inquiryId) throw new Error('inquiryId is required for getInquiryMessages');
+
+    return this._withRetry('getInquiryMessages', async () => {
+      const token = await this.getToken();
+
+      const response = await axios.get(`${this.baseUrl}/inquiries/${inquiryId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        params: {
+          include: 'messages'
+        },
+        timeout: 8000
+      });
+
+      const messages = response.data?.data?.messages || [];
+      return Array.isArray(messages) ? messages.slice(0, limit) : [];
+    });
+  }
+
+  /**
+   * Get recent messages for a conversation UUID (legacy / non-inquiry threads).
+   * For reservations use getReservationMessages; for inquiries use getInquiryMessages —
+   * this endpoint 404s on both reservation and inquiry threads in practice.
    */
   async getConversationMessages(conversationId, limit = 10) {
     return this._withRetry('getConversationMessages', async () => {
@@ -434,13 +465,17 @@ export class HospitableClient {
 
   /**
    * Fetch thread messages using the correct Hospitable endpoint for the context.
-   * Reservations → GET /reservations/{id}/messages; inquiries → GET /conversations/{id}/messages.
+   * Reservations → GET /reservations/{id}/messages
+   * Inquiries (no reservation) → GET /inquiries/{id}?include=messages (webhook conversation_id is inquiry UUID)
    */
-  async getThreadMessages({ reservationId, conversationId } = {}, limit = 10) {
+  async getThreadMessages({ reservationId, conversationId, isInquiry } = {}, limit = 10) {
     if (reservationId) {
       return this.getReservationMessages(reservationId, limit);
     }
     if (conversationId) {
+      if (isInquiry !== false) {
+        return this.getInquiryMessages(conversationId, limit);
+      }
       return this.getConversationMessages(conversationId, limit);
     }
     throw new Error('reservationId or conversationId is required for getThreadMessages');

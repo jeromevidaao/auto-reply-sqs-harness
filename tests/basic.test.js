@@ -378,7 +378,8 @@ describe('EventRequestTool (no LLM)', () => {
   });
 });
 
-function mockHospitableClient({ getReservationMessages, getConversationMessages } = {}) {
+function mockHospitableClient({ getReservationMessages, getConversationMessages, getInquiryMessages } = {}) {
+  const inquiryFetcher = getInquiryMessages || getConversationMessages;
   return {
     async getReservationMessages(...args) {
       return getReservationMessages(...args);
@@ -386,9 +387,15 @@ function mockHospitableClient({ getReservationMessages, getConversationMessages 
     async getConversationMessages(...args) {
       return getConversationMessages(...args);
     },
-    async getThreadMessages({ reservationId, conversationId } = {}, limit) {
+    async getInquiryMessages(...args) {
+      return inquiryFetcher(...args);
+    },
+    async getThreadMessages({ reservationId, conversationId, isInquiry } = {}, limit) {
       if (reservationId) return getReservationMessages(reservationId, limit);
-      if (conversationId) return getConversationMessages(conversationId, limit);
+      if (conversationId) {
+        if (isInquiry !== false) return inquiryFetcher(conversationId, limit);
+        return getConversationMessages(conversationId, limit);
+      }
       throw new Error('reservationId or conversationId is required for getThreadMessages');
     },
   };
@@ -416,6 +423,37 @@ describe('Conversation history hard-fail (no LLM)', () => {
       }),
       (err) => err.name === 'ConversationHistoryRequiredError'
     );
+  });
+
+  it('fetches inquiry thread via getInquiryMessages when no reservationId (not conversation endpoint)', async () => {
+    const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
+    let usedInquiryEndpoint = false;
+    const tool = new ConversationContextTool({
+      hospitableClient: mockHospitableClient({
+        getReservationMessages: async () => {
+          throw new Error('should not call reservation endpoint for inquiries');
+        },
+        getInquiryMessages: async (inquiryId) => {
+          usedInquiryEndpoint = true;
+          assert.equal(inquiryId, '9b00a88f-03ca-4aa8-b6cc-2c3475f35184');
+          return [
+            { sender_type: 'guest', body: 'Hello are you able to accommodate this reservation thanks', created_at: new Date().toISOString() },
+          ];
+        },
+        getConversationMessages: async () => {
+          throw new Error('should not call conversation endpoint for inquiries');
+        },
+      }),
+    });
+
+    const result = await tool.execute('Hello are you able to accommodate this reservation thanks', {
+      conversation_id: '9b00a88f-03ca-4aa8-b6cc-2c3475f35184',
+      requireLiveConversationHistory: true,
+    });
+
+    assert.equal(usedInquiryEndpoint, true);
+    assert.equal(result.historySource, 'live_fetched');
+    assert.equal(result.recentMessageCount, 1);
   });
 
   it('fetches reservation thread via getReservationMessages when reservationId is present (not conversation endpoint)', async () => {

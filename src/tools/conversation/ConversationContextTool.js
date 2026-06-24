@@ -107,13 +107,17 @@ export class ConversationContextTool extends BaseTool {
         result.traces.push(
           fetchViaReservation
             ? `Fetching reservation messages via GET /reservations/${reservationId}/messages (conversation_id=${conversationId || 'none'})`
-            : `Fetching inquiry messages via conversation_id=${conversationId}`
+            : `Fetching inquiry messages via GET /inquiries/${conversationId}?include=messages`
         );
         // Fetch a generous recent window so that "full history" for short/medium threads (e.g. the Taylor readiness + thanks case)
         // and prior host statements are reliably included. We still only surface recent slices to the LLM to control tokens,
         // but the raw list is used for scans (earlyUnitReadyOffered, greeting, duplicate, etc.) and copied to conversationHistory.
         const messages = await this.hospitableClient.getThreadMessages(
-          { reservationId: fetchViaReservation ? reservationId : null, conversationId: fetchViaReservation ? null : conversationId },
+          {
+            reservationId: fetchViaReservation ? reservationId : null,
+            conversationId: fetchViaReservation ? null : conversationId,
+            isInquiry: isInquiry,
+          },
           20
         );
         allRecentMessages = messages || [];
@@ -528,7 +532,7 @@ export class ConversationContextTool extends BaseTool {
 
           // Also try to fetch recent messages to look for explicit pre-approval language
           try {
-            const messages = await this.hospitableClient.getConversationMessages(conversationId, 8);
+            const messages = await this.hospitableClient.getInquiryMessages(conversationId, 8);
             const recentHostPreApproval = messages
               .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
               .find(m => /pre.?approv|approved your request/i.test(m.body || ''));
