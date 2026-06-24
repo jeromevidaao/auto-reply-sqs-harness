@@ -66,6 +66,40 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(applied.applied, false);
   });
 
+  it('forces Richard + phone via _applyLuggagePolicy when LLM omits contact (luggage-drop-off eval)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyLuggagePolicy(
+      {
+        typeOfMessageReceived: 'LUGGAGE_DROP_OFF',
+        proposedResponse: 'Yes, early luggage drop-off is usually fine before check-in. Just let us know your timing.',
+      },
+      { guestName: 'Sam' },
+      'Can we drop our luggage off early before check-in?'
+    );
+    assert.equal(applied.applied, true);
+    assert.ok(applied.proposedResponse.includes('Richard'));
+    assert.ok(applied.proposedResponse.includes('807-8071'));
+  });
+
+  it('does not stomp luggage reply that already has Richard and phone', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyLuggagePolicy(
+      {
+        typeOfMessageReceived: 'LUGGAGE_DROP_OFF',
+        proposedResponse: 'Please contact Richard at (207) 807-8071 to coordinate early drop-off.',
+      },
+      {},
+      'Can we drop our luggage off early before check-in?'
+    );
+    assert.equal(applied.applied, false);
+  });
+
   it('forces thermostat neutral remote wording via _applyThermostatPolicy', async () => {
     const thermostatTool = new ThermostatTool();
     const thermo = await thermostatTool.execute("How do I turn up the heat? It's cold in here.", {

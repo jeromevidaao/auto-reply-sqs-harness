@@ -11,6 +11,12 @@ import { normalizeGuestName } from './utils/normalizeGuestName.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
 
+const LUGGAGE_DROP_OFF_STANDARD_RESPONSE =
+  'Yes, you can coordinate an early luggage drop-off with Richard, our on-site property manager, at (207) 807-8071.';
+
+const LUGGAGE_STORAGE_STANDARD_RESPONSE =
+  'Richard, our on-site property manager, can help with luggage storage after checkout. You can reach him at (207) 807-8071 or (207) 518-3417.';
+
 export class GuestMessagingAgent {
   constructor(options = {}) {
     this.llm = options.llmAdapter || createLLMAdapter(options.llm || 'auto');
@@ -313,6 +319,14 @@ export class GuestMessagingAgent {
     if (thermostatPolicy.applied) {
       parsed.typeOfMessageReceived = thermostatPolicy.typeOfMessageReceived || 'THERMOSTAT_HEATPUMP';
       parsed.proposedResponse = thermostatPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const luggagePolicy = this._applyLuggagePolicy(parsed, context, guestMessage);
+    if (luggagePolicy.applied) {
+      parsed.typeOfMessageReceived = luggagePolicy.typeOfMessageReceived || 'LUGGAGE_DROP_OFF';
+      parsed.proposedResponse = luggagePolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -907,6 +921,55 @@ export class GuestMessagingAgent {
       applied: true,
       typeOfMessageReceived: 'THERMOSTAT_HEATPUMP',
       proposedResponse
+    };
+  }
+
+  _isLuggageRequest(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    return /luggage|suitcase/.test(lower) ||
+      /drop\s+(our|my|the)?\s*(bags?|luggage)/.test(lower) ||
+      /(bags?|luggage).*(drop|store|storage|leave)/.test(lower) ||
+      /early.*(drop|arrival).*(luggage|bags?)/.test(lower);
+  }
+
+  /**
+   * Ensure operational luggage handoff always includes Richard + the correct phone number.
+   * The LLM sometimes omits the contact (luggage-drop-off eval flake in CI).
+   */
+  _applyLuggagePolicy(parsed, context = {}, guestMessage = '') {
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const isDropOff = categories.includes('LUGGAGE_DROP_OFF');
+    const isStorage = categories.includes('LUGGAGE_STORAGE');
+    const luggageAsk = this._isLuggageRequest(guestMessage);
+
+    if (!isDropOff && !isStorage && !luggageAsk) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+    const hasRichard = lower.includes('richard');
+    const hasPhone = lower.includes('807-8071') || lower.includes('8078071');
+
+    if (hasRichard && hasPhone) {
+      return { applied: false };
+    }
+
+    const standard = isStorage && !isDropOff
+      ? LUGGAGE_STORAGE_STANDARD_RESPONSE
+      : LUGGAGE_DROP_OFF_STANDARD_RESPONSE;
+
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const proposedResponse = greetingMatch
+      ? greetingMatch[0].trimEnd() + ' ' + standard
+      : standard;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: isStorage && !isDropOff ? 'LUGGAGE_STORAGE' : 'LUGGAGE_DROP_OFF',
+      proposedResponse,
     };
   }
 
@@ -1944,6 +2007,13 @@ export class GuestMessagingAgent {
     if (thermostatPolicyFinal.applied) {
       finalResult.typeOfMessageReceived = thermostatPolicyFinal.typeOfMessageReceived || 'THERMOSTAT_HEATPUMP';
       finalResult.proposedResponse = thermostatPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+    }
+
+    const luggagePolicyFinal = this._applyLuggagePolicy(finalResult, enrichedContext, guestMessage);
+    if (luggagePolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = luggagePolicyFinal.typeOfMessageReceived || 'LUGGAGE_DROP_OFF';
+      finalResult.proposedResponse = luggagePolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
     }
 
