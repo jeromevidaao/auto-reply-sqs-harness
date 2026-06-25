@@ -1,0 +1,21 @@
+{
+  "id": "payment-method-update-julie",
+  "description": "Guest asks host to bill AMEX instead of cancelled Visa. Host must direct to Airbnb, not offer to note/update payment.",
+  "guestMessage": "Hello! We're looking forward to staying there in July. I did need to update our payment method to an AMEX card as our prior cc had fraudulent charges and had to be cancelled. When it comes time to charging for the stay, please make sure to bill the AMEX and not the Visa originally used. Thank you!\n\nJulie",
+  "context": {
+    "guestName": "Julie",
+    "checkIn": "2026-07-10",
+    "checkOut": "2026-07-15",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-06-01T10:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "PAYMENT_METHOD_UPDATE",
+    "shouldReply": true,
+    "forbiddenPhrases": ["i'll note", "i will note", "we will bill", "charge your amex"],
+    "requiredPhrases": ["Airbnb", "do not handle payments"]
+  },
+  "notes": "Julie AMEX incident — hosts do not handle payments."
+}

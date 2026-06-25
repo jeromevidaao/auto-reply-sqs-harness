@@ -17,6 +17,9 @@ const LUGGAGE_DROP_OFF_STANDARD_RESPONSE =
 const LUGGAGE_STORAGE_STANDARD_RESPONSE =
   'Richard, our on-site property manager, can help with luggage storage after checkout. You can reach him at (207) 807-8071 or (207) 518-3417.';
 
+const PAYMENT_METHOD_UPDATE_STANDARD_RESPONSE =
+  'Please reach out to Airbnb to ensure that this is the case. We host, do not handle payments.';
+
 export class GuestMessagingAgent {
   constructor(options = {}) {
     this.llm = options.llmAdapter || createLLMAdapter(options.llm || 'auto');
@@ -327,6 +330,14 @@ export class GuestMessagingAgent {
     if (luggagePolicy.applied) {
       parsed.typeOfMessageReceived = luggagePolicy.typeOfMessageReceived || 'LUGGAGE_DROP_OFF';
       parsed.proposedResponse = luggagePolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const paymentMethodPolicy = this._applyPaymentMethodPolicy(parsed, context, guestMessage);
+    if (paymentMethodPolicy.applied) {
+      parsed.typeOfMessageReceived = paymentMethodPolicy.typeOfMessageReceived || 'PAYMENT_METHOD_UPDATE';
+      parsed.proposedResponse = paymentMethodPolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -969,6 +980,63 @@ export class GuestMessagingAgent {
     return {
       applied: true,
       typeOfMessageReceived: isStorage && !isDropOff ? 'LUGGAGE_STORAGE' : 'LUGGAGE_DROP_OFF',
+      proposedResponse,
+    };
+  }
+
+  _isPaymentMethodUpdateRequest(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    if (/fraudulent charge/.test(lower) && /card|cc\b|visa|amex|mastercard/.test(lower)) {
+      return true;
+    }
+    if (/payment method/.test(lower)) {
+      return true;
+    }
+    if (/(update|change|switch).*(card|payment|amex|visa|mastercard)/.test(lower)) {
+      return true;
+    }
+    if (/(bill|charge|charging).*(amex|visa|card|payment)/.test(lower)) {
+      return true;
+    }
+    if (/(amex|visa|mastercard).*(instead|not the|rather than)/.test(lower)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Guests sometimes ask hosts to switch billing cards. Hosts do not handle payments —
+   * always direct to Airbnb (Julie AMEX incident).
+   */
+  _applyPaymentMethodPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isPaymentMethodUpdateRequest(guestMessage)) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+    const alreadyCorrect =
+      lower.includes('airbnb') &&
+      /do not handle payment|don't handle payment|we host.*do not/i.test(lower) &&
+      !/i'll note|i will note|we will bill|charge your|use the amex|use the visa/i.test(lower);
+
+    if (alreadyCorrect) {
+      return { applied: false };
+    }
+
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    let proposedResponse = PAYMENT_METHOD_UPDATE_STANDARD_RESPONSE;
+
+    if (greetingMatch) {
+      proposedResponse = `${greetingMatch[0].trimEnd()} ${PAYMENT_METHOD_UPDATE_STANDARD_RESPONSE}`;
+    } else if (firstName) {
+      proposedResponse = `Hi ${firstName}, ${PAYMENT_METHOD_UPDATE_STANDARD_RESPONSE.charAt(0).toLowerCase()}${PAYMENT_METHOD_UPDATE_STANDARD_RESPONSE.slice(1)}`;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'PAYMENT_METHOD_UPDATE',
       proposedResponse,
     };
   }
@@ -2014,6 +2082,13 @@ export class GuestMessagingAgent {
     if (luggagePolicyFinal.applied) {
       finalResult.typeOfMessageReceived = luggagePolicyFinal.typeOfMessageReceived || 'LUGGAGE_DROP_OFF';
       finalResult.proposedResponse = luggagePolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+    }
+
+    const paymentMethodPolicyFinal = this._applyPaymentMethodPolicy(finalResult, enrichedContext, guestMessage);
+    if (paymentMethodPolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = paymentMethodPolicyFinal.typeOfMessageReceived || 'PAYMENT_METHOD_UPDATE';
+      finalResult.proposedResponse = paymentMethodPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
     }
 

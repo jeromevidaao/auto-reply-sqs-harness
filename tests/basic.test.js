@@ -84,6 +84,27 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(applied.proposedResponse.includes('807-8071'));
   });
 
+  it('directs payment method updates to Airbnb via _applyPaymentMethodPolicy (Julie AMEX incident)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = "Hello! I did need to update our payment method to an AMEX card as our prior cc had fraudulent charges and had to be cancelled. When it comes time to charging for the stay, please make sure to bill the AMEX and not the Visa originally used. Thank you!";
+    const applied = agent._applyPaymentMethodPolicy(
+      {
+        typeOfMessageReceived: 'FYI_STATEMENT',
+        proposedResponse: "Thank you for the update, Julie. I'll note that the AMEX should be used for the stay charges.",
+      },
+      { guestName: 'Julie' },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'PAYMENT_METHOD_UPDATE');
+    assert.ok(applied.proposedResponse.includes('Airbnb'));
+    assert.ok(applied.proposedResponse.includes('do not handle payments'));
+    assert.ok(!/i'll note|i will note/i.test(applied.proposedResponse));
+  });
+
   it('does not stomp luggage reply that already has Richard and phone', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
