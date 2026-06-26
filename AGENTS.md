@@ -2,6 +2,8 @@
 
 This is the canonical instruction file for any AI/agent working in this repo (Grok, Claude, Cursor, etc.).
 
+**Do not offer manual Lambda deploy.** Push to `main` → CI (tests + eval) → auto-deploy via `.github/workflows/deploy.yml`. See README **CI/CD & Deployment** and `docs/deployment.md`. Only mention manual/AWS-console steps when the user explicitly asks for something outside that path (e.g. DLQ redrive, alarm investigation).
+
 ## Core Product
 Local-first evaluation harness + core agent logic for the Grok-powered guest messaging / auto-reply system (originally the `auto-reply-sqs` Lambda).
 
