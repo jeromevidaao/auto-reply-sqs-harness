@@ -456,6 +456,59 @@ function mockHospitableClient({ getReservationMessages, getConversationMessages,
   };
 }
 
+describe('THANK_YOU_MESSAGE repeat allowance (no LLM)', () => {
+  it('allows repeat replies when host recently sent a short welcome ack', async () => {
+    const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');
+    const tool = new ConversationContextTool({
+      hospitableClient: mockHospitableClient({
+        getReservationMessages: async () => [
+          { sender_type: 'host', body: "You're welcome, Olivia!", created_at: new Date().toISOString() },
+        ],
+      }),
+    });
+
+    const result = await tool.execute('Thanks again for the quick response!', {
+      conversation_id: 'conv-repeat-thanks',
+      reservationId: 'res-repeat-thanks',
+      requireLiveConversationHistory: true,
+    });
+
+    assert.equal(result.duplicateRisk, false);
+    assert.equal(result.hasRecentHostMessage, true);
+  });
+
+  it('does not suppress THANK_YOU_MESSAGE due to recent host activity', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: {
+        complete: async () => JSON.stringify({
+          typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+          proposedResponse: "You're welcome, Olivia!",
+          shouldReply: true,
+          confidence: 0.95,
+        }),
+      },
+      hospitableClient: mockHospitableClient({
+        getReservationMessages: async () => [
+          { sender_type: 'host', body: "You're welcome, Olivia!", created_at: new Date().toISOString() },
+        ],
+      }),
+      requireLiveConversationHistory: false,
+    });
+
+    const result = await agent.handleMessage('Thanks again!', {
+      guestName: 'Olivia',
+      conversation_id: 'conv-repeat-thanks-2',
+      reservationId: 'res-repeat-thanks-2',
+      sender_type: 'guest',
+    });
+
+    assert.equal(result.typeOfMessageReceived, 'THANK_YOU_MESSAGE');
+    assert.equal(result.shouldReply, true);
+    assert.match(result.proposedResponse, /you're welcome, olivia/i);
+  });
+});
+
 describe('Conversation history hard-fail (no LLM)', () => {
   it('throws ConversationHistoryRequiredError when live fetch fails and history is required', async () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');

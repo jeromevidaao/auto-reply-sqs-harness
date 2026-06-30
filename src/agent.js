@@ -1229,7 +1229,9 @@ export class GuestMessagingAgent {
     if (context.preApprovedInquiry) {
       lines.push('- IMPORTANT: This is a pre-approved inquiry with no recent host activity. A warm, welcoming response is appropriate and safe.');
     }
-    if (context.recentHostActivity) {
+    const isGuestThankYou = /^(thank|thanks)/i.test((message || '').trim()) ||
+      (/(thank|thanks|appreciate)/i.test(message || '') && !/\?/.test(message || ''));
+    if (context.recentHostActivity && !isGuestThankYou) {
       lines.push('- IMPORTANT: A host message was sent very recently. Be extremely conservative — consider not replying to avoid duplication.');
     }
     if (context.conversationTraces?.duplicateRisk) {
@@ -1765,7 +1767,8 @@ export class GuestMessagingAgent {
     }
 
     if (enrichedContext.recentHostActivity && decision.shouldReply &&
-        !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext)) {
+        !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext) &&
+        decision.typeOfMessageReceived !== 'THANK_YOU_MESSAGE') {
       console.log('[Agent] → Recent host activity detected after first pass — forcing suppression to prevent duplicate reply');
       finalDecision = {
         ...decision,

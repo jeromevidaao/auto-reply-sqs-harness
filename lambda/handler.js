@@ -756,8 +756,10 @@ export const handler = async (event, context) => {
       if (targetId) {
         const sentPreview = result.proposedResponse.substring(0, 80);
 
-        // === Pre-send guard: prevent sending duplicate short replies (e.g. "You're welcome!" twice) ===
+        // === Pre-send guard: prevent sending duplicate short replies for non-thank-you categories ===
+        // THANK_YOU_MESSAGE ("You are welcome") may repeat — guests often thank us more than once.
         try {
+          const skipDuplicateGuard = result.typeOfMessageReceived === 'THANK_YOU_MESSAGE';
           let recentForGuard = null;
           if (reservationId && !msgContext.isInquiry) {
             recentForGuard = await hospitableClient.getThreadMessages({ reservationId }, 4);
@@ -768,7 +770,7 @@ export const handler = async (event, context) => {
             }
           }
 
-          if (recentForGuard) {
+          if (recentForGuard && !skipDuplicateGuard) {
             const veryRecentHostReplies = recentForGuard
               .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
               .slice(0, 3)

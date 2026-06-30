@@ -163,18 +163,8 @@ export class ConversationContextTool extends BaseTool {
             result.traces.push('High duplicate risk detected based on recent host reply content');
           }
 
-          // Extra guard: if we (the host/harness) just sent a very short acknowledgment like "You're welcome"
-          // in the last few minutes, treat as high duplicate risk for thank-you style messages.
-          const shortAckRecent = recentHostMessages.some(m => {
-            const b = (m.body || '').trim().toLowerCase();
-            const mins = (Date.now() - new Date(m.created_at).getTime()) / (1000 * 60);
-            return mins < 20 && (b === "you're welcome!" || b === "you're welcome" || b.startsWith("you're welcome"));
-          });
-          if (shortAckRecent && /thank|thanks|appreciate|no rush/i.test(input || '')) {
-            result.duplicateRisk = true;
-            result.duplicateReason = 'We sent a "You\'re welcome" style reply very recently — strongly prefer not replying again';
-            result.traces.push('Recent short host acknowledgment detected (anti double "You\'re welcome")');
-          }
+          // THANK_YOU_MESSAGE repeats are allowed — guests may thank us more than once and we reply
+          // "You're welcome" each time. Do not set duplicateRisk for recent short welcome acks.
         } else {
           result.traces.push('Live history fetched but no host messages in the recent window');
         }
