@@ -133,6 +133,33 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(!/i'll note|i will note/i.test(applied.proposedResponse));
   });
 
+  it('confirms each remote controls one unit via _applyHvacRemotePerUnitPolicy', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Does the one remote work both air units?';
+    const applied = agent._applyHvacRemotePerUnitPolicy(
+      {
+        typeOfMessageReceived: 'THERMOSTAT_HEATPUMP',
+        proposedResponse: 'Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat does not control the AC or heat.',
+      },
+      { guestName: 'Alex' },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'HVAC_REMOTE_PER_UNIT');
+    assert.equal(applied.proposedResponse, 'Hi Alex, no. Each remote is for a single unit.');
+    assert.ok(!/nest|make sure you are using/i.test(applied.proposedResponse));
+
+    const bare = agent._applyHvacRemotePerUnitPolicy(
+      { typeOfMessageReceived: 'THERMOSTAT_HEATPUMP', proposedResponse: 'Use the wall remotes.' },
+      {},
+      msg
+    );
+    assert.equal(bare.proposedResponse, 'No, each remote is for a single unit.');
+  });
+
   it('confirms security deposit refund via Airbnb via _applySecurityDepositPolicy', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

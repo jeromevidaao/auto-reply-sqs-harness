@@ -2,6 +2,8 @@
 
 **Canonical category name(s)**: THERMOSTAT_HEATPUMP, THERMOSTAT
 
+**Do NOT use THERMOSTAT_HEATPUMP when the guest only asks whether one remote controls both/multiple air units** (e.g. "Does the one remote work both air units?"). That is **HVAC_REMOTE_PER_UNIT** — answer that each remote is for a single unit. See hvac-remote-per-unit.md.
+
 **When the guest asks about heat, AC, temperature, or the Nest thermostat**:
 - This is almost always **THERMOSTAT_HEATPUMP**.
 - Use the output from the `get_thermostat_instructions` tool (and live `get_heat_pump_status` when a comfort complaint is present).

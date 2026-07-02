@@ -105,6 +105,10 @@ export class ThermostatTool extends BaseTool {
   _isGuestMessageHvacRelevant(guestMessage = '') {
     const m = (guestMessage || '').toLowerCase();
 
+    if (this._isRemotePerUnitQuestion(guestMessage)) {
+      return false;
+    }
+
     // Clear non-HVAC intents — never treat these as thermostat messages.
     if (/\bhotel recommendations?\b/.test(m) || /\brecommend(?:ations?)?\b.*\bhotels?\b/.test(m) || /\bhotels?\b.*\brecommend/.test(m)) {
       return false;
@@ -114,6 +118,25 @@ export class ThermostatTool extends BaseTool {
     }
 
     return this._hasExplicitHvacLanguage(m);
+  }
+
+  _isRemotePerUnitQuestion(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    if (!/\bremote/.test(lower)) {
+      return false;
+    }
+
+    const asksAboutSharedRemote =
+      /\b(?:one|the|a|single)\b.{0,30}\bremote\b.{0,50}\b(?:both|two|all|multiple)\b/.test(lower) ||
+      /\bremote\b.{0,50}\b(?:both|two|all)\b.{0,30}\b(?:unit|units|head|heads|room|rooms|air)\b/.test(lower) ||
+      /\b(?:both|two|all)\b.{0,30}\b(?:unit|units|air)\b.{0,50}\b(?:one|the|a|single)\b.{0,20}\bremote\b/.test(lower) ||
+      (/\b(?:both|two|all)\s+air\s+units?\b/.test(lower) && /\bremote/.test(lower));
+
+    if (!asksAboutSharedRemote) {
+      return false;
+    }
+
+    return !/\b(?:cold|hot|freezing|not (?:working|blowing|cooling)|no air|too (?:hot|cold)|turn (?:up|down)|broken|stuck|warm up|cool down)\b/.test(lower);
   }
 
   _hasExplicitHvacLanguage(m = '') {

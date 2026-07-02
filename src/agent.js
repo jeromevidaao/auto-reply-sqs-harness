@@ -23,6 +23,9 @@ const PAYMENT_METHOD_UPDATE_STANDARD_RESPONSE =
 const SECURITY_DEPOSIT_STANDARD_RESPONSE =
   'Yes. You will get it back automatically after your stay. This is not done by us but by the platform/Airbnb.';
 
+const HVAC_REMOTE_PER_UNIT_STANDARD_RESPONSE =
+  'No, each remote is for a single unit.';
+
 export class GuestMessagingAgent {
   constructor(options = {}) {
     this.llm = options.llmAdapter || createLLMAdapter(options.llm || 'auto');
@@ -323,6 +326,14 @@ export class GuestMessagingAgent {
     if (eventPolicy.applied) {
       parsed.typeOfMessageReceived = 'EVENT_REQUEST';
       parsed.proposedResponse = eventPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const hvacRemotePerUnitPolicy = this._applyHvacRemotePerUnitPolicy(parsed, context, guestMessage);
+    if (hvacRemotePerUnitPolicy.applied) {
+      parsed.typeOfMessageReceived = hvacRemotePerUnitPolicy.typeOfMessageReceived || 'HVAC_REMOTE_PER_UNIT';
+      parsed.proposedResponse = hvacRemotePerUnitPolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -973,11 +984,74 @@ export class GuestMessagingAgent {
     };
   }
 
+  _isHvacRemotePerUnitQuestion(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    if (!/\bremote/.test(lower)) {
+      return false;
+    }
+
+    const asksAboutSharedRemote =
+      /\b(?:one|the|a|single)\b.{0,30}\bremote\b.{0,50}\b(?:both|two|all|multiple)\b/.test(lower) ||
+      /\bremote\b.{0,50}\b(?:both|two|all)\b.{0,30}\b(?:unit|units|head|heads|room|rooms|air)\b/.test(lower) ||
+      /\b(?:both|two|all)\b.{0,30}\b(?:unit|units|air)\b.{0,50}\b(?:one|the|a|single)\b.{0,20}\bremote\b/.test(lower) ||
+      (/\b(?:both|two|all)\s+air\s+units?\b/.test(lower) && /\bremote/.test(lower));
+
+    if (!asksAboutSharedRemote) {
+      return false;
+    }
+
+    if (/\b(?:cold|hot|freezing|not (?:working|blowing|cooling)|no air|too (?:hot|cold)|turn (?:up|down)|broken|stuck|warm up|cool down)\b/.test(lower)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Guests ask whether one remote controls multiple air units. Each remote is room-specific.
+   */
+  _applyHvacRemotePerUnitPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isHvacRemotePerUnitQuestion(guestMessage)) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+    const alreadyCorrect =
+      /\bno\b/.test(lower) &&
+      /each remote/.test(lower) &&
+      /single unit/.test(lower) &&
+      !/nest|make sure you are using|heat pump remotes on the wall/i.test(lower);
+
+    if (alreadyCorrect) {
+      return { applied: false };
+    }
+
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    let proposedResponse = HVAC_REMOTE_PER_UNIT_STANDARD_RESPONSE;
+
+    if (greetingMatch) {
+      proposedResponse = `${greetingMatch[0].trimEnd()} no. Each remote is for a single unit.`;
+    } else if (firstName) {
+      proposedResponse = `Hi ${firstName}, no. Each remote is for a single unit.`;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'HVAC_REMOTE_PER_UNIT',
+      proposedResponse,
+    };
+  }
+
   /**
    * Ensure THERMOSTAT_HEATPUMP replies always include the neutral remote-control wording.
    * Uses ThermostatTool / HeatPumpTool recommended snippets when the LLM paraphrases.
    */
   _applyThermostatPolicy(parsed, context = {}, guestMessage = '') {
+    if (this._isHvacRemotePerUnitQuestion(guestMessage)) {
+      return { applied: false };
+    }
     const categories = Array.isArray(parsed.typeOfMessageReceived)
       ? parsed.typeOfMessageReceived
       : [parsed.typeOfMessageReceived];
@@ -2246,6 +2320,13 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = postCheckoutThanksPolicyFinal.shouldReply;
       finalResult.confidence = postCheckoutThanksPolicyFinal.confidence;
       finalResult.escalated = postCheckoutThanksPolicyFinal.escalated;
+    }
+
+    const hvacRemotePerUnitPolicyFinal = this._applyHvacRemotePerUnitPolicy(finalResult, enrichedContext, guestMessage);
+    if (hvacRemotePerUnitPolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = hvacRemotePerUnitPolicyFinal.typeOfMessageReceived || 'HVAC_REMOTE_PER_UNIT';
+      finalResult.proposedResponse = hvacRemotePerUnitPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
     }
 
     const thermostatPolicyFinal = this._applyThermostatPolicy(finalResult, enrichedContext, guestMessage);

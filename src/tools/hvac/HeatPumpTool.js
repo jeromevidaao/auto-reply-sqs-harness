@@ -40,8 +40,17 @@ export class HeatPumpTool extends BaseTool {
     const guestName = context.guestName || null;
 
     const lower = guestMessage.toLowerCase();
+    const isRemotePerUnitQuestion =
+      /\bremote/.test(lower) &&
+      (
+        /\b(?:one|the|a|single)\b.{0,30}\bremote\b.{0,50}\b(?:both|two|all|multiple)\b/.test(lower) ||
+        /\bremote\b.{0,50}\b(?:both|two|all)\b.{0,30}\b(?:unit|units|head|heads|room|rooms|air)\b/.test(lower) ||
+        /\b(?:both|two|all)\b.{0,30}\b(?:unit|units|air)\b.{0,50}\b(?:one|the|a|single)\b.{0,20}\bremote\b/.test(lower) ||
+        (/\b(?:both|two|all)\s+air\s+units?\b/.test(lower) && /\bremote/.test(lower))
+      ) &&
+      !/\b(?:cold|hot|freezing|not (?:working|blowing|cooling)|no air|too (?:hot|cold)|turn (?:up|down)|broken|stuck|warm up|cool down)\b/.test(lower);
     const tempKeywords = ['hot', 'cold', 'warm', 'cool', 'temperature', 'thermostat', 'heat', 'ac', 'air conditioning', 'too warm', 'too cold', 'freezing', 'boiling', 'no air', 'not blowing', 'air not', 'stuffy', 'remotes', 'unit', 'units', 'air', 'settings'];
-    const seemsRelevant = tempKeywords.some(kw => lower.includes(kw));
+    const seemsRelevant = !isRemotePerUnitQuestion && tempKeywords.some(kw => lower.includes(kw));
 
     const result = {
       detected: false,
