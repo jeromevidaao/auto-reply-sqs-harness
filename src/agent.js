@@ -310,7 +310,13 @@ export class GuestMessagingAgent {
       shouldReply = true;
     }
 
-    const eventPolicy = this._applyEventRequestPolicy(parsed, context);
+    const postCheckoutThanksPolicy = this._applyPostCheckoutThankYouPolicy(parsed, context, guestMessage);
+    if (postCheckoutThanksPolicy.applied) {
+      shouldReply = postCheckoutThanksPolicy.shouldReply;
+      confidence = postCheckoutThanksPolicy.confidence;
+    }
+
+    const eventPolicy = this._applyEventRequestPolicy(parsed, context, guestMessage);
     if (eventPolicy.applied) {
       parsed.typeOfMessageReceived = 'EVENT_REQUEST';
       parsed.proposedResponse = eventPolicy.proposedResponse;
@@ -393,7 +399,12 @@ export class GuestMessagingAgent {
    * Ensures the exact policy phrase "not able to accommodate events or gatherings" is always present
    * (eval rubric + production consistency). Allows an optional greeting + name prefix from the LLM draft.
    */
-  _applyEventRequestPolicy(parsed, context = {}) {
+  _applyEventRequestPolicy(parsed, context = {}, guestMessage = '') {
+    const msg = guestMessage || context.originalMessage || '';
+    if (this._isPostCheckoutThankYou(msg, context)) {
+      return { applied: false };
+    }
+
     const categories = Array.isArray(parsed.typeOfMessageReceived)
       ? parsed.typeOfMessageReceived
       : [parsed.typeOfMessageReceived];
@@ -556,7 +567,7 @@ export class GuestMessagingAgent {
    */
   _looksLikeActualCheckout(guestMessage = '', context = {}) {
     const lower = (guestMessage || '').toLowerCase();
-    if (/checked out|check(?:ing)? out|starting the dishwasher|thanks again for your host|thanks for (?:being|your) (?:a great |such a )?host|departed|on our way (?:home|back)|heading home|end of (?:our|the) stay|about to check out/i.test(lower)) {
+    if (/checked out|check(?:ing)? out|starting the dishwasher|thanks again for your host|thanks for (?:being|your|letting us) (?:a great |such a )?(?:host|stay)|departed|on our way (?:home|back)|heading home|end of (?:our|the) stay|about to check out/i.test(lower)) {
       return true;
     }
     const checkOut = (context.checkOut || '').slice(0, 10);
@@ -565,6 +576,59 @@ export class GuestMessagingAgent {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Post-checkout thank-you (Rene checkout incident): guest confirms departure and thanks us.
+   * Distinct from post-welcome thanks and from Amy-style housekeeping feedback.
+   */
+  _isPostCheckoutThankYou(guestMessage = '', context = {}) {
+    if (!this._looksLikeActualCheckout(guestMessage, context)) return false;
+    if (this._isPostStayHousekeepingFeedback(guestMessage)) return false;
+    const lower = (guestMessage || '').toLowerCase();
+    return /thank|thanks|appreciate|great day|have a (?:great|wonderful|good) day/i.test(lower) ||
+      /officially checked out|we(?:'ve| have) gotten everything out|pulled the linens/i.test(lower);
+  }
+
+  _applyPostCheckoutThankYouPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isPostCheckoutThankYou(guestMessage, context)) {
+      return { applied: false };
+    }
+
+    const naturalName = this._guestDisplayFirstName(context);
+    const draft = (parsed.proposedResponse || '').trim();
+    const eventDecline = /not able to accommodate events|gatherings/i.test(draft);
+    const isGoodThankYouAck = !eventDecline && /you're welcome|you are welcome/i.test(draft);
+
+    let proposedResponse = draft;
+    if (!isGoodThankYouAck) {
+      let recovered = null;
+      const raw = parsed.rawModelOutput;
+      if (raw) {
+        try {
+          const r = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          const pr = (r.proposedResponse || '').trim();
+          if (/you're welcome|you are welcome/i.test(pr) && !/not able to accommodate events/i.test(pr)) {
+            recovered = pr;
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+      proposedResponse = recovered || `You're welcome, ${naturalName}! Safe travels and hope you enjoyed your stay.`;
+    }
+
+    parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+    };
   }
 
   /**
@@ -2067,11 +2131,21 @@ export class GuestMessagingAgent {
     }
 
     // Final guard: never let reflection/judge paraphrase away the firm event policy wording.
-    const eventPolicyFinal = this._applyEventRequestPolicy(finalResult, enrichedContext);
+    const eventPolicyFinal = this._applyEventRequestPolicy(finalResult, enrichedContext, guestMessage);
     if (eventPolicyFinal.applied) {
       finalResult.typeOfMessageReceived = 'EVENT_REQUEST';
       finalResult.proposedResponse = eventPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
+    }
+
+    const postCheckoutThanksPolicyFinal = this._applyPostCheckoutThankYouPolicy(finalResult, enrichedContext, guestMessage);
+    if (postCheckoutThanksPolicyFinal.applied) {
+      console.log('[Agent] → Post-checkout thank-you policy applied (short warm ack; repeats allowed)');
+      finalResult.typeOfMessageReceived = postCheckoutThanksPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = postCheckoutThanksPolicyFinal.proposedResponse;
+      finalResult.shouldReply = postCheckoutThanksPolicyFinal.shouldReply;
+      finalResult.confidence = postCheckoutThanksPolicyFinal.confidence;
+      finalResult.escalated = postCheckoutThanksPolicyFinal.escalated;
     }
 
     const thermostatPolicyFinal = this._applyThermostatPolicy(finalResult, enrichedContext, guestMessage);
@@ -2300,6 +2374,42 @@ export class GuestMessagingAgent {
    * re-sends welcome logistics on a post-welcome thank-you. Does not depend on Grok seeing history.
    */
   _applyDeterministicJudgeGuards(llmJudgeResult = {}, firstDecision = {}, context = {}, guestMessage = '') {
+    if (this._isPostCheckoutThankYou(guestMessage, context)) {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const eventMismatch = firstDecision.typeOfMessageReceived === 'EVENT_REQUEST' ||
+        /not able to accommodate events|gatherings/i.test(draft);
+      const judgeRejected = llmJudgeResult.verdict === 'REJECT';
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const llmAlreadyFixed = llmJudgeResult.verdict === 'REVISE' && revised &&
+        /you're welcome|you are welcome/i.test(revised) &&
+        !/not able to accommodate events|gatherings/i.test(revised);
+
+      if (llmAlreadyFixed) {
+        return llmJudgeResult;
+      }
+
+      if (eventMismatch || judgeRejected) {
+        const policy = this._applyPostCheckoutThankYouPolicy(
+          { ...firstDecision },
+          context,
+          guestMessage
+        );
+        console.log('[Agent] → Deterministic judge guard: post-checkout thank-you misclassified as EVENT_REQUEST (Rene checkout incident)');
+        return {
+          ...llmJudgeResult,
+          verdict: 'REVISE',
+          revisedResponse: policy.proposedResponse,
+          notes: (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+            'Deterministic guard: post-checkout thank-you — revise to short You\'re welcome ack (not event decline).',
+          issues: [
+            ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+            'Post-checkout thank-you misclassified as EVENT_REQUEST — guest confirmed departure and thanked host (Rene checkout incident).'
+          ],
+          deterministicGuard: true,
+        };
+      }
+    }
+
     if (this._isTemporaryDepartureDuringStay(guestMessage, context)) {
       const draft = (firstDecision.proposedResponse || '').trim();
       const hasEndOfStayFarewell = /safe travels|hope you enjoyed|glad you had a good stay|have a (?:great|wonderful|safe) trip|enjoyed your stay/i.test(draft);

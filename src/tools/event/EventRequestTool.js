@@ -19,8 +19,15 @@ export class EventRequestTool extends BaseTool {
 
   async execute(input, context = {}) {
     const message = typeof input === 'string' ? input : (input?.message || '');
+    const lower = message.toLowerCase();
 
-    const isEventRequest = /event|party|gather|get[- ]?together|celebration|meeting|birthday party|hosting|people over/i.test(message.toLowerCase());
+    // Checkout/housekeeping false positive (Rene incident): "gathered all of the trash"
+    if (/\bgathered\b/.test(lower) && /\b(trash|garbage|linens?|laundry|recycl)/i.test(lower)) {
+      return { detected: false };
+    }
+
+    const isEventRequest = /\b(?:event|party|gathering|get[- ]?together|celebration|meeting|birthday party|hosting|people over)\b/i.test(lower) ||
+      /\bhost\b.*\b(?:party|event|people|gathering)\b/i.test(lower);
 
     if (!isEventRequest) {
       return { detected: false };

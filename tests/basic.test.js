@@ -34,6 +34,34 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(applied.proposedResponse.includes('not able to accommodate events or gatherings'));
   });
 
+  it('does not false-positive on checkout trash-gathering thank-you (Rene checkout incident)', async () => {
+    const tool = new EventRequestTool();
+    const msg = 'Good Morning Jerome! We have officially checked out. We pulled the linens, and gathered all of the trash in one area. I think we\'ve gotten everything out! Have a great day and thanks for letting us stay here.';
+    const result = await tool.execute(msg);
+    assert.equal(result.detected, false);
+  });
+
+  it('skips event policy on post-checkout thank-you messages', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Good Morning Jerome! We have officially checked out. We pulled the linens, and gathered all of the trash in one area. Thanks for letting us stay here.';
+    const ctx = {
+      guestName: 'Rene',
+      checkIn: '2026-06-29',
+      checkOut: '2026-07-02',
+      asOfDate: '2026-07-02',
+      earlyEventDetection: { detected: true, standardResponse: 'event decline' },
+    };
+    const applied = agent._applyEventRequestPolicy(
+      { typeOfMessageReceived: 'EVENT_REQUEST', proposedResponse: 'event decline' },
+      ctx,
+      msg
+    );
+    assert.equal(applied.applied, false);
+  });
+
   it('does not false-positive on Airbnb booking intros or hotel recommendations', async () => {
     const tool = new ThermostatTool();
     const abby = await tool.execute(
@@ -455,6 +483,76 @@ function mockHospitableClient({ getReservationMessages, getConversationMessages,
     },
   };
 }
+
+describe('Post-checkout thank-you safeguards (no LLM)', () => {
+  const reneCheckoutMsg = 'Good Morning Jerome! We have officially checked out. We pulled the linens, and gathered all of the trash in one area. I think we\'ve gotten everything out! Have a great day and thanks for letting us stay here.';
+  const reneCtx = {
+    guestName: 'Rene',
+    checkIn: '2026-06-29',
+    checkOut: '2026-07-02',
+    asOfDate: '2026-07-02',
+  };
+
+  it('detects post-checkout thank-you messages', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    assert.equal(agent._isPostCheckoutThankYou(reneCheckoutMsg, reneCtx), true);
+  });
+
+  it('replaces EVENT_REQUEST decline with warm checkout thank-you ack', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const parsed = {
+      typeOfMessageReceived: 'EVENT_REQUEST',
+      proposedResponse: "Thank you for thinking of our place for your event! Unfortunately, we're not able to accommodate events or gatherings.",
+      rawModelOutput: JSON.stringify({
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: "You're welcome, Rene! Safe travels and hope you enjoyed your stay.",
+      }),
+    };
+    const applied = agent._applyPostCheckoutThankYouPolicy(parsed, reneCtx, reneCheckoutMsg);
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'THANK_YOU_MESSAGE');
+    assert.match(applied.proposedResponse, /you're welcome, rene/i);
+    assert.doesNotMatch(applied.proposedResponse, /events or gatherings/i);
+    assert.equal(applied.shouldReply, true);
+    assert.equal(applied.escalated, false);
+  });
+
+  it('deterministic judge guard REVISEs judge REJECT on misclassified checkout thank-you', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const decision = {
+      typeOfMessageReceived: 'EVENT_REQUEST',
+      proposedResponse: "Thank you for thinking of our place for your event! Unfortunately, we're not able to accommodate events or gatherings.",
+      shouldReply: true,
+      rawModelOutput: JSON.stringify({
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: "You're welcome, Rene! Safe travels and hope you enjoyed your stay.",
+      }),
+    };
+    const guarded = agent._applyDeterministicJudgeGuards(
+      {
+        verdict: 'REJECT',
+        notes: 'Draft mismatched to guest checkout message.',
+        issues: ['EVENT_REQUEST language on checkout thank-you'],
+      },
+      decision,
+      reneCtx,
+      reneCheckoutMsg
+    );
+    assert.equal(guarded.verdict, 'REVISE');
+    assert.equal(guarded.deterministicGuard, true);
+    assert.match(guarded.revisedResponse, /you're welcome, rene/i);
+    assert.doesNotMatch(guarded.revisedResponse, /events or gatherings/i);
+  });
+});
 
 describe('THANK_YOU_MESSAGE repeat allowance (no LLM)', () => {
   it('allows repeat replies when host recently sent a short welcome ack', async () => {
