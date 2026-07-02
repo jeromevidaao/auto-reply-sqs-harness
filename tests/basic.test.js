@@ -133,6 +133,28 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(!/i'll note|i will note/i.test(applied.proposedResponse));
   });
 
+  it('confirms security deposit refund via Airbnb via _applySecurityDepositPolicy', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = "Hi Jerome! I had a question about the deposit. I noticed in the house rules it mentions something about a $250 deposit. Is that's something I will get back? I didn't even realize that there was a deposit (which is cool). But it stated if the house rules were broken that the deposit isn't refundable, but luckily I didn't have any house parties or break any rules!";
+    const applied = agent._applySecurityDepositPolicy(
+      {
+        typeOfMessageReceived: 'FYI_STATEMENT',
+        proposedResponse: "Thanks for letting me know you followed the house rules! Glad everything went well.",
+      },
+      { guestName: 'Alex' },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'SECURITY_DEPOSIT_QUESTION');
+    assert.ok(applied.proposedResponse.includes('get it back automatically'));
+    assert.ok(applied.proposedResponse.includes('Airbnb'));
+    assert.ok(applied.proposedResponse.includes('not done by us'));
+    assert.ok(!/i'll refund|i will refund|we will refund/i.test(applied.proposedResponse));
+  });
+
   it('does not stomp luggage reply that already has Richard and phone', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

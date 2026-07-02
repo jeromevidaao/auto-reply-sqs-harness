@@ -20,6 +20,9 @@ const LUGGAGE_STORAGE_STANDARD_RESPONSE =
 const PAYMENT_METHOD_UPDATE_STANDARD_RESPONSE =
   'Please reach out to Airbnb to ensure that this is the case. We host, do not handle payments.';
 
+const SECURITY_DEPOSIT_STANDARD_RESPONSE =
+  'Yes. You will get it back automatically after your stay. This is not done by us but by the platform/Airbnb.';
+
 export class GuestMessagingAgent {
   constructor(options = {}) {
     this.llm = options.llmAdapter || createLLMAdapter(options.llm || 'auto');
@@ -344,6 +347,14 @@ export class GuestMessagingAgent {
     if (paymentMethodPolicy.applied) {
       parsed.typeOfMessageReceived = paymentMethodPolicy.typeOfMessageReceived || 'PAYMENT_METHOD_UPDATE';
       parsed.proposedResponse = paymentMethodPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const securityDepositPolicy = this._applySecurityDepositPolicy(parsed, context, guestMessage);
+    if (securityDepositPolicy.applied) {
+      parsed.typeOfMessageReceived = securityDepositPolicy.typeOfMessageReceived || 'SECURITY_DEPOSIT_QUESTION';
+      parsed.proposedResponse = securityDepositPolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -1128,6 +1139,68 @@ export class GuestMessagingAgent {
     return {
       applied: true,
       typeOfMessageReceived: 'PAYMENT_METHOD_UPDATE',
+      proposedResponse,
+    };
+  }
+
+  _isSecurityDepositQuestion(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    if (!/deposit/.test(lower)) {
+      return false;
+    }
+    if (this._isPaymentMethodUpdateRequest(guestMessage)) {
+      return false;
+    }
+    if (/cancel/.test(lower) && /refund/.test(lower)) {
+      return false;
+    }
+
+    return (
+      /get (?:it )?back/.test(lower) ||
+      /refundable/.test(lower) ||
+      /will i get/.test(lower) ||
+      /do i get/.test(lower) ||
+      /question about (?:the )?deposit/.test(lower) ||
+      /about (?:the |a )?deposit/.test(lower) ||
+      /house rules.*deposit|deposit.*house rules/.test(lower) ||
+      /\$\d+.*deposit|deposit.*\$\d+/.test(lower)
+    );
+  }
+
+  /**
+   * Guests ask whether security/damage deposits are refunded. Hosts do not process
+   * deposits — Airbnb returns them automatically after the stay when rules were followed.
+   */
+  _applySecurityDepositPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isSecurityDepositQuestion(guestMessage)) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+    const alreadyCorrect =
+      /you will get it back|get it back automatically/.test(lower) &&
+      /airbnb|platform/.test(lower) &&
+      /not done by us|we do not|don't handle|do not handle/.test(lower) &&
+      !/i'll refund|i will refund|we will refund|release your deposit|return your deposit/i.test(lower);
+
+    if (alreadyCorrect) {
+      return { applied: false };
+    }
+
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    let proposedResponse = SECURITY_DEPOSIT_STANDARD_RESPONSE;
+
+    if (greetingMatch) {
+      proposedResponse = `${greetingMatch[0].trimEnd()} ${SECURITY_DEPOSIT_STANDARD_RESPONSE.charAt(0).toLowerCase()}${SECURITY_DEPOSIT_STANDARD_RESPONSE.slice(1)}`;
+    } else if (firstName) {
+      proposedResponse = `Hi ${firstName}, ${SECURITY_DEPOSIT_STANDARD_RESPONSE.charAt(0).toLowerCase()}${SECURITY_DEPOSIT_STANDARD_RESPONSE.slice(1)}`;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'SECURITY_DEPOSIT_QUESTION',
       proposedResponse,
     };
   }
@@ -2193,6 +2266,13 @@ export class GuestMessagingAgent {
     if (paymentMethodPolicyFinal.applied) {
       finalResult.typeOfMessageReceived = paymentMethodPolicyFinal.typeOfMessageReceived || 'PAYMENT_METHOD_UPDATE';
       finalResult.proposedResponse = paymentMethodPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+    }
+
+    const securityDepositPolicyFinal = this._applySecurityDepositPolicy(finalResult, enrichedContext, guestMessage);
+    if (securityDepositPolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = securityDepositPolicyFinal.typeOfMessageReceived || 'SECURITY_DEPOSIT_QUESTION';
+      finalResult.proposedResponse = securityDepositPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
     }
 

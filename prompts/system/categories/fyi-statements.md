@@ -8,6 +8,8 @@
 - The message does **not require** the host to:
 
 **Do NOT use FYI_STATEMENT for payment/billing updates** (e.g. guest asks to switch to AMEX, update credit card, or bill a different card). Those are **PAYMENT_METHOD_UPDATE** — direct the guest to Airbnb; hosts do not handle payments. See payment-method-update.md.
+
+**Do NOT use FYI_STATEMENT for security/damage deposit questions** (e.g. guest asks if they will get the $250 deposit back after their stay). Those are **SECURITY_DEPOSIT_QUESTION** — confirm automatic refund after the stay and that Airbnb handles it. See security-deposit.md.
   - Look up information (WiFi, codes, directions, policies, etc.)
   - Take any action (maintenance, refund, special request, etc.)
   - Provide new facts the guest is asking for
