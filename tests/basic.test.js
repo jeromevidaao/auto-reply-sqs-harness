@@ -523,6 +523,28 @@ describe('Post-checkout thank-you safeguards (no LLM)', () => {
     assert.equal(applied.escalated, false);
   });
 
+  it('does not treat stay-extension checkout-date asks as post-checkout thank-you (Lilly incident)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = "Hello, I'm wondering if I could extend our stay by one day -- instead of checking out on 28th, we'd check out on the 29th. Let me know, thanks!";
+    const ctx = {
+      guestName: 'Lilly',
+      checkIn: '2026-09-26',
+      checkOut: '2026-09-29',
+      stayExtensionInfo: { detected: true, extensionType: 'later_checkout' },
+    };
+    assert.equal(agent._looksLikeStayExtensionRequest(msg, ctx), true);
+    assert.equal(agent._isPostCheckoutThankYou(msg, ctx), false);
+    const applied = agent._applyPostCheckoutThankYouPolicy(
+      { typeOfMessageReceived: 'STAY_EXTENSION', proposedResponse: 'I checked the calendar for 53 Pine St #3 and the 29th is not available.' },
+      ctx,
+      msg
+    );
+    assert.equal(applied.applied, false);
+  });
+
   it('deterministic judge guard REVISEs judge REJECT on misclassified checkout thank-you', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

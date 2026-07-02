@@ -563,11 +563,37 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Full-day stay extension / checkout-date change request (Lilly incident).
+   * Must not be treated as post-checkout thank-you when guest says "checking out on the 29th".
+   */
+  _looksLikeStayExtensionRequest(guestMessage = '', context = {}) {
+    if (context.stayExtensionInfo?.detected || context.earlyStayExtensionInfo?.detected) {
+      return true;
+    }
+    const lower = (guestMessage || '').toLowerCase();
+    return /(extend.*(stay|booking|reservation|night|day)|one more (day|night)|extra (day|night)|instead of check(?:ing)? out|we(?:'d| would) check(?:ing)? out|change (?:my )?(checkout|check.out|departure|check out) (?:date|to)|move checkout|push checkout|arriv(?:e|ing).*(?:one|a) day (?:early|earlier)|come (?:one|a) day (?:early|earlier)|wondering if i could extend|could (?:we|i) extend)/i.test(lower);
+  }
+
+  /**
    * Guest message signals actual checkout / end-of-stay departure (not a brief step-out).
    */
   _looksLikeActualCheckout(guestMessage = '', context = {}) {
+    if (this._looksLikeStayExtensionRequest(guestMessage, context)) {
+      return false;
+    }
+
     const lower = (guestMessage || '').toLowerCase();
-    if (/checked out|check(?:ing)? out|starting the dishwasher|thanks again for your host|thanks for (?:being|your|letting us) (?:a great |such a )?(?:host|stay)|departed|on our way (?:home|back)|heading home|end of (?:our|the) stay|about to check out/i.test(lower)) {
+    if (/checked out|officially checked out|just checked out|we(?:'ve| have) checked out/i.test(lower)) {
+      return true;
+    }
+    if (/starting the dishwasher|thanks again for your host|thanks for (?:being|your|letting us) (?:a great |such a )?(?:host|stay)/i.test(lower)) {
+      return true;
+    }
+    if (/about to check out|checking out now|on our way (?:home|back)|heading home|departed|end of (?:our|the) stay/i.test(lower)) {
+      return true;
+    }
+    if (/check(?:ing)? out/i.test(lower) &&
+        /(gotten everything out|pulled the linens|gathered.*trash|we(?:'re| are) (?:done|finished|all set))/i.test(lower)) {
       return true;
     }
     const checkOut = (context.checkOut || '').slice(0, 10);
@@ -583,6 +609,7 @@ export class GuestMessagingAgent {
    * Distinct from post-welcome thanks and from Amy-style housekeeping feedback.
    */
   _isPostCheckoutThankYou(guestMessage = '', context = {}) {
+    if (this._looksLikeStayExtensionRequest(guestMessage, context)) return false;
     if (!this._looksLikeActualCheckout(guestMessage, context)) return false;
     if (this._isPostStayHousekeepingFeedback(guestMessage)) return false;
     const lower = (guestMessage || '').toLowerCase();
