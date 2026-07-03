@@ -508,6 +508,42 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(applied.applied, true);
     assert.equal(applied.typeOfMessageReceived, 'SLEEPING_ARRANGEMENTS');
   });
+
+  it('appends follow-up to in-stay extra towels replies (Sean incident)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Hi, are there more clean towels in the unit? I think each bedroom has one.';
+    const applied = agent._applyExtraLinensTowelsPolicy(
+      {
+        typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
+        proposedResponse: 'Good evening, Sean, yes there are extra clean towels under the sofa bed. Lift up the long part of the sofa to reveal them along with the linens.'
+      },
+      { guestName: 'Sean' },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.ok(applied.proposedResponse.includes('feel free to let us know'));
+    assert.ok(applied.proposedResponse.includes('Lift up the long part of the sofa'));
+  });
+
+  it('does not double-append follow-up when EXTRA_LINENS_TOWELS reply already offers help', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Hi, are there more clean towels in the unit?';
+    const applied = agent._applyExtraLinensTowelsPolicy(
+      {
+        typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
+        proposedResponse: 'Yes, lift up the long part of the sofa to reveal extra towels and linens. Let me know if you can find them!'
+      },
+      {},
+      msg
+    );
+    assert.equal(applied.applied, false);
+  });
 });
 
 function mockHospitableClient({ getReservationMessages, getConversationMessages, getInquiryMessages } = {}) {

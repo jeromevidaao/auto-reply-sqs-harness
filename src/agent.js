@@ -26,6 +26,9 @@ const SECURITY_DEPOSIT_STANDARD_RESPONSE =
 const HVAC_REMOTE_PER_UNIT_STANDARD_RESPONSE =
   'No, each remote is for a single unit.';
 
+const EXTRA_LINENS_TOWELS_FOLLOW_UP =
+  'If you cannot find them, feel free to let us know.';
+
 export class GuestMessagingAgent {
   constructor(options = {}) {
     this.llm = options.llmAdapter || createLLMAdapter(options.llm || 'auto');
@@ -376,6 +379,13 @@ export class GuestMessagingAgent {
       if (sofaLinensPolicy.proposedResponse) {
         parsed.proposedResponse = sofaLinensPolicy.proposedResponse;
       }
+      shouldReply = true;
+    }
+
+    const extraLinensTowelsPolicy = this._applyExtraLinensTowelsPolicy(parsed, context, guestMessage);
+    if (extraLinensTowelsPolicy.applied) {
+      parsed.typeOfMessageReceived = extraLinensTowelsPolicy.typeOfMessageReceived || 'EXTRA_LINENS_TOWELS';
+      parsed.proposedResponse = extraLinensTowelsPolicy.proposedResponse;
       shouldReply = true;
     }
 
@@ -981,6 +991,63 @@ export class GuestMessagingAgent {
       applied: true,
       typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS',
       proposedResponse: wrongCategory || needsStorageDetail ? proposedResponse : undefined
+    };
+  }
+
+  _isExtraLinensTowelsInStayAsk(guestMessage = '', context = {}) {
+    if (this._isPreArrivalSofaLinensAsk(guestMessage, context)) {
+      return false;
+    }
+
+    const lower = (guestMessage || '').toLowerCase();
+    const towelOrLinenAsk =
+      /\b(?:towels?|linens?|sheets?|blankets?|pillows?|wash\s*cloths?)\b/.test(lower) &&
+      /\b(?:more|extra|additional|another|where|find|stored|available|are there|do you have|in the unit|under)\b/.test(lower);
+
+    const sofaBedContext =
+      /\b(?:sofa|couch|sofa bed|bedroom)\b/.test(lower) ||
+      /\b(?:more|extra|additional)\b.{0,40}\b(?:towels?|linens?)\b/.test(lower);
+
+    return towelOrLinenAsk && sofaBedContext;
+  }
+
+  /**
+   * In-stay extra towels/linens replies must include a follow-up offer if the guest cannot find them.
+   */
+  _applyExtraLinensTowelsPolicy(parsed, context = {}, guestMessage = '') {
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const isCategory = categories.includes('EXTRA_LINENS_TOWELS');
+    const isAsk = this._isExtraLinensTowelsInStayAsk(guestMessage, context);
+
+    if (!isCategory && !isAsk) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    if (!draft || draft === 'none') {
+      return { applied: false };
+    }
+
+    const lower = draft.toLowerCase();
+    const hasLocationGuidance =
+      /lift up|under the sofa|under there|storage compartment|reveal/.test(lower);
+    const hasFollowUp =
+      /let (?:us|me) know/.test(lower) ||
+      /feel free/.test(lower) ||
+      /cannot find|can't find/.test(lower);
+
+    if (!hasLocationGuidance || hasFollowUp) {
+      return { applied: false };
+    }
+
+    const proposedResponse = `${draft.replace(/\s+$/, '')} ${EXTRA_LINENS_TOWELS_FOLLOW_UP}`;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
+      proposedResponse,
     };
   }
 
@@ -2363,6 +2430,13 @@ export class GuestMessagingAgent {
       if (sofaLinensPolicyFinal.proposedResponse) {
         finalResult.proposedResponse = sofaLinensPolicyFinal.proposedResponse;
       }
+      finalResult.shouldReply = true;
+    }
+
+    const extraLinensTowelsPolicyFinal = this._applyExtraLinensTowelsPolicy(finalResult, enrichedContext, guestMessage);
+    if (extraLinensTowelsPolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = extraLinensTowelsPolicyFinal.typeOfMessageReceived || 'EXTRA_LINENS_TOWELS';
+      finalResult.proposedResponse = extraLinensTowelsPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
     }
 

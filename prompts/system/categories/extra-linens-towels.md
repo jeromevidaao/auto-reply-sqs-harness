@@ -30,9 +30,15 @@ When the guest is **already in the unit** and asks where to find extra towels, s
 - **ONLY** for Apt 2 and Apt 3 (2-bedroom units with sofa beds). **NOT** for Studio (1B) — use **STUDIO_FUTON_BLANKET** for the studio futon instead.
 - This is different from pre-arrival capacity questions (**SLEEPING_ARRANGEMENTS** / **SLEEPING_ACCOMMODATION**).
 
-**Required reply content** (from production — include lift-up instructions):
-"For the extra guests, we have linens available on the sofa bed. You need to lift up the long part of the sofa to reveal the linens as well as the extra two towels and wash cloths. They should be stored right under there. Let me know if you can find them!"
+**Required reply content** (from production — include lift-up instructions **and** a follow-up offer):
+- **MUST** tell them where extra towels/linens are (under the sofa bed — lift up the long part of the sofa).
+- **MUST** end with an offer to help if they cannot find them — e.g. "If you cannot find them, feel free to let us know."
+
+**Example tones** (facts matter more than exact words):
+"For the extra guests, we have linens available on the sofa bed. You need to lift up the long part of the sofa to reveal the linens as well as the extra two towels and wash cloths. They should be stored right under there. If you cannot find them, feel free to let us know."
+
+"Good evening, Sean, yes there are extra clean towels under the sofa bed. Lift up the long part of the sofa to reveal them along with the linens. If you cannot find them, feel free to let us know."
 
 **Recognition cues for in-stay EXTRA_LINENS_TOWELS**:
-- "we are in the apartment", "we're here", "checked in", "can't find", "where are the sheets"
+- "we are in the apartment", "we're here", "checked in", "can't find", "where are the sheets", "more clean towels", "in the unit"
 - AND asking about sofa bed linens / extra towels
