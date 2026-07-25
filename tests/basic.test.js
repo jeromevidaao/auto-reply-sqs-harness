@@ -791,6 +791,242 @@ describe('THANK_YOU_MESSAGE repeat allowance (no LLM)', () => {
   });
 });
 
+describe('Judge rewrite quality loop (no real LLM)', () => {
+  it('builds rewrite prompt with critique + tool ground truth', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const prompt = agent._buildJudgeRewritePrompt(
+      {
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: "Good morning, Olivia, You're welcome!",
+      },
+      {
+        verdict: 'REVISE',
+        issues: ['Repeated recent host greeting'],
+        rewriteBrief: 'Strip Good morning; keep short You\'re welcome only',
+        notes: 'greeting repeat',
+      },
+      { conversationContext: { recentHostGreeting: true } },
+      { originalMessage: 'Thanks for the quick response!' }
+    );
+    assert.match(prompt, /REWRITE TASK/);
+    assert.match(prompt, /Repeated recent host greeting/);
+    assert.match(prompt, /Strip Good morning/);
+    assert.match(prompt, /TOOL RESULTS/);
+    assert.match(prompt, /Thanks for the quick response/);
+  });
+
+  it('rewriteFromJudgeCritique returns improved proposedResponse', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: {
+        complete: async () => JSON.stringify({
+          typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+          proposedResponse: "You're welcome, Olivia!",
+          shouldReply: true,
+        }),
+      },
+    });
+    const rewritten = await agent.rewriteFromJudgeCritique(
+      { typeOfMessageReceived: 'THANK_YOU_MESSAGE', proposedResponse: 'Good morning, Olivia, You\'re welcome!' },
+      { verdict: 'REVISE', issues: ['Repeated recent host greeting'], rewriteBrief: 'Strip greeting' },
+      {},
+      { originalMessage: 'Thanks!' }
+    );
+    assert.ok(rewritten);
+    assert.equal(rewritten.proposedResponse, "You're welcome, Olivia!");
+  });
+
+  it('runs critique → llm rewrite → verify and sends rewritten text', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      enableConversationJudge: true,
+      enableJudgeRewriteLoop: true,
+      requireLiveConversationHistory: false,
+      llmAdapter: {
+        complete: async (system) => {
+          const s = String(system || '');
+          if (s.includes('VERIFY pass')) {
+            return JSON.stringify({
+              verdict: 'APPROVE',
+              issues: [],
+              notes: 'rewrite fixed greeting',
+              confidence: 1,
+            });
+          }
+          if (s.includes('conversation quality reviewer')) {
+            return JSON.stringify({
+              verdict: 'REVISE',
+              issues: ['Repeated recent host greeting'],
+              rewriteBrief: "Strip Good morning greeting; use only You're welcome, Olivia!",
+              notes: 'greeting repeat',
+              confidence: 0.9,
+            });
+          }
+          if (s.includes('rewriting')) {
+            return JSON.stringify({
+              typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+              proposedResponse: "You're welcome, Olivia!",
+              shouldReply: true,
+            });
+          }
+          return JSON.stringify({
+            typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+            proposedResponse: "Good morning, Olivia, You're welcome!",
+            shouldReply: true,
+            confidence: 1,
+          });
+        },
+      },
+    });
+
+    const result = await agent.handleMessage('Thanks for the quick response!', {
+      guestName: 'Olivia',
+      conversationHistory: [],
+    });
+
+    assert.equal(result.judgeRewrite?.source, 'llm_rewrite');
+    assert.match(result.proposedResponse, /you're welcome, olivia/i);
+    assert.ok(!/good morning/i.test(result.proposedResponse));
+    assert.equal(result.conversationJudge?.verdict, 'APPROVE');
+    assert.equal(result.conversationJudgeCritique?.verdict, 'REVISE');
+    assert.equal(result.judgePasses?.length, 2);
+    assert.equal(result.judgePasses[0].pass, 'critique');
+    assert.equal(result.judgePasses[1].pass, 'verify');
+    assert.equal(result.shouldReply, true);
+  });
+
+  it('falls back to judge revisedResponse when rewrite loop is disabled', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      enableConversationJudge: true,
+      enableJudgeRewriteLoop: false,
+      requireLiveConversationHistory: false,
+      llmAdapter: {
+        complete: async (system) => {
+          const s = String(system || '');
+          if (s.includes('conversation quality reviewer')) {
+            return JSON.stringify({
+              verdict: 'REVISE',
+              issues: ['Repetitive greeting'],
+              revisedResponse: "You're welcome, Sam!",
+              notes: 'fixed',
+            });
+          }
+          if (s.includes('rewriting')) {
+            throw new Error('rewrite should not run when loop disabled');
+          }
+          return JSON.stringify({
+            typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+            proposedResponse: 'Good morning, Sam, You are welcome and looking forward!',
+            shouldReply: true,
+            confidence: 1,
+          });
+        },
+      },
+    });
+
+    const result = await agent.handleMessage('Thanks!', {
+      guestName: 'Sam',
+      conversationHistory: [],
+    });
+
+    assert.equal(result.judgeRewrite?.source, 'judge_revisedResponse');
+    assert.equal(result.proposedResponse, "You're welcome, Sam!");
+    assert.equal(result.judgePasses?.length, 1);
+    assert.ok(!result.conversationJudgeVerify);
+  });
+
+  it('prefers deterministic_guard revisedResponse over llm rewrite when guard fires', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: {
+        complete: async (system) => {
+          if (String(system || '').includes('rewriting')) {
+            throw new Error('llm rewrite should not run when deterministic_guard supplies text');
+          }
+          return '{}';
+        },
+      },
+    });
+
+    const msg = 'Thank you so much! I appreciate your prompt response! We are super excited!';
+    const badDecision = {
+      typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+      proposedResponse: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and parking and the pet fee.',
+      shouldReply: true,
+    };
+    const ctx = {
+      guestName: 'Rene',
+      originalMessage: msg,
+      conversationHistory: [
+        { sender_type: 'host', body: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and parking.' },
+      ],
+      conversationTraces: { recentWelcomeSent: true, hasRecentHostMessage: true },
+    };
+
+    const guarded = agent._applyDeterministicJudgeGuards(
+      { verdict: 'APPROVE', notes: 'LLM missed it' },
+      badDecision,
+      ctx,
+      msg
+    );
+    assert.equal(guarded.verdict, 'REVISE');
+    assert.equal(guarded.deterministicGuard, true);
+    assert.match(guarded.revisedResponse, /you're welcome, rene/i);
+
+    // Same selection rules as handleMessage quality loop (no second LLM rewrite).
+    let candidateText = null;
+    let rewriteMeta = null;
+    if (guarded.deterministicGuard && guarded.revisedResponse) {
+      candidateText = guarded.revisedResponse;
+      rewriteMeta = { source: 'deterministic_guard', proposedResponse: candidateText };
+    }
+    assert.equal(rewriteMeta.source, 'deterministic_guard');
+    assert.equal(candidateText, guarded.revisedResponse);
+  });
+
+  it('post-welcome thank-you still strips logistics with rewrite loop enabled', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      enableConversationJudge: true,
+      enableJudgeRewriteLoop: true,
+      requireLiveConversationHistory: false,
+      llmAdapter: {
+        complete: async (system) => {
+          const s = String(system || '');
+          if (s.includes('VERIFY pass') || s.includes('conversation quality reviewer')) {
+            return JSON.stringify({ verdict: 'APPROVE', issues: [], notes: 'ok', confidence: 1 });
+          }
+          return JSON.stringify({
+            typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+            proposedResponse: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and parking and the pet fee.',
+            shouldReply: true,
+            confidence: 1,
+          });
+        },
+      },
+    });
+
+    const result = await agent.handleMessage(
+      'Thank you so much! I appreciate your prompt response! We are super excited!',
+      {
+        guestName: 'Rene',
+        conversationHistory: [
+          { sender_type: 'host', body: 'Good afternoon, Rene, Check-in is at 4pm with self-check-in and parking.' },
+        ],
+        conversationTraces: { recentWelcomeSent: true, hasRecentHostMessage: true },
+      }
+    );
+
+    assert.match(result.proposedResponse, /you're welcome, rene/i);
+    assert.ok(!/4\s*pm|self-check-in|pet fee/i.test(result.proposedResponse));
+    assert.equal(result.shouldReply, true);
+  });
+});
+
 describe('Conversation history hard-fail (no LLM)', () => {
   it('throws ConversationHistoryRequiredError when live fetch fails and history is required', async () => {
     const { ConversationContextTool } = await import('../src/tools/conversation/ConversationContextTool.js');

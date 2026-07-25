@@ -65,6 +65,7 @@ This document tracks the concrete next steps for the harness. We will grow it it
   - Supports either a dedicated SNS topic (`URGENT_ACCESS_SNS_TOPIC_ARN`) — recommended when notifying multiple people
   - Or direct phone number(s) via `URGENT_ACCESS_PHONE_NUMBER` (comma-separated, e.g. +16462043958,+15086676477)
   - Currently configured for Jerome (646-204-3958) and Ruby (508-667-6477)
+- [x] **Judge quality iteration loop** (category-agnostic): critique → one rewrite from issues/tools → verify (max 1 rewrite). `enableJudgeRewriteLoop` default on. Traces: `judgePasses`, `judgeRewrite`, `conversationJudgeCritique` / `conversationJudgeVerify`.
 - Tool results and safety traces (pre-approval, recent host activity, unit readiness) available earlier in the pipeline
 - Next: Continue moving remaining old production safety logic (full duplicate checks, more pre-approval details) into the tool layer
 - Goal: Highest quality responses by ensuring every pass (main + reflection + judge) has the best possible traces and tool outputs
@@ -72,6 +73,7 @@ This document tracks the concrete next steps for the harness. We will grow it it
 - [x] Added preapproved-inquiry-fastpath golden that exercises early pre-approval trace injection into the first LLM pass
 - [x] Significantly enhanced ConversationContextTool with stronger live duplicate/recent host message checking (actively fetches via Hospitable when possible + content similarity heuristic)
 - Add more goldens specifically testing multipass behavior (recent host suppression, judge forcing revisions based on traces)
+- Next: structured Fact Pack for tool/KB ground truth feeding the rewrite pass (still category-agnostic)
 
 ### D. Welcome Message Logic
 - [x] Basic NEW_RESERVATION_WELCOME + pet mismatch golden added and passing

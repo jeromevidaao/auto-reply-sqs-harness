@@ -66,6 +66,11 @@ export class GuestMessagingAgent {
     // when enabled. This gives strong protection against repetition and bad cancellation answers.
     this.enableConversationJudge = options.enableConversationJudge !== false; // on by default
 
+    // Quality iteration: judge critique → one rewrite from issues → judge verify (max 1 rewrite).
+    // Category-agnostic; works for multi-intent, truth, tone, and thread consistency.
+    // Default on whenever the Conversation Judge is on. Set false to restore "judge rewrites once" only.
+    this.enableJudgeRewriteLoop = options.enableJudgeRewriteLoop !== false;
+
     // Production Lambda sets hospitableClient; live history is required by default there.
     // Eval/simulator pass requireLiveConversationHistory: false to use scenario-provided history.
     this.hospitableClient = options.hospitableClient || null;
@@ -2506,22 +2511,115 @@ export class GuestMessagingAgent {
         originalMessage: guestMessage,
       };
 
-      let judgeResult = await this.runConversationJudge(finalDecision, toolResults, judgeContext);
+      // === Quality iteration loop (category-agnostic) ===
+      // 1) Critique pass  2) one rewrite from issues/tool ground truth  3) verify pass (no second rewrite)
+      let judgeResult = await this.runConversationJudge(finalDecision, toolResults, judgeContext, { pass: 'critique' });
       judgeResult = this._applyDeterministicJudgeGuards(judgeResult, finalDecision, judgeContext, guestMessage);
 
       finalResult.conversationJudge = judgeResult;
+      finalResult.conversationJudgeCritique = judgeResult;
+      finalResult.judgePasses = [{ pass: 'critique', verdict: judgeResult.verdict, notes: judgeResult.notes, issues: judgeResult.issues }];
 
-      if (judgeResult.verdict === 'REVISE' && judgeResult.revisedResponse) {
-        console.log('[Agent] Conversation Judge requested revision');
-        finalResult.typeOfMessageReceived = finalDecision.typeOfMessageReceived;
-        finalResult.proposedResponse = judgeResult.revisedResponse;
-        finalResult.judgeNotes = judgeResult.notes;
-      } else if (judgeResult.verdict === 'REJECT') {
+      if (judgeResult.verdict === 'REJECT') {
         console.log('[Agent] Conversation Judge rejected the response');
         finalResult.shouldReply = false;
         finalResult.proposedResponse = 'none';
         finalResult.escalated = true;
         finalResult.judgeNotes = judgeResult.notes;
+      } else if (judgeResult.verdict === 'REVISE') {
+        console.log('[Agent] Conversation Judge requested revision (quality iteration)');
+        const decisionForRewrite = {
+          typeOfMessageReceived: finalResult.typeOfMessageReceived || finalDecision.typeOfMessageReceived,
+          proposedResponse: finalResult.proposedResponse || finalDecision.proposedResponse,
+          shouldReply: finalResult.shouldReply,
+          confidence: finalResult.confidence,
+        };
+
+        let candidateText = null;
+        let rewriteMeta = null;
+
+        // Deterministic guards already produced a safe rewrite — prefer that over another LLM call.
+        if (judgeResult.deterministicGuard && judgeResult.revisedResponse) {
+          candidateText = judgeResult.revisedResponse;
+          rewriteMeta = { source: 'deterministic_guard', proposedResponse: candidateText };
+          console.log('[Agent] → Rewrite source: deterministic_guard');
+        } else if (this.enableJudgeRewriteLoop) {
+          const rewritten = await this.rewriteFromJudgeCritique(
+            decisionForRewrite,
+            judgeResult,
+            toolResults,
+            judgeContext
+          );
+          if (rewritten?.proposedResponse && rewritten.proposedResponse !== 'none') {
+            candidateText = rewritten.proposedResponse;
+            rewriteMeta = { source: 'llm_rewrite', ...rewritten };
+            if (rewritten.typeOfMessageReceived) {
+              finalResult.typeOfMessageReceived = rewritten.typeOfMessageReceived;
+            }
+            console.log('[Agent] → Rewrite source: llm_rewrite');
+          }
+        }
+
+        // Fallback: judge-authored revisedResponse (legacy / when rewrite loop off or rewrite failed)
+        if (!candidateText && judgeResult.revisedResponse) {
+          candidateText = judgeResult.revisedResponse;
+          rewriteMeta = rewriteMeta || { source: 'judge_revisedResponse', proposedResponse: candidateText };
+          console.log('[Agent] → Rewrite source: judge_revisedResponse (fallback)');
+        }
+
+        if (candidateText) {
+          finalResult.proposedResponse = candidateText;
+          finalResult.judgeRewrite = rewriteMeta;
+          finalResult.judgeNotes = judgeResult.notes;
+
+          // Verify pass: one check only — may APPROVE, light REVISE (apply text), or REJECT (escalate).
+          // No second rewrite loop (latency + cost bound).
+          if (this.enableJudgeRewriteLoop) {
+            const verifyDecision = {
+              typeOfMessageReceived: finalResult.typeOfMessageReceived,
+              proposedResponse: finalResult.proposedResponse,
+              shouldReply: true,
+              confidence: finalResult.confidence ?? 1.0,
+            };
+            let verifyResult = await this.runConversationJudge(
+              verifyDecision,
+              toolResults,
+              judgeContext,
+              { pass: 'verify' }
+            );
+            verifyResult = this._applyDeterministicJudgeGuards(
+              verifyResult,
+              verifyDecision,
+              judgeContext,
+              guestMessage
+            );
+            finalResult.conversationJudgeVerify = verifyResult;
+            finalResult.conversationJudge = verifyResult;
+            finalResult.judgePasses.push({
+              pass: 'verify',
+              verdict: verifyResult.verdict,
+              notes: verifyResult.notes,
+              issues: verifyResult.issues,
+            });
+
+            if (verifyResult.verdict === 'REJECT') {
+              console.log('[Agent] Conversation Judge VERIFY rejected rewritten response — escalating');
+              finalResult.shouldReply = false;
+              finalResult.proposedResponse = 'none';
+              finalResult.escalated = true;
+              finalResult.judgeNotes = [judgeResult.notes, verifyResult.notes].filter(Boolean).join(' | ');
+            } else if (verifyResult.verdict === 'REVISE' && verifyResult.revisedResponse) {
+              console.log('[Agent] Conversation Judge VERIFY requested final light revise (no second rewrite)');
+              finalResult.proposedResponse = verifyResult.revisedResponse;
+              finalResult.judgeNotes = [judgeResult.notes, verifyResult.notes].filter(Boolean).join(' | ');
+            } else {
+              console.log('[Agent] Conversation Judge VERIFY approved rewritten response');
+            }
+          }
+        } else {
+          console.warn('[Agent] Conversation Judge REVISE but no candidate rewrite text — keeping original draft');
+          finalResult.judgeNotes = judgeResult.notes;
+        }
       } else {
         console.log('[Agent] Conversation Judge approved original decision');
       }
@@ -2916,24 +3014,123 @@ export class GuestMessagingAgent {
     };
   }
 
-  async runConversationJudge(firstDecision, toolResults = {}, context = {}) {
+  /**
+   * One-shot rewrite after a Conversation Judge REVISE.
+   * Uses judge issues/rewriteBrief + tool ground truth — category-agnostic quality iteration.
+   * Returns null on failure so the caller can fall back to judge.revisedResponse.
+   */
+  async rewriteFromJudgeCritique(firstDecision, judgeResult = {}, toolResults = {}, context = {}) {
+    const rewritePrompt = this._buildJudgeRewritePrompt(firstDecision, judgeResult, toolResults, context);
+    try {
+      const raw = await this.llm.complete(
+        'You are rewriting a short-term rental host reply for a real guest. Fix only the judge issues. Stay grounded in tool/property facts. Sound warm and human. Return ONLY valid JSON.',
+        rewritePrompt
+      );
+
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const match = raw && raw.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]);
+      }
+
+      const text = (parsed?.proposedResponse || parsed?.revisedResponse || '').trim();
+      if (!text || text === 'none') {
+        console.warn('[Agent] Judge rewrite returned no usable proposedResponse');
+        return null;
+      }
+
+      return {
+        proposedResponse: text,
+        typeOfMessageReceived: parsed.typeOfMessageReceived || firstDecision.typeOfMessageReceived,
+        shouldReply: parsed.shouldReply !== false,
+        notes: parsed.notes || null,
+      };
+    } catch (err) {
+      console.error('[Agent] Judge rewrite call failed:', err.message);
+      return null;
+    }
+  }
+
+  _buildJudgeRewritePrompt(firstDecision, judgeResult = {}, toolResults = {}, context = {}) {
+    const lines = [];
+    lines.push('=== REWRITE TASK (quality iteration — one pass only) ===');
+    lines.push('A Conversation Judge rejected the draft quality and asked for a REVISE.');
+    lines.push('Rewrite the host reply so it fixes EVERY listed issue while remaining natural and human.');
+    lines.push('');
+    lines.push('Hard rules:');
+    lines.push('- Ground every factual claim in TOOL RESULTS / property knowledge only. Do not invent availability, codes, policies, or amenities.');
+    lines.push('- If the guest had multiple intents (thanks + question(s), or several questions), address ALL of them in one combined reply.');
+    lines.push('- Prefer multi-category arrays in typeOfMessageReceived when multiple intents apply.');
+    lines.push('- Do not re-introduce issues the judge already called out (repetition, contradictions, robotic greetings, deferral when facts are known, etc.).');
+    lines.push('- Keep the reply concise. Warm, not corporate.');
+    lines.push('- Output JSON only, no markdown fences.');
+    lines.push('');
+    lines.push('=== ORIGINAL GUEST MESSAGE ===');
+    lines.push(context.originalMessage || 'Not provided');
+    lines.push('');
+    lines.push('=== PRIOR DRAFT (to improve) ===');
+    lines.push(JSON.stringify(firstDecision, null, 2));
+    lines.push('');
+    lines.push('=== JUDGE CRITIQUE ===');
+    lines.push(JSON.stringify({
+      verdict: judgeResult.verdict,
+      issues: judgeResult.issues || [],
+      rewriteBrief: judgeResult.rewriteBrief || null,
+      notes: judgeResult.notes || null,
+      // Optional full rewrite from judge — use as a strong hint, not the only option
+      judgeSuggestedRevisedResponse: judgeResult.revisedResponse || null,
+    }, null, 2));
+    lines.push('');
+
+    if (toolResults && Object.keys(toolResults).length > 0) {
+      lines.push('=== TOOL RESULTS (ground truth) ===');
+      lines.push(JSON.stringify(toolResults, null, 2));
+      lines.push('');
+    }
+
+    if (context.conversationHistory?.length) {
+      lines.push('=== RECENT CONVERSATION HISTORY (newest last) ===');
+      context.conversationHistory.slice(-8).forEach((m) => {
+        const who = m.sender_type === 'guest' ? 'Guest' : 'Host';
+        lines.push(`${who}: ${m.body}`);
+      });
+      lines.push('');
+    }
+
+    lines.push('=== REQUIRED OUTPUT JSON ===');
+    lines.push(JSON.stringify({
+      typeOfMessageReceived: 'CATEGORY or [array of categories]',
+      proposedResponse: 'the full improved reply to send the guest',
+      shouldReply: true,
+      notes: 'what you fixed',
+    }, null, 2));
+
+    return lines.join('\n');
+  }
+
+  async runConversationJudge(firstDecision, toolResults = {}, context = {}, options = {}) {
     if (!this.enableConversationJudge) {
       return { verdict: 'APPROVE', notes: 'Conversation Judge disabled' };
     }
 
+    const pass = options.pass === 'verify' ? 'verify' : 'critique';
     const category = Array.isArray(firstDecision.typeOfMessageReceived)
       ? firstDecision.typeOfMessageReceived[0]
       : firstDecision.typeOfMessageReceived;
 
     // With very low volume (4-5 messages/day), we run the judge on every message
     // when enabled. The category check is now mostly informational.
-    console.log('[Agent] Running Conversation Judge for category:', category);
+    console.log(`[Agent] Running Conversation Judge (${pass}) for category:`, category);
 
-    const judgePrompt = await this._buildConversationJudgePrompt(firstDecision, toolResults, context);
+    const judgePrompt = await this._buildConversationJudgePrompt(firstDecision, toolResults, context, { pass });
 
     try {
       const raw = await this.llm.complete(
-        'You are an expert conversation quality reviewer. Your only job is to catch repetitive or inconsistent responses from an AI host.',
+        pass === 'verify'
+          ? 'You are an expert conversation quality reviewer on a VERIFY pass. Check whether a rewritten host reply fixed the prior issues. Be strict on remaining truth, coverage, and human tone problems.'
+          : 'You are an expert conversation quality reviewer. Your only job is to catch repetitive, ungrounded, incomplete, or inconsistent responses from an AI host. Prefer clear issues + rewriteBrief over only rewriting yourself.',
         judgePrompt
       );
 
@@ -2946,21 +3143,22 @@ export class GuestMessagingAgent {
       }
 
       if (!parsed || !parsed.verdict) {
-        console.warn('[Agent] Conversation Judge returned invalid output. Approving original.');
-        return { verdict: 'APPROVE', notes: 'Invalid judge output' };
+        console.warn(`[Agent] Conversation Judge (${pass}) returned invalid output. Approving original.`);
+        return { verdict: 'APPROVE', notes: 'Invalid judge output', pass };
       }
 
-      console.log('[Agent] Conversation Judge verdict:', parsed.verdict);
-
+      console.log(`[Agent] Conversation Judge (${pass}) verdict:`, parsed.verdict);
+      parsed.pass = pass;
       return parsed;
 
     } catch (err) {
-      console.error('[Agent] Conversation Judge call failed:', err.message);
-      return { verdict: 'APPROVE', notes: 'Judge call failed - using original decision' };
+      console.error(`[Agent] Conversation Judge (${pass}) call failed:`, err.message);
+      return { verdict: 'APPROVE', notes: 'Judge call failed - using original decision', pass };
     }
   }
 
-  async _buildConversationJudgePrompt(firstDecision, toolResults, context) {
+  async _buildConversationJudgePrompt(firstDecision, toolResults, context, options = {}) {
+    const pass = options.pass === 'verify' ? 'verify' : 'critique';
     const lines = [];
 
     try {
@@ -2972,11 +3170,26 @@ export class GuestMessagingAgent {
       lines.push('You are an expert at detecting repetitive AI behavior and contradictions in conversations. Be strict.');
     }
 
+    if (pass === 'verify') {
+      lines.push('=== VERIFY PASS (quality iteration) ===');
+      lines.push('You are reviewing a REWRITTEN reply after a prior REVISE. Decide APPROVE / REVISE / REJECT.');
+      lines.push('- APPROVE if prior issues are fixed and the reply is grounded, complete, and natural.');
+      lines.push('- REVISE only for remaining clear defects; set revisedResponse to the final sendable text (no further rewrite loop will run).');
+      lines.push('- REJECT if still unsafe, contradictory, or fabricated.');
+      lines.push('Do not re-litigate style nits if truth and intent coverage are solid.');
+      lines.push('');
+    } else {
+      lines.push('=== CRITIQUE PASS (quality iteration) ===');
+      lines.push('Focus on diagnosing issues. Prefer detailed issues[] + rewriteBrief so a separate rewrite pass can fix them.');
+      lines.push('You MAY still set revisedResponse as a strong fallback, but rewriteBrief is preferred for the iteration loop.');
+      lines.push('');
+    }
+
     lines.push('=== ORIGINAL GUEST MESSAGE ===');
     lines.push(context.originalMessage || 'Not provided');
     lines.push('');
 
-    lines.push('=== FIRST DRAFT DECISION ===');
+    lines.push(pass === 'verify' ? '=== CANDIDATE REPLY UNDER REVIEW ===' : '=== FIRST DRAFT DECISION ===');
     lines.push(JSON.stringify(firstDecision, null, 2));
     lines.push('');
 

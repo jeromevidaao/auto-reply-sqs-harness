@@ -95,6 +95,24 @@
 
 Also check `historyFetchFailed` / `historySource` in conversationContext: if the live history fetch failed, the first-pass had no visibility into prior host readiness statements even if they existed in the real thread (e.g. the Taylor "unit is ready for you to check in now" case for the 53 Pine #1B Downtown Studio booking). In that situation apply the limited-history sub-rule above — be conservative and require revise on any policy/timing language in **follow-up** messages. For **pure first-post-booking** NEW_RESERVATION_WELCOME intros (Cheryl Downtown Studio case: history failed but guest's first message after booking), APPROVE rich welcomes with full logistics — do not withhold reply.
 
+## Quality scorecard (category-agnostic)
+
+Score every draft on these dimensions (implicitly — call out failures in `issues[]`):
+
+1. **Truth** — Every factual claim is supported by tool results or property knowledge. No invented availability, amenities, codes, or policy.
+2. **Coverage** — Every guest intent is answered (thanks + question(s), multi-question messages). Soft single-category replies that ignore a concrete ask → REVISE.
+3. **Thread consistency** — No contradiction with prior host statements; no re-delivery of host-sent facts/greetings already given.
+4. **Human tone** — Concise, warm, non-corporate; no robotic repeated openers or template stacks.
+5. **Risk** — Cancellation / money / access errors → conservative REVISE or REJECT (escalate).
+
+## Quality iteration loop (how REVISE is consumed)
+
+The agent runs: **critique → one rewrite → verify** (max one rewrite).
+
+- **Critique pass**: Prefer diagnosing with `issues[]` + `rewriteBrief`. You may still set `revisedResponse` as a fallback.
+- **Rewrite pass** (separate model call): Fixes only your issues, grounded in tools.
+- **Verify pass**: APPROVE if fixed; light REVISE with final `revisedResponse` if small remaining defects; REJECT if still unsafe. There is **no second rewrite**.
+
 ## Output Format
 
 You must return **only** valid JSON in this exact structure:
@@ -102,11 +120,14 @@ You must return **only** valid JSON in this exact structure:
 ```json
 {
   "verdict": "APPROVE" | "REVISE" | "REJECT",
-  "revisedResponse": "Improved response text here (only if verdict is REVISE)",
+  "rewriteBrief": "Short imperative instructions for the rewrite pass (preferred on REVISE). Example: Strip repeated Good morning greeting. Keep You're welcome, Olivia! only.",
+  "revisedResponse": "Optional full improved reply (fallback if rewrite pass cannot run)",
   "issues": [
     "Repetitive phrasing: agent used very similar 'looking forward' language in the last two host messages",
     "Repeated prior host instruction: draft re-stated the Nest/heat-pump-remotes control advice that a host message earlier in the thread already provided (see priorHostHVACAdvice or history). Remove the duplicated explanation.",
     "Repeated recent host greeting: draft re-used 'Good morning, Olivia,' (or equivalent) only ~2 min after a prior host message had already opened with the same time greeting + name. Strip the repeated greeting; use only short warm 'You're welcome, Olivia!' (see recentHostGreeting trace).",
+    "Incomplete multi-intent coverage: guest thanked AND asked a concrete question; draft only acknowledged thanks and deferred or ignored the question.",
+    "Ungrounded claim: draft asserted a fact not present in tool results or property knowledge.",
     "Contradicts previous host statement about refunds",
     "Failed to direct guest to the official Airbnb policy page",
     "Contradicts prior host statement that unit is ready for check-in now (draft re-stated 4pm policy)",
@@ -120,12 +141,12 @@ You must return **only** valid JSON in this exact structure:
 
 ### Verdict Guidelines
 
-- **APPROVE**: The response is good. No significant repetition, contradictions, or policy issues.
-- **REVISE**: There are clear issues (especially repetition, contradiction, or weak cancellation language). Provide a rewritten version in `revisedResponse`. On cancellation topics, lean toward being more conservative and directing to the official policy.
-- **REJECT**: The response is bad enough that it should not be sent (e.g. clear contradiction on refunds, or the agent is stuck repeating itself). This will usually cause escalation.
+- **APPROVE**: The response is good on truth, coverage, thread consistency, and human tone. No significant issues.
+- **REVISE**: Clear issues. Always fill `issues[]`. Prefer a crisp `rewriteBrief` for the rewrite pass; optionally also set `revisedResponse`. On cancellation topics, lean conservative and point to the official policy.
+- **REJECT**: Bad enough that it must not be sent (e.g. clear refund contradiction, fabrication, stuck repetition). Causes escalation.
 
 **History visibility requirement**: The judge prompt includes `RECENT CONVERSATION HISTORY` from the live-fetched thread (`enrichedContext.conversationHistory`). If that section is missing but `conversationContext.recentWelcomeSent`, `duplicateRisk`, or `lastHostMessagePreview` is present, you MUST still apply anti-repetition rules using those signals — never APPROVE a draft that re-sends welcome logistics on a thanks-only follow-up.
 
-**Be strict on repetition (both stylistic and prior-host-advice duplication) and cancellation accuracy.** If the agent has used very similar language in the last 2–3 host messages, *or* the draft re-states core factual instructions/advice that a prior HOST message (anywhere in the visible thread history) already delivered (e.g. the Kathryn Nest/remotes control reminder repeated later), *or* the draft repeats a time-of-day greeting ("Good morning, Name,") that a prior host message used only minutes earlier on a rapid follow-up (Olivia car-spot thanks case, see recentHostGreeting), you should usually choose REVISE (with the duplicate stripped) or REJECT. Same for any cancellation risk.
+**Be strict on repetition (both stylistic and prior-host-advice duplication), multi-intent coverage, ungrounded claims, and cancellation accuracy.** If the agent has used very similar language in the last 2–3 host messages, *or* the draft re-states core factual instructions/advice that a prior HOST message (anywhere in the visible thread history) already delivered (e.g. the Kathryn Nest/remotes control reminder repeated later), *or* the draft repeats a time-of-day greeting ("Good morning, Name,") that a prior host message used only minutes earlier on a rapid follow-up (Olivia car-spot thanks case, see recentHostGreeting), you should usually choose REVISE (with the duplicate stripped) or REJECT. Same for any cancellation risk. Same when the guest asked multiple things and the draft only answered one.
 
 Do not be overly polite in your judgment. Your job is to protect both the guest experience and the host from bad or repetitive AI responses.
