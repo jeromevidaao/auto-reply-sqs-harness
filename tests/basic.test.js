@@ -200,12 +200,34 @@ describe('EventRequestTool (no LLM)', () => {
       msg
     );
     assert.equal(applied.applied, true);
-    assert.equal(applied.typeOfMessageReceived, 'LAUNDRY_QUESTION');
+    // Multi-categorization: thanks + laundry must both be present
+    assert.deepEqual(applied.typeOfMessageReceived, ['THANK_YOU_MESSAGE', 'LAUNDRY_QUESTION']);
+    // Combined final reply: You're welcome + Soap Bubble facts (not deferral)
+    assert.ok(/you'?re welcome/i.test(applied.proposedResponse));
     assert.ok(/do not have laundry on site|no laundry on site/i.test(applied.proposedResponse));
     assert.ok(applied.proposedResponse.includes('Soap Bubble'));
     assert.ok(applied.proposedResponse.includes('68 Pine St'));
     assert.ok(applied.proposedResponse.includes('Portland, ME 04102'));
     assert.ok(!/i'll check|i will check|get back shortly/i.test(applied.proposedResponse));
+    // Expected shape for multi-intent with first-contact greeting preserved from draft
+    assert.match(
+      applied.proposedResponse,
+      /Good morning, Henry! You're welcome\.\s+We do not have laundry on site/i
+    );
+
+    // Laundry-only (no thanks) → single category, no "You're welcome"
+    const laundryOnly = agent._applyLaundryPolicy(
+      {
+        typeOfMessageReceived: 'OTHER_MESSAGE',
+        proposedResponse: 'none',
+      },
+      { guestName: 'Henry' },
+      'Is there laundry on site?'
+    );
+    assert.equal(laundryOnly.applied, true);
+    assert.equal(laundryOnly.typeOfMessageReceived, 'LAUNDRY_QUESTION');
+    assert.ok(laundryOnly.proposedResponse.includes('Soap Bubble'));
+    assert.ok(!/you'?re welcome/i.test(laundryOnly.proposedResponse));
 
     // Detergent questions must not be overwritten by the facilities answer.
     const detergent = agent._applyLaundryPolicy(
@@ -217,6 +239,24 @@ describe('EventRequestTool (no LLM)', () => {
       'What detergent do you use for laundry?'
     );
     assert.equal(detergent.applied, false);
+  });
+
+  it('merges multi-intent categories via _mergeCategories', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    assert.deepEqual(
+      agent._mergeCategories('THANK_YOU_MESSAGE', 'LAUNDRY_QUESTION'),
+      ['THANK_YOU_MESSAGE', 'LAUNDRY_QUESTION']
+    );
+    assert.deepEqual(
+      agent._mergeCategories(['THANK_YOU_MESSAGE', 'LAUNDRY_QUESTION'], 'LAUNDRY_QUESTION'),
+      ['THANK_YOU_MESSAGE', 'LAUNDRY_QUESTION']
+    );
+    assert.equal(agent._mergeCategories(null, 'LAUNDRY_QUESTION'), 'LAUNDRY_QUESTION');
+    assert.equal(agent._hasThankYouIntent('Thanks so much! Is there laundry?'), true);
+    assert.equal(agent._hasThankYouIntent('Is there laundry?'), false);
   });
 
   it('does not stomp luggage reply that already has Richard and phone', () => {

@@ -14,22 +14,26 @@
 - Recommend the laundromat **next door**: **Soap Bubble**, very accessible.
 - Always include the address: **68 Pine St, Portland, ME 04102**.
 - **NEVER** say you will check, look into it, or get back later — answer immediately with the facts above.
-- **NEVER** classify as THANK_YOU_MESSAGE, OTHER_MESSAGE, or escalate when the guest is asking about laundry facilities.
+- **Multi-categorization (required when mixed)**: If the guest also says thanks / excitement / "appreciate", set `typeOfMessageReceived` to an **array** including both intents, e.g. `["THANK_YOU_MESSAGE", "LAUNDRY_QUESTION"]`. Do **not** soft-classify as only `THANK_YOU_MESSAGE`.
+- **Combined reply**: When multi-intent, put a short "You're welcome, [Name]!" (or "You're welcome!") **and** the Soap Bubble laundry facts in the **same** `proposedResponse`.
 - **ALWAYS** set `shouldReply: true`.
 
-**Standard response** (use verbatim; greeting + guest name prefix optional):
+**Standard laundry facts** (always include these words/facts when LAUNDRY_QUESTION applies):
 "We do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102"
 
-**Good example**:
-"Good morning, Henry! We do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102"
+**Good examples**:
+- Laundry only: "Hi Henry, we do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102"
+- Thanks + laundry (Henry): categories `["THANK_YOU_MESSAGE", "LAUNDRY_QUESTION"]` → "You're welcome, Henry! We do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102"
+- With first-contact greeting: "Good morning, Henry! You're welcome. We do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102"
 
 **Anti-patterns (do NOT do these)**:
 - "I'll check on laundry for you and get back shortly."
 - "Let me look into laundry options and get back to you."
 - Offering to do laundry or implying there are on-site machines.
 - Answering only with "You're welcome" and ignoring the laundry question.
+- Classifying as only `THANK_YOU_MESSAGE` when laundry was asked.
 
-**Tone**: Brief, factual, helpful.
+**Tone**: Brief, warm when they thanked you, then factual.
 
 ## LAUNDRY_DETERGENT_QUESTION
 

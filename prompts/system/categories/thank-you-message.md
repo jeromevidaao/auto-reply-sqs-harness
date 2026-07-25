@@ -6,6 +6,7 @@
 - Guest sends a pure thank you with no question attached.
 - Post-checkout or end-of-stay thanks (e.g. "we just checked out and started the dishwasher. Thanks again...").
 - Any courteous "thanks / appreciate / thank you for hosting" that does not require action or information from you.
+- **Multi-intent**: If the guest thanks you **and** also asks a concrete question (laundry, parking, WiFi, etc.), do **not** use only this category. Emit an array including `THANK_YOU_MESSAGE` **plus** the question category (e.g. `["THANK_YOU_MESSAGE", "LAUNDRY_QUESTION"]`) and combine a short "You're welcome" with the full factual answer in one reply.
 
 **Critical Rules**:
 - **DO NOT** use formal greetings like "Good morning", "Good afternoon", or "Good evening".

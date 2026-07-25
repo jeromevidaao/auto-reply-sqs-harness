@@ -1369,9 +1369,56 @@ export class GuestMessagingAgent {
     return true;
   }
 
+  /** True when the guest message includes thanks / appreciation (multi-intent with other asks). */
+  _hasThankYouIntent(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    return /\bthank(?:s| you)\b|\bappreciate(?: it)?\b|\bthx\b/.test(lower);
+  }
+
+  /**
+   * Merge category labels into a string (single) or array (multi). Drops empties/duplicates.
+   * Prefer keeping THANK_YOU_MESSAGE first when present so multi-intent order is readable.
+   * Soft placeholders (OTHER_MESSAGE / UNCATEGORIZED) are dropped once a real content category exists.
+   */
+  _mergeCategories(existing, ...toAdd) {
+    const out = [];
+    const push = (c) => {
+      if (c == null || c === '') return;
+      if (Array.isArray(c)) {
+        c.forEach(push);
+        return;
+      }
+      if (!out.includes(c)) out.push(c);
+    };
+    push(existing);
+    for (const c of toAdd) push(c);
+
+    const softPlaceholders = new Set(['OTHER_MESSAGE', 'UNCATEGORIZED']);
+    const hasRealContent = out.some((c) => !softPlaceholders.has(c));
+    const filtered = hasRealContent ? out.filter((c) => !softPlaceholders.has(c)) : out;
+
+    // Courtesy categories first, then content categories (readable multi-intent arrays).
+    const preferredOrder = (a, b) => {
+      const rank = (x) => (x === 'THANK_YOU_MESSAGE' || x === 'FYI_STATEMENT' ? 0 : 1);
+      return rank(a) - rank(b);
+    };
+    filtered.sort(preferredOrder);
+
+    if (filtered.length === 0) return 'OTHER_MESSAGE';
+    if (filtered.length === 1) return filtered[0];
+    return filtered;
+  }
+
+  _categoriesInclude(existing, category) {
+    const list = Array.isArray(existing) ? existing : [existing];
+    return list.includes(category);
+  }
+
   /**
    * Guests ask if laundry is available on site. Same answer for all three units:
    * no on-site laundry; Soap Bubble laundromat next door at 68 Pine St.
+   * Multi-intent (thanks + laundry): emit both categories and combine "You're welcome"
+   * with the Soap Bubble facts in one reply (Henry incident).
    * Prevents deferral replies like "I'll check on laundry and get back shortly."
    */
   _applyLaundryPolicy(parsed, context = {}, guestMessage = '') {
@@ -1379,31 +1426,71 @@ export class GuestMessagingAgent {
       return { applied: false };
     }
 
+    const guestHasThanks = this._hasThankYouIntent(guestMessage);
     const draft = (parsed.proposedResponse || '').trim();
     const lower = draft.toLowerCase();
-    const alreadyCorrect =
+    const hasLaundryFacts =
       /soap bubble/.test(lower) &&
       /68 pine/.test(lower) &&
-      /do not have laundry on site|no laundry on site|don't have laundry on site|no on-site laundry/.test(lower) &&
-      !/i'll check|i will check|get back shortly|let me check|look into laundry/i.test(lower);
+      /do not have laundry on site|no laundry on site|don't have laundry on site|no on-site laundry/.test(lower);
+    const hasDeferral = /i'll check|i will check|get back shortly|let me check|look into laundry/i.test(lower);
+    const hasThanksAck = /you'?re welcome|you are welcome/i.test(lower);
 
-    if (alreadyCorrect) {
+    const typeOfMessageReceived = this._mergeCategories(
+      // Keep any other content categories the LLM already set; always include laundry (+ thanks when mixed).
+      parsed.typeOfMessageReceived,
+      'LAUNDRY_QUESTION',
+      guestHasThanks ? 'THANK_YOU_MESSAGE' : null
+    );
+
+    // Whether the *incoming* classification already multi-tags correctly (not the merged target).
+    const catsCorrect =
+      this._categoriesInclude(parsed.typeOfMessageReceived, 'LAUNDRY_QUESTION') &&
+      (!guestHasThanks || this._categoriesInclude(parsed.typeOfMessageReceived, 'THANK_YOU_MESSAGE'));
+
+    const textCorrect = hasLaundryFacts && !hasDeferral && (!guestHasThanks || hasThanksAck);
+
+    if (textCorrect && catsCorrect) {
       return { applied: false };
     }
 
-    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
-    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
-    let proposedResponse = LAUNDRY_QUESTION_STANDARD_RESPONSE;
+    // Text already good but multi-cat missing — only fix categories.
+    if (textCorrect && !catsCorrect) {
+      return {
+        applied: true,
+        typeOfMessageReceived,
+        proposedResponse: draft,
+      };
+    }
 
-    if (greetingMatch) {
-      proposedResponse = `${greetingMatch[0].trimEnd()} ${LAUNDRY_QUESTION_STANDARD_RESPONSE.charAt(0).toLowerCase()}${LAUNDRY_QUESTION_STANDARD_RESPONSE.slice(1)}`;
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const laundryBody = LAUNDRY_QUESTION_STANDARD_RESPONSE;
+    const laundryBodyLower =
+      laundryBody.charAt(0).toLowerCase() + laundryBody.slice(1);
+
+    let proposedResponse;
+    if (guestHasThanks) {
+      // Combined multi-intent reply: courtesy + Soap Bubble facts.
+      if (greetingMatch) {
+        // "Good morning, Henry! You're welcome. We do not have laundry..."
+        proposedResponse = `${greetingMatch[0].trimEnd()} You're welcome. ${laundryBody}`;
+      } else if (firstName) {
+        proposedResponse = `You're welcome, ${firstName}! ${laundryBody}`;
+      } else {
+        proposedResponse = `You're welcome! ${laundryBody}`;
+      }
+    } else if (greetingMatch) {
+      proposedResponse = `${greetingMatch[0].trimEnd()} ${laundryBodyLower}`;
     } else if (firstName) {
-      proposedResponse = `Hi ${firstName}, ${LAUNDRY_QUESTION_STANDARD_RESPONSE.charAt(0).toLowerCase()}${LAUNDRY_QUESTION_STANDARD_RESPONSE.slice(1)}`;
+      proposedResponse = `Hi ${firstName}, ${laundryBodyLower}`;
+    } else {
+      proposedResponse = laundryBody;
     }
 
     return {
       applied: true,
-      typeOfMessageReceived: 'LAUNDRY_QUESTION',
+      typeOfMessageReceived,
       proposedResponse,
     };
   }
@@ -1459,6 +1546,13 @@ export class GuestMessagingAgent {
 
     if (this._isTemporaryDepartureDuringStay(message, context)) {
       lines.push('- CRITICAL IN-STAY TEMPORARY DEPARTURE (Amie incident): Guest is currently IN their stay (check-in day or mid-stay, NOT checkout day). They said they "left the apartment/unit" temporarily (e.g. stepped out so a property manager could knock, deliver a blanket, or leave an item by the door). This is NOT checkout and they are returning tonight. Classify as THANK_YOU_MESSAGE. proposedResponse MUST be a brief warm "You\'re welcome, [Name]!" only. MUST NOT say "safe travels", "hope you enjoyed your stay", "have a great trip", or any end-of-stay farewell.');
+    }
+
+    // Multi-intent: thanks/excitement + laundry facilities (Henry incident). Soft single-category thank-you is wrong.
+    if (this._isLaundryFacilitiesQuestion(message) && this._hasThankYouIntent(message)) {
+      lines.push('- CRITICAL MULTI-CATEGORIZATION (thanks + laundry — Henry incident): Guest thanked you / expressed excitement AND asked about laundry. typeOfMessageReceived MUST be the array ["THANK_YOU_MESSAGE", "LAUNDRY_QUESTION"] (not THANK_YOU_MESSAGE alone). proposedResponse MUST combine a short "You\'re welcome, [Name]!" (or "You\'re welcome!") with the full laundry facts in one message: no laundry on site; laundromat next door Soap Bubble; Address: 68 Pine St, Portland, ME 04102. MUST NOT say "I\'ll check on laundry" or "get back shortly". Applies to all three units.');
+    } else if (this._isLaundryFacilitiesQuestion(message)) {
+      lines.push('- CRITICAL LAUNDRY_QUESTION (all units): Guest asked about laundry facilities. Answer immediately: no laundry on site; Soap Bubble next door; 68 Pine St, Portland, ME 04102. shouldReply true. Never defer.');
     }
 
     if (this._isPostStayHousekeepingFeedback(message)) {
