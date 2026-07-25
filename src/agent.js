@@ -26,6 +26,9 @@ const SECURITY_DEPOSIT_STANDARD_RESPONSE =
 const HVAC_REMOTE_PER_UNIT_STANDARD_RESPONSE =
   'No, each remote is for a single unit.';
 
+const LAUNDRY_QUESTION_STANDARD_RESPONSE =
+  'We do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102';
+
 const EXTRA_LINENS_TOWELS_FOLLOW_UP =
   'If you cannot find them, feel free to let us know.';
 
@@ -369,6 +372,14 @@ export class GuestMessagingAgent {
     if (securityDepositPolicy.applied) {
       parsed.typeOfMessageReceived = securityDepositPolicy.typeOfMessageReceived || 'SECURITY_DEPOSIT_QUESTION';
       parsed.proposedResponse = securityDepositPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const laundryPolicy = this._applyLaundryPolicy(parsed, context, guestMessage);
+    if (laundryPolicy.applied) {
+      parsed.typeOfMessageReceived = laundryPolicy.typeOfMessageReceived || 'LAUNDRY_QUESTION';
+      parsed.proposedResponse = laundryPolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -1342,6 +1353,57 @@ export class GuestMessagingAgent {
     return {
       applied: true,
       typeOfMessageReceived: 'SECURITY_DEPOSIT_QUESTION',
+      proposedResponse,
+    };
+  }
+
+  _isLaundryFacilitiesQuestion(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    if (!/\blaundry\b|\blaundromat\b|\bwashing machine\b|\bwasher\b|\bdryer\b/.test(lower)) {
+      return false;
+    }
+    // Detergent / product questions have their own category and standard wording.
+    if (/\bdetergent\b|\bdrying sheets?\b|\bfabric softener\b|\bkirkland\b|\btide\b/.test(lower)) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Guests ask if laundry is available on site. Same answer for all three units:
+   * no on-site laundry; Soap Bubble laundromat next door at 68 Pine St.
+   * Prevents deferral replies like "I'll check on laundry and get back shortly."
+   */
+  _applyLaundryPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isLaundryFacilitiesQuestion(guestMessage)) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+    const alreadyCorrect =
+      /soap bubble/.test(lower) &&
+      /68 pine/.test(lower) &&
+      /do not have laundry on site|no laundry on site|don't have laundry on site|no on-site laundry/.test(lower) &&
+      !/i'll check|i will check|get back shortly|let me check|look into laundry/i.test(lower);
+
+    if (alreadyCorrect) {
+      return { applied: false };
+    }
+
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    let proposedResponse = LAUNDRY_QUESTION_STANDARD_RESPONSE;
+
+    if (greetingMatch) {
+      proposedResponse = `${greetingMatch[0].trimEnd()} ${LAUNDRY_QUESTION_STANDARD_RESPONSE.charAt(0).toLowerCase()}${LAUNDRY_QUESTION_STANDARD_RESPONSE.slice(1)}`;
+    } else if (firstName) {
+      proposedResponse = `Hi ${firstName}, ${LAUNDRY_QUESTION_STANDARD_RESPONSE.charAt(0).toLowerCase()}${LAUNDRY_QUESTION_STANDARD_RESPONSE.slice(1)}`;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'LAUNDRY_QUESTION',
       proposedResponse,
     };
   }
@@ -2421,6 +2483,13 @@ export class GuestMessagingAgent {
     if (securityDepositPolicyFinal.applied) {
       finalResult.typeOfMessageReceived = securityDepositPolicyFinal.typeOfMessageReceived || 'SECURITY_DEPOSIT_QUESTION';
       finalResult.proposedResponse = securityDepositPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+    }
+
+    const laundryPolicyFinal = this._applyLaundryPolicy(finalResult, enrichedContext, guestMessage);
+    if (laundryPolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = laundryPolicyFinal.typeOfMessageReceived || 'LAUNDRY_QUESTION';
+      finalResult.proposedResponse = laundryPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
     }
 

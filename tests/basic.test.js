@@ -182,6 +182,43 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(!/i'll refund|i will refund|we will refund/i.test(applied.proposedResponse));
   });
 
+  it('answers laundry facilities with Soap Bubble via _applyLaundryPolicy (Henry bad-reply case)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    // Real guest wording: thanks + excitement + laundry ask. Old bad auto deferred instead of answering.
+    const msg = 'Thanks so much! We are excited for our stay. Is there laundry?';
+    const badDraft =
+      "Good morning, Henry! You're welcome. I'll check on laundry for you and get back shortly.";
+    const applied = agent._applyLaundryPolicy(
+      {
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: badDraft,
+      },
+      { guestName: 'Henry' },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'LAUNDRY_QUESTION');
+    assert.ok(/do not have laundry on site|no laundry on site/i.test(applied.proposedResponse));
+    assert.ok(applied.proposedResponse.includes('Soap Bubble'));
+    assert.ok(applied.proposedResponse.includes('68 Pine St'));
+    assert.ok(applied.proposedResponse.includes('Portland, ME 04102'));
+    assert.ok(!/i'll check|i will check|get back shortly/i.test(applied.proposedResponse));
+
+    // Detergent questions must not be overwritten by the facilities answer.
+    const detergent = agent._applyLaundryPolicy(
+      {
+        typeOfMessageReceived: 'LAUNDRY_DETERGENT_QUESTION',
+        proposedResponse: 'For laundry, we use Kirkland Brand detergent from Costco, and for drying sheets we use Tide.',
+      },
+      { guestName: 'Henry' },
+      'What detergent do you use for laundry?'
+    );
+    assert.equal(detergent.applied, false);
+  });
+
   it('does not stomp luggage reply that already has Richard and phone', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
