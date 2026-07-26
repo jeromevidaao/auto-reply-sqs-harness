@@ -23,6 +23,7 @@ Each file corresponds to one or more `typeOfMessageReceived` categories used by 
 - `damage-report.md`
 - `directions.md`
 - `door-code-issues.md`
+- `apt2-street-door-lockout.md` (Apt 2 only: bolted parking door + street exit lockout; SNS urgent SMS)
 - `early-checkin.md`
 - `ev-charger.md`
 - `event-request.md`

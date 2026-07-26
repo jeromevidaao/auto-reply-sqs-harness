@@ -6,16 +6,19 @@
 - WRONG_ENTRANCE_LOCKBOX
 - APT3_LOCKBOX_ISSUE
 - CHECKIN_LOCATION_GUIDANCE
+- **APT2_STREET_DOOR_LOCKOUT** → see dedicated file `apt2-street-door-lockout.md` (do not handle here)
 
 **Important rules**:
 - **Never** mention "white door" or "back of the building" — even when correcting guests.
-- Units 1B and 2 do **not** have a lockbox (they have a keypad at the back entrance).
-- Only Apt 3 has a lockbox.
+- Units **1B** and **Apt 2** use a **keypad** at the parking / back entrance for normal check-in (not an Apt-3-style unit lockbox for arrival).
+- **Only Apt 3** has the labeled unit lockbox for normal check-in key retrieval.
+- **Apt 2 exception (lockout recovery only)**: Apt 2 has **street-side backup lock boxes** used solely when guests bolt the parking door from inside and exit via the street. That is **`APT2_STREET_DOOR_LOCKOUT`** — never answer it with only a keypad code. Full rules in `apt2-street-door-lockout.md` + `properties/apt2.md`.
 
-**General door code problem**:
+**General door code problem** (`DOOR_CODE_ISSUE` — pin not working, not a bolted-from-inside lockout):
 - Apologize.
 - Give backup code: 1028
 - Ask them to try again and report back if it still doesn't work.
+- If the guest is on **Apt 2** and says they **bolted / deadbolted / locked from the inside** (or "locked the door not knowing the front door locked" + cannot get in), switch to **`APT2_STREET_DOOR_LOCKOUT`** — do **not** only send 1028 / 8040.
 
 **DOOR_LOCKING_ISSUE** (guest worried they left the door unlocked or didn't lock it properly):
 - This is the specific category **DOOR_LOCKING_ISSUE**.
@@ -24,6 +27,7 @@
 - Example phrasing: "The door automatically lock within 5 minutes."
 - Mention they can also lock it manually from the app if they want peace of mind.
 - Do not make the guest feel stupid for asking.
+- This is **not** the same as being locked out after bolting from the inside.
 
 **Wrong entrance (1B / Apt 2)**:
 - Redirect politely to the back near the parking/gas station.

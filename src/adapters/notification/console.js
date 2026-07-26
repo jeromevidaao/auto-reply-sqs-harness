@@ -233,4 +233,48 @@ export class ConsoleEscalationAdapter {
       }
     };
   }
+
+  /**
+   * Local equivalent of SNS urgent-access SMS (lockout / door code / Apt 2 street lockout).
+   */
+  async notifyUrgentAccessIssue({ guestMessage, context, timestamp = new Date(), category, proposedResponse } = {}) {
+    const guestName = context.guestDisplayName || context.guestName || 'Guest';
+    const property = context.propertyName || context.listingId || 'Unknown property';
+    const isApt2StreetLockout = category === 'APT2_STREET_DOOR_LOCKOUT';
+
+    const lines = [];
+    lines.push('\n' + '!'.repeat(80));
+    lines.push(isApt2StreetLockout
+      ? '🚨  URGENT ACCESS — APT 2 STREET LOCKOUT (bolted parking door)'
+      : '🚨  URGENT ACCESS — GUEST CANNOT GET IN');
+    lines.push('!'.repeat(80));
+    lines.push(`Time: ${timestamp.toISOString()}`);
+    lines.push(`Guest: ${guestName}`);
+    lines.push(`Property: ${property}`);
+    if (category) lines.push(`Category: ${category}`);
+    lines.push('');
+    lines.push('Guest message:');
+    lines.push('---');
+    lines.push(guestMessage);
+    lines.push('---');
+    if (proposedResponse && proposedResponse !== 'none') {
+      lines.push('');
+      lines.push('Auto-reply proposed/sent:');
+      lines.push(String(proposedResponse).slice(0, 800));
+    }
+    lines.push('');
+    lines.push(isApt2StreetLockout
+      ? 'Action: SMS Jerome + Ruby (prod: URGENT_ACCESS_*). Street top lockbox 2630 + pin.'
+      : 'Action: SMS hosts immediately (prod: URGENT_ACCESS_SNS_TOPIC_ARN or URGENT_ACCESS_PHONE_NUMBER).');
+    lines.push('!'.repeat(80) + '\n');
+
+    console.error(lines.join('\n'));
+
+    return {
+      notified: true,
+      type: 'urgent_access',
+      channel: 'console',
+      category: category || null,
+    };
+  }
 }

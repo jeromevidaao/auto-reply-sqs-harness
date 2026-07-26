@@ -241,6 +241,84 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(detergent.applied, false);
   });
 
+  it('forces Apt 2 street-door lockout recovery (Henry bolted-door incident), not keypad-only', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const apt2 = {
+      guestName: 'Henry',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+      guestPhone: '6468040123',
+    };
+    const lockedOutMsg =
+      'We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb.';
+    // Bad historical reply: only restate the unit/outside code
+    const badDraft =
+      "Good evening, Henry,\n\nSorry you're locked out! The code for the outside door and unit is 8040. Give that a try and let me know right away if you still can't get in.";
+
+    const applied = agent._applyApt2StreetDoorLockoutPolicy(
+      { typeOfMessageReceived: 'DOOR_CODE_ISSUE', proposedResponse: badDraft },
+      apt2,
+      lockedOutMsg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'APT2_STREET_DOOR_LOCKOUT');
+    assert.ok(applied.proposedResponse.includes('2630'));
+    assert.ok(/lock box/i.test(applied.proposedResponse));
+    assert.ok(applied.proposedResponse.includes('top'));
+    assert.ok(applied.proposedResponse.includes('0123'));
+    assert.ok(applied.proposedResponse.includes('646-204-3958'));
+    assert.ok(applied.proposedResponse.includes('508-667-6477'));
+    assert.ok(applied.proposedResponse.includes('207-518-3417'));
+    assert.ok(!/code for the outside door and unit is 8040/i.test(applied.proposedResponse));
+
+    // Follow-up clarification "We bolted the door from the inside"
+    const bolted = agent._applyApt2StreetDoorLockoutPolicy(
+      { typeOfMessageReceived: 'DOOR_CODE_ISSUE', proposedResponse: badDraft },
+      {
+        ...apt2,
+        conversationHistory: [
+          { sender_type: 'guest', body: lockedOutMsg },
+          { sender_type: 'host', body: badDraft },
+        ],
+      },
+      'We bolted the door from the inside'
+    );
+    assert.equal(bolted.applied, true);
+    assert.equal(bolted.typeOfMessageReceived, 'APT2_STREET_DOOR_LOCKOUT');
+    assert.ok(bolted.proposedResponse.includes('2630'));
+
+    // Must not fire for Apt 3 lockbox problems
+    const apt3 = agent._applyApt2StreetDoorLockoutPolicy(
+      { typeOfMessageReceived: 'APT3_LOCKBOX_ISSUE', proposedResponse: 'sorry you are having trouble with the lock box' },
+      {
+        guestName: 'Morgan',
+        listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+        propertyName: 'Apt 3',
+      },
+      "I'm having trouble opening the lockbox. The code isn't working."
+    );
+    assert.equal(apt3.applied, false);
+
+    // Generic "code not working" on Apt 2 without bolt/lockout-from-inside → not this category
+    const codeOnly = agent._applyApt2StreetDoorLockoutPolicy(
+      { typeOfMessageReceived: 'DOOR_CODE_ISSUE', proposedResponse: 'Please try backup code 1028.' },
+      apt2,
+      'The door code is not working for the parking entrance.'
+    );
+    assert.equal(codeOnly.applied, false);
+
+    // "Did I leave the door unlocked?" is DOOR_LOCKING_ISSUE territory — not street lockout
+    const forgotLock = agent._applyApt2StreetDoorLockoutPolicy(
+      { typeOfMessageReceived: 'DOOR_LOCKING_ISSUE', proposedResponse: 'The door automatically lock within 5 minutes.' },
+      apt2,
+      'I think I forgot to lock the door when I left. Is that a problem?'
+    );
+    assert.equal(forgotLock.applied, false);
+  });
+
   it('merges multi-intent categories via _mergeCategories', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

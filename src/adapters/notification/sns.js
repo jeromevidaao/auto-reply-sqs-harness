@@ -265,7 +265,7 @@ export class SnsNotificationAdapter {
    * 1. Dedicated SNS topic (recommended when notifying multiple people, e.g. Jerome + Ruby)
    * 2. Direct phone number(s) via URGENT_ACCESS_PHONE_NUMBER (comma-separated supported)
    */
-  async notifyUrgentAccessIssue({ guestMessage, context, timestamp = new Date() }) {
+  async notifyUrgentAccessIssue({ guestMessage, context, timestamp = new Date(), category, proposedResponse } = {}) {
     const guestName = context.guestDisplayName || context.guestName || 'Guest';
     const property = context.propertyName || context.listingId || 'Unknown property';
     const dates = (context.checkIn && context.checkOut)
@@ -282,17 +282,30 @@ export class SnsNotificationAdapter {
       airbnbLink = `https://www.airbnb.com/hosting/messages/${context.airbnb_conversation_id}`;
     }
 
+    const isApt2StreetLockout = category === 'APT2_STREET_DOOR_LOCKOUT';
+    const headline = isApt2StreetLockout
+      ? '🚨 URGENT - APT 2 STREET LOCKOUT (bolted parking door)'
+      : '🚨 URGENT - GUEST CANNOT GET IN';
+    const guidance = isApt2StreetLockout
+      ? 'Apt 2: guest likely bolted parking door + exited street. Auto-reply should cover top lockbox 2630 + pin. Call/text guest if still stuck.'
+      : 'Please assist the guest immediately.';
+
     const message = [
-      `🚨 URGENT - GUEST CANNOT GET IN`,
+      headline,
       '',
       `Guest: ${guestName}${dates}`,
       `Property: ${property}`,
+      category ? `Category: ${category}` : '',
       '',
       `Message: ${guestMessage}`,
       '',
+      proposedResponse && proposedResponse !== 'none'
+        ? `Auto-reply sent/proposed:\n${String(proposedResponse).slice(0, 500)}`
+        : '',
+      '',
       airbnbLink ? `🔗 Direct link: ${airbnbLink}` : '',
       '',
-      'Please assist the guest immediately.',
+      guidance,
     ].filter(Boolean).join('\n');
 
     // Preferred: Publish to a dedicated SNS topic (supports multiple SMS subscriptions)

@@ -97,6 +97,8 @@ This rule exists because the harness directly affects live guest replies and the
 - When you touch the live Kumo path, be extremely conservative: only act on clear temp/AC/heat complaints, only fix when you actually see a mismatch, always tell the guest what you did.
 - The Kathryn Booker mixed-mode AC incident (June 2026) is the canonical example that drove the live investigation + auto-fix + neutral language change. Do not regress to accusatory "don't use the Nest" phrasing when the guest says they are on the remotes.
 
+- **Apt 2 street-door lockout (`APT2_STREET_DOOR_LOCKOUT`)** — Henry incident: guests bolt the parking/unit door from inside and exit via the street stairs; they get locked out and **keypad codes alone do not help**. Deterministic policy forces street top lock box **2630**, put key back, unit pin = last 4 of phone, and host phones (Jerome / Ruby / Richard). Never answer with only "try 8040/1028". Unit-specific to listing `114663c5-0709-4eff-a868-fa9ebd6ed42d`. See `prompts/system/categories/apt2-street-door-lockout.md` + `prompts/properties/apt2.md`. Eval: `apt2-street-door-lockout`. On this (and other access) categories, `notifyUrgentAccessIssue` sends SNS SMS — Lambda needs `URGENT_ACCESS_PHONE_NUMBER=+16462043958,+15086676477` and/or `URGENT_ACCESS_SNS_TOPIC_ARN`.
+
 If you are an agent and the user asks you to make a change, you must follow the commit+push+verify steps at the end and report the SHA + MCP verification.
 
 This file itself must be kept up to date when product behavior changes.

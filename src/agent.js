@@ -29,6 +29,26 @@ const HVAC_REMOTE_PER_UNIT_STANDARD_RESPONSE =
 const LAUNDRY_QUESTION_STANDARD_RESPONSE =
   'We do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102';
 
+/** Apt 2 listing UUID (Sunny Downtown 2 Bed) — street-door lockout is unit-specific. */
+const APT2_LISTING_ID = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
+
+/**
+ * Build the Apt 2 street-door lockout recovery reply.
+ * @param {string|null} pinLast4 - last 4 of guest phone when known
+ */
+function buildApt2StreetDoorLockoutResponse(pinLast4 = null) {
+  const pinPhrase = pinLast4
+    ? `your pin code ${pinLast4} (last 4 digits of the phone number on your reservation)`
+    : 'your pin code (the last 4 digits of the phone number on your reservation)';
+  return (
+    `Sorry you're locked out! On the street entrance door on the right, you will see two lock boxes. ` +
+    `The one at the top has the backup key — open it by rotating the digits to 2630. ` +
+    `Once you open the street door, put the key back in the lock box right away. ` +
+    `After you go up the stairs, use ${pinPhrase} to enter the unit. ` +
+    `If you have any trouble, call me at 646-204-3958, my wife Ruby at 508-667-6477, or Richard at 207-518-3417.`
+  );
+}
+
 const EXTRA_LINENS_TOWELS_FOLLOW_UP =
   'If you cannot find them, feel free to let us know.';
 
@@ -385,6 +405,14 @@ export class GuestMessagingAgent {
     if (laundryPolicy.applied) {
       parsed.typeOfMessageReceived = laundryPolicy.typeOfMessageReceived || 'LAUNDRY_QUESTION';
       parsed.proposedResponse = laundryPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const apt2StreetLockoutPolicy = this._applyApt2StreetDoorLockoutPolicy(parsed, context, guestMessage);
+    if (apt2StreetLockoutPolicy.applied) {
+      parsed.typeOfMessageReceived = apt2StreetLockoutPolicy.typeOfMessageReceived || 'APT2_STREET_DOOR_LOCKOUT';
+      parsed.proposedResponse = apt2StreetLockoutPolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -1500,6 +1528,138 @@ export class GuestMessagingAgent {
     };
   }
 
+  /**
+   * Apt 2 only: guest bolted the parking/unit door from inside and exited via the street.
+   * Keypad codes alone cannot open a door bolted from the inside — use street backup key.
+   * Henry incident: "unable to get into" + later "We bolted the door from the inside".
+   */
+  _isApt2Listing(context = {}) {
+    if (context.listingId === APT2_LISTING_ID) return true;
+    const name = String(context.propertyName || context.listingName || '').toLowerCase();
+    // Prefer explicit Apt 2 / Sunny 2-bed naming; avoid matching Apt 3 or 1B.
+    if (/\bapt\s*3\b|#3\b|unit\s*3\b/.test(name)) return false;
+    if (/\b1b\b|studio/.test(name)) return false;
+    return /\bapt\s*2\b|apt2|sunny.*2\s*bed|2 bed apt/.test(name);
+  }
+
+  _extractGuestPhoneLast4(context = {}) {
+    const candidates = [
+      context.guestPhone,
+      context.guest_phone,
+      context.phone,
+      context.phoneNumber,
+      context.phone_number,
+      context.guest?.phone,
+      context.guest?.phone_number,
+      context.guest?.mobile,
+      context.guest?.cell,
+      context.reservation?.guest?.phone,
+      context.reservation?.guest?.phone_number,
+    ];
+    for (const c of candidates) {
+      if (c == null || c === '') continue;
+      const digits = String(c).replace(/\D/g, '');
+      if (digits.length >= 4) return digits.slice(-4);
+    }
+    return null;
+  }
+
+  /**
+   * True when this is the Apt 2 bolted-door / street-exit lockout (not generic code fail).
+   * Also scans recent conversationHistory for "bolted" when the current message is a lockout follow-up.
+   */
+  _isApt2StreetDoorLockout(guestMessage = '', context = {}) {
+    if (!this._isApt2Listing(context)) return false;
+
+    const lower = String(guestMessage || '').toLowerCase();
+    const historyText = Array.isArray(context.conversationHistory)
+      ? context.conversationHistory
+          .map((m) => String(m?.body || m?.message || m?.text || ''))
+          .join(' ')
+          .toLowerCase()
+      : '';
+    const combined = `${lower}\n${historyText}`;
+
+    const bolted = /\bbolted\b|\bdeadbolt(?:ed)?\b|\blocked (?:the )?(?:door|it) from the inside|\blocked from the inside/.test(combined);
+    const accidentalFrontLock =
+      /accident(?:ally)?\s+lock/.test(lower) ||
+      /locked the (?:front )?door not knowing/.test(lower) ||
+      /not knowing that the front door lock/.test(lower);
+    const lockedOut =
+      /locked out|unable to get (?:back )?in|can(?:not|'t) get (?:back )?in|unable to get into|can(?:not|'t) get into|are unable to get into/.test(
+        lower
+      );
+
+    // Explicit bolt/deadbolt on Apt 2 (including follow-up "We bolted the door from the inside").
+    if (bolted) return true;
+    // Henry first message: accidental lock + cannot re-enter (street lockout pattern).
+    if (accidentalFrontLock && lockedOut) return true;
+    // Lockout + clear "front door locked" / interior lock language without a "code not working" pin.
+    if (lockedOut && /front door lock|door locked|from the inside/.test(lower) && !/\bcode\b/.test(lower)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Force correct street lockbox recovery for Apt 2 bolted-door lockouts.
+   * Overrides wrong DOOR_CODE_ISSUE replies that only restate the keypad pin.
+   */
+  _applyApt2StreetDoorLockoutPolicy(parsed, context = {}, guestMessage = '') {
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const already = categories.includes('APT2_STREET_DOOR_LOCKOUT');
+    const detected = this._isApt2StreetDoorLockout(guestMessage, context);
+
+    if (!already && !detected) {
+      return { applied: false };
+    }
+    if (!this._isApt2Listing(context) && !already) {
+      return { applied: false };
+    }
+
+    const pinLast4 = this._extractGuestPhoneLast4(context);
+    const standard = buildApt2StreetDoorLockoutResponse(pinLast4);
+    const draft = (parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+
+    const hasLockbox2630 = lower.includes('2630') && (lower.includes('lock box') || lower.includes('lockbox'));
+    const hasContacts =
+      (lower.includes('646') && lower.includes('204') && lower.includes('3958')) ||
+      lower.includes('646-204-3958') ||
+      lower.includes('6462043958');
+    const hasRubyOrRichard =
+      lower.includes('508-667-6477') ||
+      lower.includes('5086676477') ||
+      lower.includes('207-518-3417') ||
+      lower.includes('2075183417');
+    const wronglyCodeOnly =
+      !hasLockbox2630 &&
+      (/\b8040\b/.test(lower) || /\b1028\b/.test(lower)) &&
+      /code for the outside|give that a try|let me know right away if you still/.test(lower);
+
+    if (already && hasLockbox2630 && hasContacts && hasRubyOrRichard && !wronglyCodeOnly) {
+      // Still force category name cleanliness but keep LLM wording if complete.
+      return { applied: false };
+    }
+
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    let proposedResponse = standard;
+    if (greetingMatch) {
+      proposedResponse = `${greetingMatch[0].trimEnd()} ${standard}`;
+    } else if (firstName) {
+      proposedResponse = `Good evening, ${firstName},\n\n${standard}`;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
+      proposedResponse,
+    };
+  }
+
   _buildUserPrompt(message, context) {
     const lines = [
       `Current guest message: "${message}"`,
@@ -2407,31 +2567,8 @@ export class GuestMessagingAgent {
       },
     };
 
-    // === Urgent Access Escalation (SMS) ===
-    // If the guest is having trouble getting into the property, this is time-sensitive.
-    // Send an immediate SMS to the configured urgent number (646 204 3958).
-    const accessIssueCategories = [
-      'DOOR_CODE_ISSUE',
-      'APT3_LOCKBOX_ISSUE',
-      'WRONG_ENTRANCE_LOCKBOX',
-      'DOOR_LOCKING_ISSUE',
-      'LOCKBOX_KEY_TAKEN',
-    ];
-
-    const isAccessIssue = accessIssueCategories.includes(category);
-
-    if (isAccessIssue) {
-      console.log('[Agent] → Urgent access issue detected — sending SMS alert');
-      try {
-        const urgentResult = await this.notification.notifyUrgentAccessIssue({
-          guestMessage,
-          context: enrichedContext,
-        });
-        finalResult.urgentAccessNotified = urgentResult;
-      } catch (err) {
-        console.error('[Agent] Failed to send urgent access SMS:', err.message);
-      }
-    }
+    // Urgent access SMS is deferred until after reflection/judge + final policies so the
+    // category (e.g. APT2_STREET_DOOR_LOCKOUT overriding a wrong DOOR_CODE_ISSUE) is final.
 
     // === Lightweight Reflection Pass (for high-risk categories) ===
     if (this.enableReflection) {
@@ -2685,6 +2822,19 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = true;
     }
 
+    const apt2StreetLockoutPolicyFinal = this._applyApt2StreetDoorLockoutPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (apt2StreetLockoutPolicyFinal.applied) {
+      console.log('[Agent] → Apt 2 street-door lockout policy applied (backup key 2630, not keypad-only)');
+      finalResult.typeOfMessageReceived = apt2StreetLockoutPolicyFinal.typeOfMessageReceived || 'APT2_STREET_DOOR_LOCKOUT';
+      finalResult.proposedResponse = apt2StreetLockoutPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+    }
+
     const sofaLinensPolicyFinal = this._applySofaBedLinensPolicy(finalResult, enrichedContext, guestMessage);
     if (sofaLinensPolicyFinal.applied) {
       finalResult.typeOfMessageReceived = sofaLinensPolicyFinal.typeOfMessageReceived;
@@ -2764,6 +2914,39 @@ export class GuestMessagingAgent {
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);
+
+    // === Urgent Access Escalation (SMS via SNS) — post-final policies ===
+    // Time-sensitive: guest cannot get in. Includes APT2_STREET_DOOR_LOCKOUT (bolted door /
+    // street exit) which texts Jerome + Ruby. Config: URGENT_ACCESS_SNS_TOPIC_ARN or
+    // URGENT_ACCESS_PHONE_NUMBER (comma-separated, e.g. +16462043958,+15086676477).
+    const accessIssueCategories = [
+      'DOOR_CODE_ISSUE',
+      'APT3_LOCKBOX_ISSUE',
+      'WRONG_ENTRANCE_LOCKBOX',
+      'LOCKBOX_KEY_TAKEN',
+      'APT2_STREET_DOOR_LOCKOUT',
+    ];
+    const finalCategories = Array.isArray(finalResult.typeOfMessageReceived)
+      ? finalResult.typeOfMessageReceived
+      : [finalResult.typeOfMessageReceived];
+    const isAccessIssue =
+      finalCategories.some((c) => accessIssueCategories.includes(c)) ||
+      this._isApt2StreetDoorLockout(guestMessage, enrichedContext);
+
+    if (isAccessIssue) {
+      console.log('[Agent] → Urgent access issue detected — sending SMS alert via SNS');
+      try {
+        const urgentResult = await this.notification.notifyUrgentAccessIssue({
+          guestMessage,
+          context: enrichedContext,
+          category: finalCategories.find((c) => accessIssueCategories.includes(c)) || finalCategories[0],
+          proposedResponse: finalResult.proposedResponse,
+        });
+        finalResult.urgentAccessNotified = urgentResult;
+      } catch (err) {
+        console.error('[Agent] Failed to send urgent access SMS:', err.message);
+      }
+    }
 
     // === SINGLE RICH ESCALATION NOTIFY (post-pipeline) ===
     // Performed exactly once, using the *final* decision object after reflection + judge.
