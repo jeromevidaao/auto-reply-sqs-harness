@@ -274,7 +274,7 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(applied.proposedResponse.includes('207-518-3417'));
     assert.ok(!/code for the outside door and unit is 8040/i.test(applied.proposedResponse));
 
-    // LLM category correct but omits pin digits when phone is known → still force full script
+    // LLM category correct but omits pin digits when phone is known → always force full script
     const missingPin = agent._applyApt2StreetDoorLockoutPolicy(
       {
         typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
@@ -286,6 +286,20 @@ describe('EventRequestTool (no LLM)', () => {
     );
     assert.equal(missingPin.applied, true);
     assert.ok(missingPin.proposedResponse.includes('0123'));
+
+    // Even a "complete" LLM draft is rewritten so pin digits cannot flake out of the keep-path
+    const alreadyComplete = agent._applyApt2StreetDoorLockoutPolicy(
+      {
+        typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
+        proposedResponse:
+          "Sorry you're locked out! Top lock box 2630. Put the key back. Use pin 0123. Call 646-204-3958, 508-667-6477, or 207-518-3417.",
+      },
+      apt2,
+      lockedOutMsg
+    );
+    assert.equal(alreadyComplete.applied, true);
+    assert.ok(alreadyComplete.proposedResponse.includes('0123'));
+    assert.ok(alreadyComplete.proposedResponse.includes('2630'));
 
     // Follow-up clarification "We bolted the door from the inside"
     const bolted = agent._applyApt2StreetDoorLockoutPolicy(
@@ -330,6 +344,51 @@ describe('EventRequestTool (no LLM)', () => {
       'I think I forgot to lock the door when I left. Is that a problem?'
     );
     assert.equal(forgotLock.applied, false);
+  });
+
+  it('processMessage injects pin 0123 for Apt 2 lockout even when LLM omits it (eval path)', async () => {
+    // Mirrors CI flake: category correct + lockbox/contacts, missing required phrase "0123".
+    const incompleteDraft =
+      "Sorry you're locked out! On the street entrance door on the right, you will see two lock boxes. " +
+      'The one at the top has the backup key — open it by rotating the digits to 2630. ' +
+      'Once you open the street door, put the key back in the lock box right away. ' +
+      'After you go up the stairs, use your pin code (the last 4 digits of the phone number on your reservation) to enter the unit. ' +
+      'If you have any trouble, call me at 646-204-3958, my wife Ruby at 508-667-6477, or Richard at 207-518-3417.';
+
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: {
+        complete: async () =>
+          JSON.stringify({
+            typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
+            shouldReply: true,
+            confidence: 1.0,
+            proposedResponse: incompleteDraft,
+          }),
+      },
+    });
+
+    const result = await agent.processMessage(
+      'We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb.',
+      {
+        guestName: 'Henry',
+        checkIn: '2026-07-24',
+        checkOut: '2026-07-26',
+        listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+        propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+        guestPhone: '6468040123',
+        conversationHistory: [],
+      }
+    );
+
+    assert.equal(result.typeOfMessageReceived, 'APT2_STREET_DOOR_LOCKOUT');
+    assert.equal(result.shouldReply, true);
+    assert.ok(result.proposedResponse.includes('0123'), 'must include guest pin last-4');
+    assert.ok(result.proposedResponse.includes('2630'));
+    assert.ok(/lock box/i.test(result.proposedResponse));
+    assert.ok(result.proposedResponse.includes('646-204-3958'));
+    assert.ok(result.proposedResponse.includes('508-667-6477'));
+    assert.ok(result.proposedResponse.includes('207-518-3417'));
   });
 
   it('merges multi-intent categories via _mergeCategories', () => {

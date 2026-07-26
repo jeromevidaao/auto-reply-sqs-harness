@@ -1603,7 +1603,10 @@ export class GuestMessagingAgent {
 
   /**
    * Force correct street lockbox recovery for Apt 2 bolted-door lockouts.
-   * Overrides wrong DOOR_CODE_ISSUE replies that only restate the keypad pin.
+   * Always rewrites to the canonical script (like EVENT_REQUEST) — never keep LLM
+   * wording. Eval flake: model often returns APT2_STREET_DOOR_LOCKOUT with lockbox
+   * + host phones but omits the last-4 pin digits ("0123") even when guestPhone is
+   * known. Completeness-check keep-paths reintroduce that miss.
    */
   _applyApt2StreetDoorLockoutPolicy(parsed, context = {}, guestMessage = '') {
     const categories = Array.isArray(parsed.typeOfMessageReceived)
@@ -1622,35 +1625,6 @@ export class GuestMessagingAgent {
     const pinLast4 = this._extractGuestPhoneLast4(context);
     const standard = buildApt2StreetDoorLockoutResponse(pinLast4);
     const draft = (parsed.proposedResponse || '').trim();
-    const lower = draft.toLowerCase();
-
-    const hasLockbox2630 = lower.includes('2630') && (lower.includes('lock box') || lower.includes('lockbox'));
-    const hasContacts =
-      (lower.includes('646') && lower.includes('204') && lower.includes('3958')) ||
-      lower.includes('646-204-3958') ||
-      lower.includes('6462043958');
-    const hasRubyOrRichard =
-      lower.includes('508-667-6477') ||
-      lower.includes('5086676477') ||
-      lower.includes('207-518-3417') ||
-      lower.includes('2075183417');
-    const hasPinWhenKnown = !pinLast4 || lower.includes(pinLast4);
-    const wronglyCodeOnly =
-      !hasLockbox2630 &&
-      (/\b8040\b/.test(lower) || /\b1028\b/.test(lower)) &&
-      /code for the outside|give that a try|let me know right away if you still/.test(lower);
-
-    if (
-      already &&
-      hasLockbox2630 &&
-      hasContacts &&
-      hasRubyOrRichard &&
-      hasPinWhenKnown &&
-      !wronglyCodeOnly
-    ) {
-      // Keep LLM wording only when the full recovery script is already present.
-      return { applied: false };
-    }
 
     const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
     const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
@@ -1691,6 +1665,13 @@ export class GuestMessagingAgent {
     if (context.infantCount != null || ic > 0) lines.push(`- infantCount (from reservation/inquiry guests): ${ic}`);
     if (context.childCount != null) lines.push(`- childCount (from reservation/inquiry): ${context.childCount}`);
     if (context.propertyName) lines.push(`- Property: ${context.propertyName}`);
+
+    // Guest phone last-4 for pin-based entry (Apt 2 street lockout, door codes).
+    // Deterministic policies inject the digits; surface them here so the first-pass LLM cannot invent a vague "last 4" only.
+    const guestPhoneLast4 = this._extractGuestPhoneLast4(context);
+    if (guestPhoneLast4) {
+      lines.push(`- Guest phone last 4 digits (unit pin when applicable): ${guestPhoneLast4}`);
+    }
 
     // Computed stay timing + days (helps NEW_RESERVATION_WELCOME follow exact timing rules for check-in instructions)
     // Uses NY calendar day for "today" to match greeting / old system behavior.
