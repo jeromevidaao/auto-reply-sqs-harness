@@ -274,6 +274,19 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(applied.proposedResponse.includes('207-518-3417'));
     assert.ok(!/code for the outside door and unit is 8040/i.test(applied.proposedResponse));
 
+    // LLM category correct but omits pin digits when phone is known → still force full script
+    const missingPin = agent._applyApt2StreetDoorLockoutPolicy(
+      {
+        typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
+        proposedResponse:
+          "Sorry you're locked out! Top lock box 2630. Put the key back. Call 646-204-3958, 508-667-6477, or 207-518-3417.",
+      },
+      apt2,
+      lockedOutMsg
+    );
+    assert.equal(missingPin.applied, true);
+    assert.ok(missingPin.proposedResponse.includes('0123'));
+
     // Follow-up clarification "We bolted the door from the inside"
     const bolted = agent._applyApt2StreetDoorLockoutPolicy(
       { typeOfMessageReceived: 'DOOR_CODE_ISSUE', proposedResponse: badDraft },

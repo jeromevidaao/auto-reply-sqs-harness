@@ -1634,13 +1634,21 @@ export class GuestMessagingAgent {
       lower.includes('5086676477') ||
       lower.includes('207-518-3417') ||
       lower.includes('2075183417');
+    const hasPinWhenKnown = !pinLast4 || lower.includes(pinLast4);
     const wronglyCodeOnly =
       !hasLockbox2630 &&
       (/\b8040\b/.test(lower) || /\b1028\b/.test(lower)) &&
       /code for the outside|give that a try|let me know right away if you still/.test(lower);
 
-    if (already && hasLockbox2630 && hasContacts && hasRubyOrRichard && !wronglyCodeOnly) {
-      // Still force category name cleanliness but keep LLM wording if complete.
+    if (
+      already &&
+      hasLockbox2630 &&
+      hasContacts &&
+      hasRubyOrRichard &&
+      hasPinWhenKnown &&
+      !wronglyCodeOnly
+    ) {
+      // Keep LLM wording only when the full recovery script is already present.
       return { applied: false };
     }
 
