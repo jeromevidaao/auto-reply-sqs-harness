@@ -47,6 +47,8 @@ jobs:
       # (all goldens with real model + tools + reflection + judge). When absent it
       # exits cleanly (0) so CI stays green. Matches the "never mock" rule.
       GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+      # Synthetic host contacts only (never production phones in CI logs)
+      ALLOW_HOST_CONTACT_TEST_DEFAULTS: '1'
 
     steps:
       - name: Checkout repository

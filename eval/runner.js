@@ -11,6 +11,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GuestMessagingAgent } from '../src/agent.js';
+import {
+  setHostContactsForTests,
+  TEST_HOST_CONTACTS,
+} from '../src/config/hostContacts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scenariosDir = path.join(__dirname, 'scenarios');
@@ -27,6 +31,10 @@ async function main() {
   const failFast = args.includes('--fail-fast');
 
   console.log(`🧪 Running evaluation suite (mode: ${mode})\n`);
+
+  // Eval must never need production SSM. Use synthetic host contacts (555 numbers).
+  process.env.ALLOW_HOST_CONTACT_TEST_DEFAULTS = '1';
+  setHostContactsForTests(TEST_HOST_CONTACTS);
 
   if (!process.env.GROK_API_KEY) {
     console.warn('⚠️  Skipping evaluation suite: GROK_API_KEY is not set.');
