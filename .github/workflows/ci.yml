@@ -102,9 +102,11 @@ jobs:
           # Move to the workspace for artifact upload
           mv /tmp/guest-messaging-harness.zip $GITHUB_WORKSPACE/
 
+      # Deploy rebuilds the zip itself; artifact is optional. Do not fail CI on storage quota.
       - name: Upload Lambda artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: guest-messaging-harness-lambda
           path: guest-messaging-harness.zip
-          retention-days: 30
+          retention-days: 3
