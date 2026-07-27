@@ -1,6 +1,6 @@
 {
   "id": "apt2-street-door-lockout",
-  "description": "Henry incident: Apt 2 guests bolted the parking/unit door from inside, exited via street, locked out. Must NOT reply with only the keypad code (8040/1028). Use street top lockbox + pin + call numbers (from host contacts fixture).",
+  "description": "Henry incident: Apt 2 guests bolted the parking/unit door from inside, exited via street, locked out. Must NOT reply with only the keypad / backup door code. Use street top lockbox + pin + call numbers (from host contacts fixture).",
   "guestMessage": "We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb.",
   "context": {
     "guestName": "Henry",
@@ -29,5 +29,5 @@
       "555-010-0003"
     ]
   },
-  "notes": "Canonical Apt 2 street-exit + bolted parking door lockout. Deterministic policy should force category + street backup-key instructions. requiredPhrases use TEST_HOST_CONTACTS synthetic values (eval runner sets them). General DOOR_CODE_ISSUE (try 1028) is wrong here."
+  "notes": "Canonical Apt 2 street-exit + bolted parking door lockout. Deterministic policy should force category + street backup-key instructions. requiredPhrases use TEST_HOST_CONTACTS synthetic values (eval runner sets them). General DOOR_CODE_ISSUE (try backup only) is wrong here."
 }

@@ -2,7 +2,7 @@
 
 **Scenario**: Guest at Apt 2 (Henry) accidentally locked/bolted the parking-side door from the inside, exited toward the street, and cannot re-enter. Keypad codes alone will not help.
 
-**Real production value**: Distinct from generic `DOOR_CODE_ISSUE` (backup 1028) and from Apt 3 lockbox. Wrong historical reply was only "try code 8040".
+**Real production value**: Distinct from generic `DOOR_CODE_ISSUE` (backup `{{BACKUP_DOOR_CODE}}`) and from Apt 3 lockbox. Wrong historical reply was only restating the guest keypad pin.
 
 **Approved ideal behavior**:
 - Category: `APT2_STREET_DOOR_LOCKOUT`

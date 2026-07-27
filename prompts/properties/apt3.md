@@ -4,9 +4,9 @@
 
 **Lockbox / Entry**:
 - Lockbox is on the **bottom**, labeled "Unit 3".
-- Combination: 9751
+- Combination: **`{{APT3_LOCKBOX_CODE}}`** (from SSM `/host/contacts-json` — never hardcode)
 - Instructions:
-  1. Rotate dials to 9751
+  1. Rotate dials to **`{{APT3_LOCKBOX_CODE}}`**
   2. Press down on the black release button
   3. Pull the door fully open
   4. Take the key inside

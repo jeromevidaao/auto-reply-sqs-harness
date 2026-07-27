@@ -168,11 +168,11 @@ If you ever need to deploy without pushing code (rare):
 
 ## Host contacts (SSM only)
 
-Personal phone numbers, owner email, WiFi password, and Apt 2 street lockbox code are **not** in this repository.
+Personal phone numbers, owner email, WiFi password, backup door code, and lockbox codes are **not** in this repository.
 
 | Parameter | Type | Purpose |
 |-----------|------|---------|
-| `/host/contacts-json` | SecureString | JSON: host phones, PM phones, WiFi, lockbox code, urgent-access E.164 list |
+| `/host/contacts-json` | SecureString | JSON: host phones, PM phones, WiFi, `backupDoorCode`, `apt2StreetLockboxCode`, `apt3LockboxCode`, urgent-access E.164 list |
 
 Lambda role needs `ssm:GetParameter` on `arn:...:parameter/host/*`.
 Prompt markdown uses placeholders like `{{HOST_JEROME_PHONE}}` substituted at runtime.

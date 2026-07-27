@@ -4,7 +4,7 @@
 - Never mention "white door" or "back of the building" — even when correcting a guest.
 
 **Unit-specific entrance guidance** (loaded via property files + this category):
-- Units 1B and 2: Entrance is at the back near the parking/gas station area. Look for green door behind clear storm door labeled "53 ST APT 1B and 2 ENTRANCE". Use last 4 digits of phone number or backup 1028.
+- Units 1B and 2: Entrance is at the back near the parking/gas station area. Look for green door behind clear storm door labeled "53 ST APT 1B and 2 ENTRANCE". Use last 4 digits of phone number or backup **`{{BACKUP_DOOR_CODE}}`**.
 - Apt 3: Different lockbox instructions (see property file).
 
 **Distance questions**:

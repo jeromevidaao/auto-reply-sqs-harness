@@ -1724,7 +1724,8 @@ export class GuestMessagingAgent {
 
     const name = this._guestDisplayFirstName(context);
     const draft = (parsed.proposedResponse || '').trim();
-    const looksLikeLockout = /locked out|lock box|2630|backup key/i.test(draft);
+    // Detect lockout recovery language without embedding real lockbox digits in source.
+    const looksLikeLockout = /locked out|lock box|lockbox|backup key|street entrance/i.test(draft);
     const looksLikeWelcome = this._hostMessageLooksLikeWelcome(draft);
     const hasReviewAck = /review/i.test(draft) && /you're welcome|you are welcome|thank you|glad/i.test(draft);
     const isGood =

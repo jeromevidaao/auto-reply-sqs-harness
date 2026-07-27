@@ -333,7 +333,7 @@ describe('EventRequestTool (no LLM)', () => {
 
     // Generic "code not working" on Apt 2 without bolt/lockout-from-inside → not this category
     const codeOnly = agent._applyApt2StreetDoorLockoutPolicy(
-      { typeOfMessageReceived: 'DOOR_CODE_ISSUE', proposedResponse: 'Please try backup code 1028.' },
+      { typeOfMessageReceived: 'DOOR_CODE_ISSUE', proposedResponse: `Please try backup code ${TEST_HOST_CONTACTS.backupDoorCode}.` },
       apt2,
       'The door code is not working for the parking entrance.'
     );

@@ -11,6 +11,7 @@
  *   {{HOST_JEROME_PHONE}} {{HOST_RUBY_PHONE}} {{HOST_RICHARD_PHONE}}
  *   {{HOST_RICHARD_PHONE_PRIMARY}} {{HOST_RICHARD_PHONE_ALT}}
  *   {{WIFI_SSID}} {{WIFI_PASSWORD}} {{OWNER_EMAIL}} {{APT2_STREET_LOCKBOX_CODE}}
+ *   {{BACKUP_DOOR_CODE}} {{APT3_LOCKBOX_CODE}}
  */
 
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
@@ -32,6 +33,8 @@ export const TEST_HOST_CONTACTS = Object.freeze({
   ownerEmail: 'owner-test@example.com',
   urgentAccessE164: '+15550100001,+15550100002',
   apt2StreetLockboxCode: '0000',
+  backupDoorCode: '9999',
+  apt3LockboxCode: '8888',
   propertyManagerName: 'Richard',
 });
 
@@ -59,6 +62,8 @@ function fromEnvIndividuals() {
       process.env.HOST_URGENT_ACCESS_E164 ||
       '',
     apt2StreetLockboxCode: process.env.APT2_STREET_LOCKBOX_CODE || '',
+    backupDoorCode: process.env.BACKUP_DOOR_CODE || '',
+    apt3LockboxCode: process.env.APT3_LOCKBOX_CODE || '',
     propertyManagerName: process.env.HOST_PM_NAME || 'Richard',
   };
 }
@@ -84,6 +89,12 @@ function normalize(raw = {}) {
     ).trim(),
     apt2StreetLockboxCode: String(
       raw.apt2StreetLockboxCode || raw.apt2_street_lockbox_code || ''
+    ).trim(),
+    backupDoorCode: String(
+      raw.backupDoorCode || raw.backup_door_code || raw.backupCode || ''
+    ).trim(),
+    apt3LockboxCode: String(
+      raw.apt3LockboxCode || raw.apt3_lockbox_code || ''
     ).trim(),
     propertyManagerName: String(raw.propertyManagerName || raw.pm_name || 'Richard').trim(),
   };
@@ -188,6 +199,8 @@ export function applyHostContactPlaceholders(text, contacts = null) {
     '{{WIFI_PASSWORD}}': c.wifiPassword,
     '{{OWNER_EMAIL}}': c.ownerEmail,
     '{{APT2_STREET_LOCKBOX_CODE}}': c.apt2StreetLockboxCode,
+    '{{BACKUP_DOOR_CODE}}': c.backupDoorCode,
+    '{{APT3_LOCKBOX_CODE}}': c.apt3LockboxCode,
   };
   let out = String(text || '');
   for (const [k, v] of Object.entries(map)) {

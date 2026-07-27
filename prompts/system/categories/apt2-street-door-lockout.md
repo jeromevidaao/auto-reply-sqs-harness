@@ -12,7 +12,7 @@ Apt 2 has **two** exits:
 1. **Main / parking entrance** (the one in the check-in instructions) — keypad pin entry.
 2. **Street entrance** — stairs down to the street. Guests sometimes exit this way.
 
-If guests **bolt / deadbolt the parking-side unit door from the inside** and then leave via the street door, they can get **locked out**. The street door may open from inside without a key, but they **cannot re-enter** without a physical key for the street door. Giving only the keypad pin (e.g. "try 8040" / backup `1028`) **does not help** — the unit door is bolted from the inside.
+If guests **bolt / deadbolt the parking-side unit door from the inside** and then leave via the street door, they can get **locked out**. The street door may open from inside without a key, but they **cannot re-enter** without a physical key for the street door. Giving only the keypad pin or backup code (`{{BACKUP_DOOR_CODE}}`) **does not help** — the unit door is bolted from the inside.
 
 Canonical guest wording (use this category):
 - "We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb."
@@ -21,7 +21,7 @@ Canonical guest wording (use this category):
 
 ## Anti-patterns (FORBIDDEN)
 
-- **Do not** reply with only the outside/unit code (8040, 1028, last-4 alone as if that opens a bolted door).
+- **Do not** reply with only the outside/unit code (guest last-4, `{{BACKUP_DOOR_CODE}}`, or similar) as if that opens a bolted door.
 - **Do not** treat this as generic `DOOR_CODE_ISSUE`.
 - **Do not** redirect as wrong-entrance / gas-station path only.
 - **Do not** use this category for Apt 3 lockbox or 1B.
