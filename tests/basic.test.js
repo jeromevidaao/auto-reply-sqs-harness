@@ -344,6 +344,73 @@ describe('EventRequestTool (no LLM)', () => {
       'I think I forgot to lock the door when I left. Is that a problem?'
     );
     assert.equal(forgotLock.applied, false);
+
+    // Henry review incident: prior lockout in history + post-stay thanks/review MUST NOT re-send lockout
+    const historyWithPriorLockout = [
+      {
+        sender_type: 'guest',
+        body: 'We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb.',
+      },
+      { sender_type: 'host', body: "Sorry you're locked out! Top lock box 2630..." },
+      {
+        sender_type: 'guest',
+        body: 'We bolted the door from the inside',
+      },
+      { sender_type: 'host', body: 'Glad you got in!' },
+    ];
+    const postStayThanks =
+      'Thanks so much Jerome and Ruby! We had a terrific trip to Portland and already looking forward to the next one. I’ll get a glowing review submitted today or tomorrow';
+    const poisoned = agent._applyApt2StreetDoorLockoutPolicy(
+      {
+        typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
+        proposedResponse: "Sorry you're locked out! Top lock box 2630.",
+      },
+      {
+        ...apt2,
+        checkIn: '2026-07-25T16:00:00-04:00',
+        checkOut: '2026-07-26T10:00:00-04:00',
+        asOfDate: '2026-07-27',
+        conversationHistory: historyWithPriorLockout,
+      },
+      postStayThanks
+    );
+    assert.equal(poisoned.applied, false, 'must not apply lockout after post-stay review thank-you');
+
+    // LLM category alone (false positive APT2) without lockout language must not force script
+    const falseCat = agent._applyApt2StreetDoorLockoutPolicy(
+      {
+        typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
+        proposedResponse: "Sorry you're locked out!",
+      },
+      {
+        ...apt2,
+        checkIn: '2026-07-25',
+        checkOut: '2026-07-26',
+        asOfDate: '2026-07-27',
+        conversationHistory: historyWithPriorLockout,
+      },
+      postStayThanks
+    );
+    assert.equal(falseCat.applied, false);
+
+    const reviewPolicy = agent._applyReviewPromisePolicy(
+      {
+        typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
+        proposedResponse: "Sorry you're locked out! Top lock box 2630.",
+      },
+      {
+        ...apt2,
+        checkIn: '2026-07-25',
+        checkOut: '2026-07-26',
+        asOfDate: '2026-07-27',
+      },
+      postStayThanks
+    );
+    assert.equal(reviewPolicy.applied, true);
+    assert.equal(reviewPolicy.typeOfMessageReceived, 'REVIEW_PROMISE');
+    assert.ok(/you're welcome/i.test(reviewPolicy.proposedResponse));
+    assert.ok(/review/i.test(reviewPolicy.proposedResponse));
+    assert.ok(!/locked out|2630|lock box/i.test(reviewPolicy.proposedResponse));
   });
 
   it('processMessage injects pin 0123 for Apt 2 lockout even when LLM omits it (eval path)', async () => {

@@ -417,8 +417,16 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
-    const sofaLinensPolicy = this._applySofaBedLinensPolicy(parsed, context, guestMessage);
-    if (sofaLinensPolicy.applied) {
+    // After lockout: post-stay review/thanks must never be forced into lockout (Henry review incident).
+    const reviewPromisePolicy = this._applyReviewPromisePolicy(parsed, context, guestMessage);
+    if (reviewPromisePolicy.applied) {
+      parsed.typeOfMessageReceived = reviewPromisePolicy.typeOfMessageReceived;
+      parsed.proposedResponse = reviewPromisePolicy.proposedResponse;
+      shouldReply = reviewPromisePolicy.shouldReply;
+      confidence = reviewPromisePolicy.confidence;
+    }
+
+    const sofaLinensPolicy = this._applySofaBedLinensPolicy(parsed, context, guestMessage);    if (sofaLinensPolicy.applied) {
       parsed.typeOfMessageReceived = sofaLinensPolicy.typeOfMessageReceived;
       if (sofaLinensPolicy.proposedResponse) {
         parsed.proposedResponse = sofaLinensPolicy.proposedResponse;
@@ -1565,22 +1573,59 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Post-stay gratitude / review promise (Henry review incident 2026-07-27).
+   * Guest already checked out and is thanking us / promising a review — never treat as lockout.
+   */
+  _isPostStayGratitudeOrReviewPromise(guestMessage = '', context = {}) {
+    const msg = String(guestMessage || '').trim();
+    if (!msg) return false;
+    const lower = msg.toLowerCase();
+
+    // Stay is over (checkout day already passed in America/New_York calendar).
+    const checkOut = (context.checkOut || '').slice(0, 10);
+    const today = this._todayDateStr(context);
+    const pastCheckout = !!(checkOut && today && checkOut < today);
+
+    const reviewPromise =
+      /\breview\b/.test(lower) &&
+      /(submit|leave|write|post|send|get a|glowing|5\s*[- ]?star|five\s*star|will|today|tomorrow|coming)/i.test(lower);
+    const postStayThanks =
+      /thank|thanks|appreciate/i.test(lower) &&
+      /(terrific|great|wonderful|amazing|lovely|excellent)\s+(trip|stay)|looking forward to the next|had a (great|wonderful|terrific|amazing|lovely)|hope to (?:be )?back|until next time/i.test(
+        lower
+      );
+
+    // Strong review/thanks language after checkout, or explicit review promise anytime after stay started ending.
+    if (pastCheckout && (reviewPromise || postStayThanks)) return true;
+    if (reviewPromise && /thank|thanks|appreciate|terrific|great trip|great stay|looking forward/i.test(lower)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * True when this is the Apt 2 bolted-door / street-exit lockout (not generic code fail).
-   * Also scans recent conversationHistory for "bolted" when the current message is a lockout follow-up.
+   *
+   * CRITICAL (Henry review incident): Do NOT scan the full conversation history for "bolted".
+   * Prior lockout turns on the same reservation must not poison later post-stay thanks/review
+   * messages into re-sending the street lockbox script. History is only used for short
+   * follow-ups when a *recent* guest message was already a lockout.
    */
   _isApt2StreetDoorLockout(guestMessage = '', context = {}) {
     if (!this._isApt2Listing(context)) return false;
 
-    const lower = String(guestMessage || '').toLowerCase();
-    const historyText = Array.isArray(context.conversationHistory)
-      ? context.conversationHistory
-          .map((m) => String(m?.body || m?.message || m?.text || ''))
-          .join(' ')
-          .toLowerCase()
-      : '';
-    const combined = `${lower}\n${historyText}`;
+    // Never override post-stay gratitude / review promises with lockout recovery.
+    if (this._isPostStayGratitudeOrReviewPromise(guestMessage, context)) {
+      return false;
+    }
 
-    const bolted = /\bbolted\b|\bdeadbolt(?:ed)?\b|\blocked (?:the )?(?:door|it) from the inside|\blocked from the inside/.test(combined);
+    const lower = String(guestMessage || '').toLowerCase();
+    const msg = String(guestMessage || '').trim();
+
+    const boltedNow =
+      /\bbolted\b|\bdeadbolt(?:ed)?\b|\blocked (?:the )?(?:door|it) from the inside|\blocked from the inside/.test(
+        lower
+      );
     const accidentalFrontLock =
       /accident(?:ally)?\s+lock/.test(lower) ||
       /locked the (?:front )?door not knowing/.test(lower) ||
@@ -1590,35 +1635,57 @@ export class GuestMessagingAgent {
         lower
       );
 
-    // Explicit bolt/deadbolt on Apt 2 (including follow-up "We bolted the door from the inside").
-    if (bolted) return true;
+    // Explicit bolt/deadbolt on the *current* message.
+    if (boltedNow) return true;
     // Henry first message: accidental lock + cannot re-enter (street lockout pattern).
     if (accidentalFrontLock && lockedOut) return true;
     // Lockout + clear "front door locked" / interior lock language without a "code not working" pin.
     if (lockedOut && /front door lock|door locked|from the inside/.test(lower) && !/\bcode\b/.test(lower)) {
       return true;
     }
+
+    // Short follow-up only (e.g. "We bolted the door from the inside") when a *recent*
+    // prior guest message already described being locked out — not the entire thread.
+    if (msg.length > 0 && msg.length <= 160) {
+      const recentGuestBodies = Array.isArray(context.conversationHistory)
+        ? context.conversationHistory
+            .filter((m) => {
+              const role = String(m?.sender_type || m?.role || m?.sender || '').toLowerCase();
+              return role === 'guest' || role === 'guest_message';
+            })
+            .slice(-3)
+            .map((m) => String(m?.body || m?.message || m?.text || '').toLowerCase())
+        : [];
+      const recentLockout = recentGuestBodies.some((b) =>
+        /locked out|unable to get (?:back )?in|can(?:not|'t) get (?:back )?in|unable to get into|accident(?:ally)?\s+lock|not knowing that the front door lock/.test(
+          b
+        )
+      );
+      if (
+        recentLockout &&
+        /\bbolted\b|\bdeadbolt|\bfrom the inside\b|\blocked (?:the )?door\b/.test(lower)
+      ) {
+        return true;
+      }
+    }
+
     return false;
   }
 
   /**
    * Force correct street lockbox recovery for Apt 2 bolted-door lockouts.
-   * Always rewrites to the canonical script (like EVENT_REQUEST) — never keep LLM
-   * wording. Eval flake: model often returns APT2_STREET_DOOR_LOCKOUT with lockbox
-   * + host phones but omits the last-4 pin digits ("0123") even when guestPhone is
-   * known. Completeness-check keep-paths reintroduce that miss.
+   * Always rewrites to the canonical script when the *current* message is a real lockout.
+   * Never apply solely because the LLM category was APT2_STREET_DOOR_LOCKOUT (false positives
+   * + prior-thread history used to re-fire this after checkout thanks — Henry review incident).
    */
   _applyApt2StreetDoorLockoutPolicy(parsed, context = {}, guestMessage = '') {
-    const categories = Array.isArray(parsed.typeOfMessageReceived)
-      ? parsed.typeOfMessageReceived
-      : [parsed.typeOfMessageReceived];
-    const already = categories.includes('APT2_STREET_DOOR_LOCKOUT');
     const detected = this._isApt2StreetDoorLockout(guestMessage, context);
 
-    if (!already && !detected) {
+    // Require live detection on this message (or short lockout follow-up). Category alone is not enough.
+    if (!detected) {
       return { applied: false };
     }
-    if (!this._isApt2Listing(context) && !already) {
+    if (!this._isApt2Listing(context)) {
       return { applied: false };
     }
 
@@ -1627,7 +1694,7 @@ export class GuestMessagingAgent {
     const draft = (parsed.proposedResponse || '').trim();
 
     const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
-    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(·]/)[0];
     let proposedResponse = standard;
     if (greetingMatch) {
       proposedResponse = `${greetingMatch[0].trimEnd()} ${standard}`;
@@ -1639,6 +1706,51 @@ export class GuestMessagingAgent {
       applied: true,
       typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
       proposedResponse,
+    };
+  }
+
+  /**
+   * Post-stay thank-you + review promise → warm REVIEW_PROMISE ack (never lockout/welcome).
+   */
+  _applyReviewPromisePolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isPostStayGratitudeOrReviewPromise(guestMessage, context)) {
+      return { applied: false };
+    }
+    // Housekeeping FYI path has its own richer ack.
+    if (this._isPostStayHousekeepingFeedback(guestMessage)) {
+      return { applied: false };
+    }
+
+    const name = this._guestDisplayFirstName(context);
+    const draft = (parsed.proposedResponse || '').trim();
+    const looksLikeLockout = /locked out|lock box|2630|backup key/i.test(draft);
+    const looksLikeWelcome = this._hostMessageLooksLikeWelcome(draft);
+    const hasReviewAck = /review/i.test(draft) && /you're welcome|you are welcome|thank you|glad/i.test(draft);
+    const isGood =
+      draft &&
+      draft !== 'none' &&
+      !looksLikeLockout &&
+      !looksLikeWelcome &&
+      (hasReviewAck || (/you're welcome|you are welcome/i.test(draft) && draft.length < 280));
+
+    let proposedResponse = draft;
+    if (!isGood) {
+      proposedResponse =
+        `You're welcome, ${name}! So glad you had a terrific trip — thank you for the kind words. ` +
+        `We'll look forward to your review and will leave you a 5-star review as well. ` +
+        `Hope to host you again in Portland soon!`;
+    }
+
+    parsed.typeOfMessageReceived = 'REVIEW_PROMISE';
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'REVIEW_PROMISE',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
     };
   }
 
@@ -2822,6 +2934,21 @@ export class GuestMessagingAgent {
       finalResult.proposedResponse = apt2StreetLockoutPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
       finalResult.confidence = 1.0;
+    }
+
+    // Must run after lockout so post-stay review/thanks win (Henry review incident 2026-07-27).
+    const reviewPromisePolicyFinal = this._applyReviewPromisePolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (reviewPromisePolicyFinal.applied) {
+      console.log('[Agent] → Post-stay review promise / gratitude policy applied (never lockout script)');
+      finalResult.typeOfMessageReceived = reviewPromisePolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = reviewPromisePolicyFinal.proposedResponse;
+      finalResult.shouldReply = reviewPromisePolicyFinal.shouldReply;
+      finalResult.confidence = reviewPromisePolicyFinal.confidence;
+      finalResult.escalated = reviewPromisePolicyFinal.escalated;
     }
 
     const sofaLinensPolicyFinal = this._applySofaBedLinensPolicy(finalResult, enrichedContext, guestMessage);
