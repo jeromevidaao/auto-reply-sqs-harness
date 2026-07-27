@@ -15,7 +15,7 @@
     "expectedCategory": "LUGGAGE_DROP_OFF",
     "shouldReply": true,
     "forbiddenPhrases": [],
-    "requiredPhrases": ["Richard", "807-8071"]
+    "requiredPhrases": ["Richard", "010-0004"]
   },
   "notes": "Real operational scenario with specific contact from old code."
 }

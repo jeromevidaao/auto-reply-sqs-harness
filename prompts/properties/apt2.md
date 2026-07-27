@@ -21,10 +21,10 @@ If guests **bolt/deadbolt the parking-side unit door from the inside** and exit 
 
 **Recovery (street entrance backup key)**:
 - At the **street entrance door**, on the **right**, there are **two lock boxes**.
-- The **top** lock box holds the backup key. Code: **`2630`** (rotate the digits).
+- The **top** lock box holds the backup key. Code: **`{{APT2_STREET_LOCKBOX_CODE}}`** (rotate the digits).
 - After opening the street door, **put the key back in the lock box immediately**.
 - Up the stairs: use the guest **pin code** (last 4 of phone on reservation) to enter the unit.
-- If stuck, call Jerome **646-204-3958**, Ruby **508-667-6477**, or Richard **207-518-3417**.
+- If stuck, call Jerome **{{HOST_JEROME_PHONE}}**, Ruby **{{HOST_RUBY_PHONE}}**, or Richard **{{HOST_RICHARD_PHONE}}**.
 
 This is **not** the same as Apt 3's unit lockbox for normal check-in. Normal Apt 2 arrival still uses the parking/keypad entrance from the instructions — not the street lock boxes.
 

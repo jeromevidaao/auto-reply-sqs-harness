@@ -19,3 +19,9 @@ eval/reports/
 # Secrets (never commit real keys)
 *.pem
 secrets/
+tmp/
+*.zip
+host-contacts*.json
+**/host-contacts.json
+.env.*
+!.env.example

@@ -105,7 +105,7 @@ const latestRealSqsEvent = {
             user: {
               id: "436eb2ed-5174-5542-926f-5013bae34188",
               name: "Jerome Ansia",
-              email: "jerome.ans@gmail.com",
+              email: "{{OWNER_EMAIL}}",
               profile_picture: "https://a0.muscache.com/im/pictures/user/1a21e083-db60-4296-9d97-f3c210294bea.jpg"
             },
             sender: {

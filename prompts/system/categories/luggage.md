@@ -12,11 +12,11 @@ For luggage drop off or storage requests:
 
 **LUGGAGE_DROP_OFF** (before check-in):
 - Direct to Richard (on-site property manager).
-- Phone: (207) 807-8071
+- Phone: {{HOST_RICHARD_PHONE_PRIMARY}}
 - He can help coordinate early luggage drop-off.
 
 **LUGGAGE_STORAGE** (after checkout):
-- Same contact: Richard at (207) 807-8071 or (207) 518-3417 (both numbers appear in production).
+- Same contact: Richard at {{HOST_RICHARD_PHONE_PRIMARY}} or {{HOST_RICHARD_PHONE_ALT}} (both numbers appear in production).
 - He can arrange storage for guests who need to keep bags after 10am checkout.
 
 **Tone**: Helpful and direct — give the contact info clearly.

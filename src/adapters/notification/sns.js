@@ -287,7 +287,7 @@ export class SnsNotificationAdapter {
       ? '🚨 URGENT - APT 2 STREET LOCKOUT (bolted parking door)'
       : '🚨 URGENT - GUEST CANNOT GET IN';
     const guidance = isApt2StreetLockout
-      ? 'Apt 2: guest likely bolted parking door + exited street. Auto-reply should cover top lockbox 2630 + pin. Call/text guest if still stuck.'
+      ? 'Apt 2: guest likely bolted parking door + exited street. Auto-reply should cover top lockbox {{APT2_STREET_LOCKBOX_CODE}} + pin. Call/text guest if still stuck.'
       : 'Please assist the guest immediately.';
 
     const message = [

@@ -216,7 +216,7 @@ export class ConsoleEscalationAdapter {
     lines.push('');
 
     lines.push('Action: Please review and forward to the cleaning team.');
-    lines.push('Recipient (for now): jerome.ans@gmail.com');
+    lines.push('Recipient: owner email from SSM /host/contacts-json (never hardcode)');
     lines.push('#'.repeat(80) + '\n');
 
     console.error(lines.join('\n'));
@@ -264,7 +264,7 @@ export class ConsoleEscalationAdapter {
     }
     lines.push('');
     lines.push(isApt2StreetLockout
-      ? 'Action: SMS Jerome + Ruby (prod: URGENT_ACCESS_*). Street top lockbox 2630 + pin.'
+      ? 'Action: SMS Jerome + Ruby (prod: URGENT_ACCESS_*). Street top lockbox {{APT2_STREET_LOCKBOX_CODE}} + pin.'
       : 'Action: SMS hosts immediately (prod: URGENT_ACCESS_SNS_TOPIC_ARN or URGENT_ACCESS_PHONE_NUMBER).');
     lines.push('!'.repeat(80) + '\n');
 

@@ -1,6 +1,6 @@
 {
   "id": "apt2-street-door-lockout",
-  "description": "Henry incident: Apt 2 guests bolted the parking/unit door from inside, exited via street, locked out. Must NOT reply with only the keypad code (8040/1028). Use street top lockbox 2630 + pin + call numbers.",
+  "description": "Henry incident: Apt 2 guests bolted the parking/unit door from inside, exited via street, locked out. Must NOT reply with only the keypad code (8040/1028). Use street top lockbox {{APT2_STREET_LOCKBOX_CODE}} + pin + call numbers.",
   "guestMessage": "We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb.",
   "context": {
     "guestName": "Henry",
@@ -20,13 +20,13 @@
       "Give that a try and let me know right away if you still can't get in"
     ],
     "requiredPhrases": [
-      "2630",
+      "0000",
       "lock box",
       "top",
       "0123",
-      "646-204-3958",
-      "508-667-6477",
-      "207-518-3417"
+      "{{HOST_JEROME_PHONE}}",
+      "{{HOST_RUBY_PHONE}}",
+      "{{HOST_RICHARD_PHONE}}"
     ]
   },
   "notes": "Canonical Apt 2 street-exit + bolted parking door lockout. Deterministic policy should force category + street backup-key instructions. General DOOR_CODE_ISSUE (try 1028) is wrong here. SNS urgent SMS also fires for this category in handleMessage."

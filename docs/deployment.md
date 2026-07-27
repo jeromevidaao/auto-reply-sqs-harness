@@ -165,3 +165,14 @@ If you ever need to deploy without pushing code (rare):
 ---
 
 **Current status**: As of the latest commit, pushing to `main` will trigger a full deployment after CI passes.
+
+## Host contacts (SSM only)
+
+Personal phone numbers, owner email, WiFi password, and Apt 2 street lockbox code are **not** in this repository.
+
+| Parameter | Type | Purpose |
+|-----------|------|---------|
+| `/host/contacts-json` | SecureString | JSON: host phones, PM phones, WiFi, lockbox code, urgent-access E.164 list |
+
+Lambda role needs `ssm:GetParameter` on `arn:...:parameter/host/*`.
+Prompt markdown uses placeholders like `{{HOST_JEROME_PHONE}}` substituted at runtime.

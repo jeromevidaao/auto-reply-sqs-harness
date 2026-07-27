@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GuestMessagingAgent } from '../src/agent.js';
+import { setHostContactsForTests, TEST_HOST_CONTACTS, clearHostContactsCache } from '../src/config/hostContacts.js';
 import { EventRequestTool } from '../src/tools/event/EventRequestTool.js';
 import { ThermostatTool } from '../src/tools/hvac/ThermostatTool.js';
 
@@ -10,6 +11,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRootForTests = path.resolve(__dirname, '..');
 
 const hasGrokKey = !!process.env.GROK_API_KEY;
+
+setHostContactsForTests(TEST_HOST_CONTACTS);
+process.env.ALLOW_HOST_CONTACT_TEST_DEFAULTS = '1';
 
 describe('EventRequestTool (no LLM)', () => {
   it('detects get-together party asks', async () => {
@@ -109,7 +113,7 @@ describe('EventRequestTool (no LLM)', () => {
     );
     assert.equal(applied.applied, true);
     assert.ok(applied.proposedResponse.includes('Richard'));
-    assert.ok(applied.proposedResponse.includes('807-8071'));
+    assert.ok(applied.proposedResponse.includes('010-0004') || applied.proposedResponse.includes(TEST_HOST_CONTACTS.richardPhonePrimary));
   });
 
   it('directs payment method updates to Airbnb via _applyPaymentMethodPolicy (Julie AMEX incident)', () => {
@@ -265,13 +269,13 @@ describe('EventRequestTool (no LLM)', () => {
     );
     assert.equal(applied.applied, true);
     assert.equal(applied.typeOfMessageReceived, 'APT2_STREET_DOOR_LOCKOUT');
-    assert.ok(applied.proposedResponse.includes('2630'));
+    assert.ok(applied.proposedResponse.includes(TEST_HOST_CONTACTS.apt2StreetLockboxCode));
     assert.ok(/lock box/i.test(applied.proposedResponse));
     assert.ok(applied.proposedResponse.includes('top'));
     assert.ok(applied.proposedResponse.includes('0123'));
-    assert.ok(applied.proposedResponse.includes('646-204-3958'));
-    assert.ok(applied.proposedResponse.includes('508-667-6477'));
-    assert.ok(applied.proposedResponse.includes('207-518-3417'));
+    assert.ok(applied.proposedResponse.includes(TEST_HOST_CONTACTS.jeromePhoneDisplay));
+    assert.ok(applied.proposedResponse.includes(TEST_HOST_CONTACTS.rubyPhoneDisplay));
+    assert.ok(applied.proposedResponse.includes(TEST_HOST_CONTACTS.richardPhoneDisplay));
     assert.ok(!/code for the outside door and unit is 8040/i.test(applied.proposedResponse));
 
     // LLM category correct but omits pin digits when phone is known → always force full script
@@ -279,8 +283,7 @@ describe('EventRequestTool (no LLM)', () => {
       {
         typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
         proposedResponse:
-          "Sorry you're locked out! Top lock box 2630. Put the key back. Call 646-204-3958, 508-667-6477, or 207-518-3417.",
-      },
+          `Sorry you're locked out! Top lock box ${TEST_HOST_CONTACTS.apt2StreetLockboxCode}. Put the key back. Call ${TEST_HOST_CONTACTS.jeromePhoneDisplay}, ${TEST_HOST_CONTACTS.rubyPhoneDisplay}, or ${TEST_HOST_CONTACTS.richardPhoneDisplay}.`,      },
       apt2,
       lockedOutMsg
     );
@@ -292,14 +295,13 @@ describe('EventRequestTool (no LLM)', () => {
       {
         typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
         proposedResponse:
-          "Sorry you're locked out! Top lock box 2630. Put the key back. Use pin 0123. Call 646-204-3958, 508-667-6477, or 207-518-3417.",
-      },
+          `Sorry you're locked out! Top lock box ${TEST_HOST_CONTACTS.apt2StreetLockboxCode}. Put the key back. Use pin 0123. Call ${TEST_HOST_CONTACTS.jeromePhoneDisplay}, ${TEST_HOST_CONTACTS.rubyPhoneDisplay}, or ${TEST_HOST_CONTACTS.richardPhoneDisplay}.`,      },
       apt2,
       lockedOutMsg
     );
     assert.equal(alreadyComplete.applied, true);
     assert.ok(alreadyComplete.proposedResponse.includes('0123'));
-    assert.ok(alreadyComplete.proposedResponse.includes('2630'));
+    assert.ok(alreadyComplete.proposedResponse.includes(TEST_HOST_CONTACTS.apt2StreetLockboxCode));
 
     // Follow-up clarification "We bolted the door from the inside"
     const bolted = agent._applyApt2StreetDoorLockoutPolicy(
@@ -315,7 +317,7 @@ describe('EventRequestTool (no LLM)', () => {
     );
     assert.equal(bolted.applied, true);
     assert.equal(bolted.typeOfMessageReceived, 'APT2_STREET_DOOR_LOCKOUT');
-    assert.ok(bolted.proposedResponse.includes('2630'));
+    assert.ok(bolted.proposedResponse.includes(TEST_HOST_CONTACTS.apt2StreetLockboxCode));
 
     // Must not fire for Apt 3 lockbox problems
     const apt3 = agent._applyApt2StreetDoorLockoutPolicy(
@@ -351,7 +353,7 @@ describe('EventRequestTool (no LLM)', () => {
         sender_type: 'guest',
         body: 'We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb.',
       },
-      { sender_type: 'host', body: "Sorry you're locked out! Top lock box 2630..." },
+      { sender_type: 'host', body: `Sorry you're locked out! Top lock box ${TEST_HOST_CONTACTS.apt2StreetLockboxCode}...` },
       {
         sender_type: 'guest',
         body: 'We bolted the door from the inside',
@@ -363,7 +365,7 @@ describe('EventRequestTool (no LLM)', () => {
     const poisoned = agent._applyApt2StreetDoorLockoutPolicy(
       {
         typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
-        proposedResponse: "Sorry you're locked out! Top lock box 2630.",
+        proposedResponse: `Sorry you're locked out! Top lock box ${TEST_HOST_CONTACTS.apt2StreetLockboxCode}.`,
       },
       {
         ...apt2,
@@ -396,7 +398,7 @@ describe('EventRequestTool (no LLM)', () => {
     const reviewPolicy = agent._applyReviewPromisePolicy(
       {
         typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT',
-        proposedResponse: "Sorry you're locked out! Top lock box 2630.",
+        proposedResponse: `Sorry you're locked out! Top lock box ${TEST_HOST_CONTACTS.apt2StreetLockboxCode}.`,
       },
       {
         ...apt2,
@@ -410,17 +412,18 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(reviewPolicy.typeOfMessageReceived, 'REVIEW_PROMISE');
     assert.ok(/you're welcome/i.test(reviewPolicy.proposedResponse));
     assert.ok(/review/i.test(reviewPolicy.proposedResponse));
-    assert.ok(!/locked out|2630|lock box/i.test(reviewPolicy.proposedResponse));
+    assert.ok(!/locked out|lock box/i.test(reviewPolicy.proposedResponse));
+    assert.ok(!reviewPolicy.proposedResponse.includes(TEST_HOST_CONTACTS.apt2StreetLockboxCode));
   });
 
   it('processMessage injects pin 0123 for Apt 2 lockout even when LLM omits it (eval path)', async () => {
     // Mirrors CI flake: category correct + lockbox/contacts, missing required phrase "0123".
-    const incompleteDraft =
+        const incompleteDraft =
       "Sorry you're locked out! On the street entrance door on the right, you will see two lock boxes. " +
-      'The one at the top has the backup key — open it by rotating the digits to 2630. ' +
+      `The one at the top has the backup key — open it by rotating the digits to ${TEST_HOST_CONTACTS.apt2StreetLockboxCode}. ` +
       'Once you open the street door, put the key back in the lock box right away. ' +
       'After you go up the stairs, use your pin code (the last 4 digits of the phone number on your reservation) to enter the unit. ' +
-      'If you have any trouble, call me at 646-204-3958, my wife Ruby at 508-667-6477, or Richard at 207-518-3417.';
+      `If you have any trouble, call me at ${TEST_HOST_CONTACTS.jeromePhoneDisplay}, my wife Ruby at ${TEST_HOST_CONTACTS.rubyPhoneDisplay}, or Richard at ${TEST_HOST_CONTACTS.richardPhoneDisplay}.`;
 
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
@@ -451,11 +454,11 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(result.typeOfMessageReceived, 'APT2_STREET_DOOR_LOCKOUT');
     assert.equal(result.shouldReply, true);
     assert.ok(result.proposedResponse.includes('0123'), 'must include guest pin last-4');
-    assert.ok(result.proposedResponse.includes('2630'));
+    assert.ok(result.proposedResponse.includes(TEST_HOST_CONTACTS.apt2StreetLockboxCode));
     assert.ok(/lock box/i.test(result.proposedResponse));
-    assert.ok(result.proposedResponse.includes('646-204-3958'));
-    assert.ok(result.proposedResponse.includes('508-667-6477'));
-    assert.ok(result.proposedResponse.includes('207-518-3417'));
+    assert.ok(result.proposedResponse.includes(TEST_HOST_CONTACTS.jeromePhoneDisplay));
+    assert.ok(result.proposedResponse.includes(TEST_HOST_CONTACTS.rubyPhoneDisplay));
+    assert.ok(result.proposedResponse.includes(TEST_HOST_CONTACTS.richardPhoneDisplay));
   });
 
   it('merges multi-intent categories via _mergeCategories', () => {
@@ -484,7 +487,7 @@ describe('EventRequestTool (no LLM)', () => {
     const applied = agent._applyLuggagePolicy(
       {
         typeOfMessageReceived: 'LUGGAGE_DROP_OFF',
-        proposedResponse: 'Please contact Richard at (207) 807-8071 to coordinate early drop-off.',
+        proposedResponse: `Please contact Richard at ${TEST_HOST_CONTACTS.richardPhonePrimary} to coordinate early drop-off.`,
       },
       {},
       'Can we drop our luggage off early before check-in?'

@@ -18,6 +18,7 @@ import { KumoCloudClient } from '../src/clients/KumoCloudClient.js';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { SQSClient, CreateQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+import { loadHostContacts } from '../src/config/hostContacts.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 const sns = new SNSClient({ region: 'us-east-1' });
@@ -610,6 +611,9 @@ export const handler = async (event, context) => {
   // Optional: Google Maps key for live distance / Old Port / walk-drive answers (used by GoogleMapsTool).
   // Falls back gracefully to mock data if missing (same pattern as old monolithic Lambda).
   await getGoogleMapsApiKey();
+
+  // Host phones / WiFi / lockbox codes — SSM /host/contacts-json only (never in source).
+  await loadHostContacts();
 
   // Reflection is now always enabled in production.
   // This ensures the complete pipeline (Main LLM → Tools → Reflection → Judge) runs on every message.

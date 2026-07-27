@@ -30,13 +30,13 @@ Canonical guest wording (use this category):
 
 1. Brief apology / acknowledge lockout.
 2. Street entrance: on the right, **two lock boxes**; the **top** one has the backup key.
-3. Open top lock box by rotating digits to **`2630`**.
+3. Open top lock box by rotating digits to **`{{APT2_STREET_LOCKBOX_CODE}}`**.
 4. Open the street door with the key, then **put the key back in the lock box right away**.
 5. Up the stairs: enter the unit with **their pin code** = last 4 digits of the phone number on their reservation (use the actual digits when known; otherwise say "last 4 digits of the phone number on your reservation").
 6. If still stuck, call:
-   - Jerome: **646-204-3958**
-   - Ruby: **508-667-6477**
-   - Richard: **207-518-3417**
+   - Jerome: **{{HOST_JEROME_PHONE}}**
+   - Ruby: **{{HOST_RUBY_PHONE}}**
+   - Richard: **{{HOST_RICHARD_PHONE}}**
 
 ## Operational side effect
 
@@ -44,4 +44,4 @@ This is **urgent**. The agent also triggers SNS SMS (`notifyUrgentAccessIssue`) 
 
 ## Example reply shape
 
-"Sorry you're locked out! On the street entrance door on the right, you will see two lock boxes. The one at the top has the backup key — open it by rotating the digits to 2630. Once you open the street door, put the key back in the lock box right away. After you go up the stairs, use your pin code (XXXX / the last 4 digits of the phone number on your reservation) to enter the unit. If you have any trouble, call me at 646-204-3958, my wife Ruby at 508-667-6477, or Richard at 207-518-3417."
+"Sorry you're locked out! On the street entrance door on the right, you will see two lock boxes. The one at the top has the backup key — open it by rotating the digits to {{APT2_STREET_LOCKBOX_CODE}}. Once you open the street door, put the key back in the lock box right away. After you go up the stairs, use your pin code (XXXX / the last 4 digits of the phone number on your reservation) to enter the unit. If you have any trouble, call me at {{HOST_JEROME_PHONE}}, my wife Ruby at {{HOST_RUBY_PHONE}}, or Richard at {{HOST_RICHARD_PHONE}}."

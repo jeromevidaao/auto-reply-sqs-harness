@@ -4,8 +4,8 @@
 
 **CRITICAL NAMING RULE**: When the situation matches a golden that expects "WIFI_PASSWORD", you **MUST** output exactly "WIFI_PASSWORD" (uppercase) as the typeOfMessageReceived. Do not use lowercase "wifi".
 
-**Network**: Ansia_2.4
-**Password**: 10286500 (all lowercase)
+**Network**: {{WIFI_SSID}}
+**Password**: {{WIFI_PASSWORD}} (all lowercase)
 
 **Rules**:
 - Only provide when the guest explicitly asks for the WiFi password or network name.

@@ -7,15 +7,19 @@ import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, Cancella
 import { EVENT_REQUEST_STANDARD_RESPONSE } from './tools/event/EventRequestTool.js';
 import { ConversationHistoryRequiredError } from './errors/ConversationHistoryRequiredError.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
+import {
+  loadHostContacts,
+  getHostContactsSync,
+  applyHostContactPlaceholders,
+  buildLuggageDropOffResponse,
+  buildLuggageStorageResponse,
+  buildApt2StreetDoorLockoutResponse,
+  phoneDigitHints,
+  setHostContactsForTests,
+} from './config/hostContacts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
-
-const LUGGAGE_DROP_OFF_STANDARD_RESPONSE =
-  'Yes, you can coordinate an early luggage drop-off with Richard, our on-site property manager, at (207) 807-8071.';
-
-const LUGGAGE_STORAGE_STANDARD_RESPONSE =
-  'Richard, our on-site property manager, can help with luggage storage after checkout. You can reach him at (207) 807-8071 or (207) 518-3417.';
 
 const PAYMENT_METHOD_UPDATE_STANDARD_RESPONSE =
   'Please reach out to Airbnb to ensure that this is the case. We host, do not handle payments.';
@@ -31,23 +35,6 @@ const LAUNDRY_QUESTION_STANDARD_RESPONSE =
 
 /** Apt 2 listing UUID (Sunny Downtown 2 Bed) — street-door lockout is unit-specific. */
 const APT2_LISTING_ID = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
-
-/**
- * Build the Apt 2 street-door lockout recovery reply.
- * @param {string|null} pinLast4 - last 4 of guest phone when known
- */
-function buildApt2StreetDoorLockoutResponse(pinLast4 = null) {
-  const pinPhrase = pinLast4
-    ? `your pin code ${pinLast4} (last 4 digits of the phone number on your reservation)`
-    : 'your pin code (the last 4 digits of the phone number on your reservation)';
-  return (
-    `Sorry you're locked out! On the street entrance door on the right, you will see two lock boxes. ` +
-    `The one at the top has the backup key — open it by rotating the digits to 2630. ` +
-    `Once you open the street door, put the key back in the lock box right away. ` +
-    `After you go up the stairs, use ${pinPhrase} to enter the unit. ` +
-    `If you have any trouble, call me at 646-204-3958, my wife Ruby at 508-667-6477, or Richard at 207-518-3417.`
-  );
-}
 
 const EXTRA_LINENS_TOWELS_FOLLOW_UP =
   'If you cannot find them, feel free to let us know.';
@@ -97,6 +84,8 @@ export class GuestMessagingAgent {
     this.requireLiveConversationHistory = options.requireLiveConversationHistory;
 
     this.systemPrompt = null;
+    /** @type {import('./config/hostContacts.js').loadHostContacts extends Function ? any : any} */
+    this._hostContacts = null;
 
     // Tools registry (unified interface for capabilities like cleaning detection, future tools)
     if (options.tools instanceof ToolRegistry) {
@@ -149,6 +138,13 @@ export class GuestMessagingAgent {
    * - `fullPromptPath` provided → loads verbatim (raw production prompt for fidelity testing)
    * - Otherwise → composes modular prompt: base.md + categories/ + property-specific knowledge
    */
+
+  async ensureHostContacts() {
+    if (this._hostContacts) return this._hostContacts;
+    this._hostContacts = await loadHostContacts();
+    return this._hostContacts;
+  }
+
   async loadPrompt(context = {}) {
     if (this.systemPrompt && !context.listingId) return this.systemPrompt;
 
@@ -157,7 +153,7 @@ export class GuestMessagingAgent {
     try {
       // Raw production fidelity mode (takes precedence)
       if (this.fullPromptPath) {
-        const full = await fs.readFile(this.fullPromptPath, 'utf8');
+        const full = applyHostContactPlaceholders(await fs.readFile(this.fullPromptPath, 'utf8'));
         if (!context.listingId) this.systemPrompt = full;
         console.log(`[Agent] Loaded RAW production prompt (${full.length} chars) in ${Date.now() - start}ms`);
         return full;
@@ -173,7 +169,9 @@ export class GuestMessagingAgent {
             propertyKnowledge = await fs.readFile(path.join(this.propertiesDir, propertyFile), 'utf8');
           } catch {}
         }
-        const simple = [base.trim(), propertyKnowledge ? '\n\n' + propertyKnowledge : ''].join('');
+        const simple = applyHostContactPlaceholders(
+          [base.trim(), propertyKnowledge ? '\n\n' + propertyKnowledge : ''].join('')
+        );
         if (!context.listingId) this.systemPrompt = simple;
         console.log(`[Agent] Loaded SIMPLE prompt (no categories) in ${Date.now() - start}ms`);
         return simple;
@@ -209,11 +207,11 @@ export class GuestMessagingAgent {
         // categories directory optional
       }
 
-      const composed = [
+      const composed = applyHostContactPlaceholders([
         base.trim(),
         categoryKnowledge ? `\n\n# Category Rules\n${categoryKnowledge}` : '',
         propertyKnowledge ? `\n\n# Property-Specific Knowledge\n${propertyKnowledge}` : ''
-      ].join('');
+      ].join(''));
 
       if (!context.listingId) {
         this.systemPrompt = composed;
@@ -255,6 +253,7 @@ export class GuestMessagingAgent {
    * @param {object} context - reservation/inquiry info + conversation history etc.
    */
   async processMessage(guestMessage, context = {}) {
+    await this.ensureHostContacts();
     // Cheap event detection — eval runner calls processMessage directly (not handleMessage),
     // so we must run this here too, not only in _enrichTracesEarly.
     if (!context.earlyEventDetection) {
@@ -1256,16 +1255,18 @@ export class GuestMessagingAgent {
 
     const draft = (parsed.proposedResponse || '').trim();
     const lower = draft.toLowerCase();
-    const hasRichard = lower.includes('richard');
-    const hasPhone = lower.includes('807-8071') || lower.includes('8078071');
+    const hasRichard = lower.includes('richard') || lower.includes((getHostContactsSync().propertyManagerName || 'richard').toLowerCase());
+    const digitHints = phoneDigitHints();
+    const draftDigits = lower.replace(/\D/g, '');
+    const hasPhone = digitHints.some((h) => h && draftDigits.includes(h));
 
     if (hasRichard && hasPhone) {
       return { applied: false };
     }
 
     const standard = isStorage && !isDropOff
-      ? LUGGAGE_STORAGE_STANDARD_RESPONSE
-      : LUGGAGE_DROP_OFF_STANDARD_RESPONSE;
+      ? buildLuggageStorageResponse()
+      : buildLuggageDropOffResponse();
 
     const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
     const proposedResponse = greetingMatch
@@ -2371,6 +2372,7 @@ export class GuestMessagingAgent {
    * testing real scenarios.
    */
   async handleMessage(guestMessage, context = {}) {
+    await this.ensureHostContacts();
     // Defense-in-depth: if the caller provides clear evidence this is a host message, bail out early.
     // RULE (per explicit requirement): Identify host vs guest using ONLY the sender metadata itself
     // (sender_type, sender.type, sender_role, sender.role). Never use message content/body.
@@ -2929,7 +2931,7 @@ export class GuestMessagingAgent {
       guestMessage
     );
     if (apt2StreetLockoutPolicyFinal.applied) {
-      console.log('[Agent] → Apt 2 street-door lockout policy applied (backup key 2630, not keypad-only)');
+      console.log('[Agent] → Apt 2 street-door lockout policy applied (backup key {{APT2_STREET_LOCKBOX_CODE}}, not keypad-only)');
       finalResult.typeOfMessageReceived = apt2StreetLockoutPolicyFinal.typeOfMessageReceived || 'APT2_STREET_DOOR_LOCKOUT';
       finalResult.proposedResponse = apt2StreetLockoutPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
@@ -3034,7 +3036,7 @@ export class GuestMessagingAgent {
     // === Urgent Access Escalation (SMS via SNS) — post-final policies ===
     // Time-sensitive: guest cannot get in. Includes APT2_STREET_DOOR_LOCKOUT (bolted door /
     // street exit) which texts Jerome + Ruby. Config: URGENT_ACCESS_SNS_TOPIC_ARN or
-    // URGENT_ACCESS_PHONE_NUMBER (comma-separated, e.g. +16462043958,+15086676477).
+    // URGENT_ACCESS_PHONE_NUMBER (comma-separated, e.g. {{HOST_JEROME_PHONE_E164}},{{HOST_RUBY_PHONE_E164}}).
     const accessIssueCategories = [
       'DOOR_CODE_ISSUE',
       'APT3_LOCKBOX_ISSUE',
@@ -3152,7 +3154,7 @@ export class GuestMessagingAgent {
     // Try to load the dedicated reflection module if available
     try {
       const reflectionPath = path.join(this.categoriesDir, 'reflection.md');
-      const reflectionRules = await fs.readFile(reflectionPath, 'utf8');
+      const reflectionRules = applyHostContactPlaceholders(await fs.readFile(reflectionPath, 'utf8'));
       lines.push(reflectionRules);
       lines.push('\n---\n');
     } catch {
@@ -3462,7 +3464,7 @@ export class GuestMessagingAgent {
 
     try {
       const judgePath = path.join(this.categoriesDir, 'conversation-judge.md');
-      const judgeRules = await fs.readFile(judgePath, 'utf8');
+      const judgeRules = applyHostContactPlaceholders(await fs.readFile(judgePath, 'utf8'));
       lines.push(judgeRules);
       lines.push('\n---\n');
     } catch {

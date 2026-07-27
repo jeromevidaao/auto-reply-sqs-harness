@@ -60,11 +60,11 @@ This document tracks the concrete next steps for the harness. We will grow it it
 - [x] `ConversationContextTool` enhanced with real pre-approval detection logic (using Hospitable inquiry + messages)
 - [x] Cheap early UnitReadiness trace added for check-in day messages
 - [x] Explicit escalation forcing for risky cancellations (prior host statements, exception requests, or recent host activity + cancellation talk)
-  - Any cancellation conversation with risk signals now triggers an email to jerome.ans@gmail.com with the direct Airbnb conversation URL
+  - Any cancellation conversation with risk signals now triggers an email to {{OWNER_EMAIL}} with the direct Airbnb conversation URL
 - [x] New urgent access escalation path: When a guest cannot get in (door code, lockbox, wrong entrance, etc.), an immediate SMS is sent via SNS
   - Supports either a dedicated SNS topic (`URGENT_ACCESS_SNS_TOPIC_ARN`) — recommended when notifying multiple people
-  - Or direct phone number(s) via `URGENT_ACCESS_PHONE_NUMBER` (comma-separated, e.g. +16462043958,+15086676477)
-  - Currently configured for Jerome (646-204-3958) and Ruby (508-667-6477)
+  - Or direct phone number(s) via `URGENT_ACCESS_PHONE_NUMBER` (comma-separated, e.g. {{HOST_JEROME_PHONE_E164}},{{HOST_RUBY_PHONE_E164}})
+  - Currently configured for Jerome ({{HOST_JEROME_PHONE}}) and Ruby ({{HOST_RUBY_PHONE}})
 - [x] **Judge quality iteration loop** (category-agnostic): critique → one rewrite from issues/tools → verify (max 1 rewrite). `enableJudgeRewriteLoop` default on. Traces: `judgePasses`, `judgeRewrite`, `conversationJudgeCritique` / `conversationJudgeVerify`.
 - Tool results and safety traces (pre-approval, recent host activity, unit readiness) available earlier in the pipeline
 - Next: Continue moving remaining old production safety logic (full duplicate checks, more pre-approval details) into the tool layer
