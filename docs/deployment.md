@@ -166,6 +166,18 @@ If you ever need to deploy without pushing code (rare):
 
 **Current status**: As of the latest commit, pushing to `main` will trigger a full deployment after CI passes.
 
+## Owner escalation notifications (manual reply needed)
+
+When the agent **cannot auto-reply**, production notifies the **Cleaning Button Android app** via FCM (data-only payload, type `manual_reply_needed`), using the same stack as cleaning alerts:
+
+- SSM: `/fcm/project-id`, `/fcm/service-account-json` (SecureString)
+- DynamoDB: `androidDeviceTokens`
+- Lambda IAM: policy `FcmOwnerAndroidNotify` on `auto-reply-sqs-role-3i2ozrop`
+
+Full agent diagnostics remain in **CloudWatch**. The legacy SNS email topic (`SNS_TOPIC_ARN` → `airbnb-unanswered-guest-questions`) is used only if FCM is unavailable (no tokens / misconfigured).
+
+Urgent access lockouts still use SNS SMS / `URGENT_ACCESS_*` (unchanged). Cleaning-issue SNS emails are unchanged.
+
 ## Host contacts (SSM only)
 
 Personal phone numbers, owner email, WiFi password, backup door code, and lockbox codes are **not** in this repository.

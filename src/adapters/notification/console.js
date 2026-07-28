@@ -5,7 +5,7 @@
  * When the agent decides not to auto-reply, this prints a very clear
  * "ESCALATION REQUIRED - Manual reply needed" block.
  *
- * This is the local equivalent of the SNS → email behavior in the original Lambda.
+ * Local equivalent of production escalation (Android FCM primary; SNS email is fallback only).
  */
 
 export class ConsoleEscalationAdapter {

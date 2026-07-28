@@ -1,11 +1,19 @@
 /**
  * SnsNotificationAdapter
  *
- * Production-style escalation using AWS SNS (same mechanism as the original auto-reply-sqs Lambda).
- * Publishes a message to the configured SNS topic, which can trigger email (or other) notifications.
+ * Escalation (manual reply needed): Android FCM to cleaningbutton app (primary).
+ * Full agent trace always logged to CloudWatch; SNS email topic is fallback only
+ * if FCM is unavailable (no tokens / misconfigured).
+ *
+ * Cleaning issues still use SNS email topic. Urgent access still uses SNS SMS/topic.
  */
 
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+import {
+  notifyOwnerAndroid,
+  buildEscalationFcmContent,
+  clip,
+} from './fcm.js';
 
 export class SnsNotificationAdapter {
   constructor(options = {}) {
@@ -21,14 +29,17 @@ export class SnsNotificationAdapter {
     this._sns = new SNSClient({ region: this.region });
   }
 
-  async notifyEscalation({ decision, guestMessage, context, timestamp = new Date() }) {
+  /**
+   * Build the full diagnostic escalation text (CloudWatch + SNS fallback only).
+   * Too large for FCM — do not send this as push body.
+   */
+  _buildEscalationDiagnosticMessage({ decision, guestMessage, context, timestamp = new Date() }) {
     const guestName = context.guestDisplayName || context.guestName || 'Guest';
     const property = context.propertyName || context.listingId || 'Unknown property';
     const dates = (context.checkIn && context.checkOut)
       ? `${context.checkIn} → ${context.checkOut}`
       : '';
 
-    // Extract IDs for diagnostics (user requirement: always surface reservation id in escalation emails)
     const reservationId =
       context.reservationId ||
       context.reservation_id ||
@@ -41,8 +52,6 @@ export class SnsNotificationAdapter {
       context.conversationId ||
       'N/A';
 
-    // Build direct Airbnb link if possible.
-    // Prefer real conversation_id returned by Hospitable (see getReservations).
     let airbnbLink = '';
     if (context.airbnb_message_url) {
       airbnbLink = context.airbnb_message_url;
@@ -54,8 +63,8 @@ export class SnsNotificationAdapter {
 
     const subject = `[Airbnb] Manual reply needed from ${guestName} - ${property}`;
 
-    // Human summary (kept for quick scan)
     const messageLines = [
+      `Time: ${timestamp.toISOString()}`,
       `Guest: ${guestName}`,
       `Property: ${property}`,
       dates ? `Dates: ${dates}` : '',
@@ -78,7 +87,6 @@ export class SnsNotificationAdapter {
       messageLines.push('');
     }
 
-    // === THE RESPONSE THAT WAS NOT SENT (critical for diagnosis) ===
     const proposed = (decision && typeof decision.proposedResponse === 'string')
       ? decision.proposedResponse
       : 'none';
@@ -88,13 +96,9 @@ export class SnsNotificationAdapter {
     messageLines.push('```');
     messageLines.push('');
 
-    // === FULL TRACE OF THOUGHTS / REASONING (why we escalated / did not send) ===
-    // This is the key addition: full agent decision, reflection, judge, notes, early traces, raw output.
-    // Makes every manual-needed email self-contained for root-cause without needing CW logs first.
     messageLines.push('=== FULL AGENT TRACE / REASONING (how the agent reached "no auto-reply") ===');
     messageLines.push('');
 
-    // Core decision flags + any suppression/force signals
     const coreDecision = {
       typeOfMessageReceived: decision?.typeOfMessageReceived,
       shouldReply: decision?.shouldReply,
@@ -109,7 +113,6 @@ export class SnsNotificationAdapter {
     messageLines.push(JSON.stringify(coreDecision, null, 2));
     messageLines.push('');
 
-    // Reflection (second-pass critique) if present
     if (decision?.reflection) {
       messageLines.push('Reflection:');
       messageLines.push(JSON.stringify(decision.reflection, null, 2));
@@ -122,7 +125,6 @@ export class SnsNotificationAdapter {
       messageLines.push('');
     }
 
-    // Conversation Judge (anti-rep / accuracy / policy last pass) — often the decider for REJECT → escalate
     if (decision?.conversationJudge) {
       messageLines.push('Conversation Judge:');
       messageLines.push(JSON.stringify(decision.conversationJudge, null, 2));
@@ -135,10 +137,8 @@ export class SnsNotificationAdapter {
       messageLines.push('');
     }
 
-    // Early traces (pre-first-pass signals from ConversationContextTool + other cheap tools)
     const et = decision?.earlyTraces || context?.conversationTraces || context?.earlyTraces || null;
     if (et) {
-      // Surface the most diagnostic fields without dumping the entire (sometimes large) object
       const traceSummary = {
         hasRecentHostMessage: et.hasRecentHostMessage || et.conversationTraces?.hasRecentHostMessage,
         duplicateRisk: et.duplicateRisk || et.conversationTraces?.duplicateRisk,
@@ -158,7 +158,6 @@ export class SnsNotificationAdapter {
       messageLines.push('');
     }
 
-    // First-pass raw model output (very useful to see exactly what the LLM emitted before post-processing/safety nets/judge)
     if (decision?.rawModelOutput) {
       const raw = String(decision.rawModelOutput);
       messageLines.push('First-pass raw model output (truncated):');
@@ -166,7 +165,6 @@ export class SnsNotificationAdapter {
       messageLines.push('');
     }
 
-    // Any other notes present on the decision
     if (decision?.notes) {
       messageLines.push('Decision notes: ' + decision.notes);
       messageLines.push('');
@@ -176,7 +174,59 @@ export class SnsNotificationAdapter {
     messageLines.push('');
     messageLines.push('(Full CloudWatch logs for this request ID contain the complete enriched context, RAW EVENT, and every intermediate trace.)');
 
-    const message = messageLines.join('\n');
+    return { subject, message: messageLines.join('\n') };
+  }
+
+  async notifyEscalation({ decision, guestMessage, context, timestamp = new Date() }) {
+    const { subject, message } = this._buildEscalationDiagnosticMessage({
+      decision,
+      guestMessage,
+      context,
+      timestamp,
+    });
+
+    // Always log full diagnostics to CloudWatch (email used to carry this).
+    console.log('📤 ESCALATION DIAGNOSTIC (CloudWatch):');
+    console.log(message);
+
+    // Primary: Android push (same owner_alerts channel as cleaning / battery).
+    const fcmContent = buildEscalationFcmContent({ decision, guestMessage, context });
+    // Include a short unsent-reply preview when present (fits tray BigText).
+    const proposed = (decision && typeof decision.proposedResponse === 'string')
+      ? decision.proposedResponse
+      : '';
+    if (proposed && proposed !== 'none') {
+      fcmContent.body = clip(
+        `${fcmContent.body}\n\nUnsent draft:\n${clip(proposed, 220)}`,
+        900
+      );
+    }
+
+    try {
+      const fcmResult = await notifyOwnerAndroid(fcmContent);
+      if (fcmResult.ok) {
+        console.log(
+          `✅ Escalation sent via Android FCM (success=${fcmResult.successCount} fail=${fcmResult.failureCount})`
+        );
+        return {
+          escalated: true,
+          channel: 'fcm',
+          successCount: fcmResult.successCount,
+          failureCount: fcmResult.failureCount,
+        };
+      }
+      console.warn(
+        `[Escalation] FCM unavailable (${fcmResult.reason || 'unknown'}); falling back to SNS email topic`
+      );
+    } catch (fcmErr) {
+      console.warn('[Escalation] FCM failed; falling back to SNS email topic:', fcmErr.message);
+    }
+
+    // Fallback: SNS topic → email (legacy path) so escalations are never silent.
+    if (!this.topicArn) {
+      console.error('❌ Escalation: FCM failed and SNS_TOPIC_ARN is not set');
+      throw new Error('Escalation notify failed: FCM unavailable and no SNS topic configured');
+    }
 
     try {
       const command = new PublishCommand({
@@ -186,17 +236,15 @@ export class SnsNotificationAdapter {
       });
 
       const result = await this._sns.send(command);
-      console.log(`✅ Escalation published to SNS (MessageId: ${result.MessageId})`);
-      console.log('📤 ACTUAL ESCALATION MESSAGE SENT TO CLOUDWATCH/SNS:');
-      console.log(message);
+      console.log(`✅ Escalation published to SNS fallback (MessageId: ${result.MessageId})`);
       return {
         escalated: true,
-        channel: 'sns',
+        channel: 'sns-fallback',
         messageId: result.MessageId,
         topicArn: this.topicArn,
       };
     } catch (err) {
-      console.error('❌ Failed to publish escalation to SNS:', err.message);
+      console.error('❌ Failed to publish escalation to SNS fallback:', err.message);
       throw err;
     }
   }

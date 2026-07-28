@@ -19,6 +19,7 @@ import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { SQSClient, CreateQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 import { loadHostContacts } from '../src/config/hostContacts.js';
+import { notifyOwnerAndroid, clip } from '../src/adapters/notification/fcm.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 const sns = new SNSClient({ region: 'us-east-1' });
@@ -884,36 +885,73 @@ export const handler = async (event, context) => {
             console.log(result.proposedResponse);
             console.log('====================================================\n');
 
-            // Escalate the perfectly good reply (generation + judge/reflection succeeded) so you get the exact text
+            // Escalate the good reply for manual send: Android FCM primary, SNS email fallback.
             try {
-              const topicArn = process.env.SNS_TOPIC_ARN;
-              if (topicArn) {
-                await sns.send(new PublishCommand({
-                  TopicArn: topicArn,
-                  Subject: `[Airbnb Inquiry] Auto-reply ready for manual send — ${msgContext.guestName || 'Guest'}`,
-                  Message: [
-                    'Brand new inquiry (no reservation_id in webhook).',
-                    '',
-                    `Guest: ${msgContext.guestName || 'Unknown'}`,
-                    `Listing / Property: ${msgContext.propertyName || msgContext.listing?.name || msgContext.property?.name || 'N/A'}`,
-                    `Webhook conversation_id: ${inquiryIdForSend}`,
-                    `Original message: ${guestMessage || msgContext.body || '(see CloudWatch)'}`,
-                    '',
-                    'GENERATED REPLY (send this manually via Hospitable or the Chrome extension):',
-                    result.proposedResponse,
-                    '',
-                    'The harness correctly classified this as NEW_INQUIRY_WELCOME, ran the full agent + reflection + judge, and produced the reply above.',
-                    'However sendMessageToInquiry (and the conversation fallback) returned 404 for the ID in the payload.',
-                    'This ID may be an Airbnb-side conversation reference that is not directly addressable for sending on the current Hospitable integration until the guest books (or requires a different endpoint/claim step).',
-                    '',
-                    `Request ID: ${requestId}`,
-                    'Full logs and context are in CloudWatch (search the request ID).'
-                  ].join('\n')
-                }));
-                console.log('📧 Full generated inquiry reply published to SNS_TOPIC_ARN');
+              const guestLabel = msgContext.guestName || 'Guest';
+              const propLabel =
+                msgContext.propertyName ||
+                msgContext.listing?.name ||
+                msgContext.property?.name ||
+                'N/A';
+              const fcmBody = [
+                'Inquiry reply ready — send manually (Hospitable send 404).',
+                propLabel,
+                `Guest: ${guestLabel}`,
+                clip(result.proposedResponse || '', 400),
+              ].join('\n');
+              const fcmResult = await notifyOwnerAndroid({
+                type: 'manual_reply_needed',
+                title: `Inquiry reply ready — ${guestLabel}`,
+                body: fcmBody,
+                data: {
+                  type: 'manual_reply_needed',
+                  guestName: String(guestLabel),
+                  property: String(propLabel),
+                  category: 'NEW_INQUIRY_WELCOME',
+                  conversationId: String(inquiryIdForSend || ''),
+                  listingName: String(propLabel),
+                  requestId: String(requestId || ''),
+                },
+              });
+              if (fcmResult.ok) {
+                console.log(
+                  `📱 Inquiry manual-send alert via Android FCM (success=${fcmResult.successCount})`
+                );
+              } else {
+                const topicArn = process.env.SNS_TOPIC_ARN;
+                if (topicArn) {
+                  await sns.send(
+                    new PublishCommand({
+                      TopicArn: topicArn,
+                      Subject: `[Airbnb Inquiry] Auto-reply ready for manual send — ${guestLabel}`,
+                      Message: [
+                        'Brand new inquiry (no reservation_id in webhook).',
+                        '',
+                        `Guest: ${guestLabel}`,
+                        `Listing / Property: ${propLabel}`,
+                        `Webhook conversation_id: ${inquiryIdForSend}`,
+                        `Original message: ${guestMessage || msgContext.body || '(see CloudWatch)'}`,
+                        '',
+                        'GENERATED REPLY (send this manually via Hospitable or the Chrome extension):',
+                        result.proposedResponse,
+                        '',
+                        'FCM was unavailable; this is the SNS email fallback.',
+                        `Request ID: ${requestId}`,
+                      ].join('\n'),
+                    })
+                  );
+                  console.log('📧 Inquiry manual-send alert published to SNS_TOPIC_ARN (FCM fallback)');
+                } else {
+                  console.warn(
+                    'Inquiry escalation: FCM unavailable and SNS_TOPIC_ARN unset; reply text is in logs above'
+                  );
+                }
               }
-            } catch (snsErr) {
-              console.warn('Could not publish inquiry escalation to SNS (the reply text is printed in the logs above):', snsErr.message);
+            } catch (notifyErr) {
+              console.warn(
+                'Could not publish inquiry escalation (reply text is printed in the logs above):',
+                notifyErr.message
+              );
             }
 
             // Return a clean 200 success. This acks the SQS message, avoids incrementing the Lambda Errors metric,
