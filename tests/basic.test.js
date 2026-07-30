@@ -1476,20 +1476,121 @@ describe('Post-stay housekeeping feedback (no LLM)', () => {
     const amyMsg = 'We had a lovely stay. The only thing was that there were no sheets for the sofa bed. Thanks!';
     const skipped = agent._applyCleaningIssueEscalationPolicy(
       { typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS', proposedResponse: "You're welcome, Amy!" },
-      { detected: true, matchedPhrase: 'no sheets' },
+      { detected: true, matchedPhrase: 'no sheets', strength: 'strong', blocksAutoReply: true },
       amyMsg
     );
     assert.equal(skipped.applied, false);
 
     const escalated = agent._applyCleaningIssueEscalationPolicy(
       { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'Sorry about that.' },
-      { detected: true, matchedPhrase: 'hair in the shower' },
+      { detected: true, matchedPhrase: 'hair in the shower', strength: 'strong', blocksAutoReply: true },
       'There was hair in the shower when we arrived.'
     );
     assert.equal(escalated.applied, true);
     assert.equal(escalated.shouldReply, false);
     assert.equal(escalated.proposedResponse, 'none');
     assert.equal(escalated.escalated, true);
+  });
+
+  it('HARDENING: logistics cleaning never blocks EARLY_CHECKIN draft (Olivia class)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const oliviaMsg =
+      "Hi Jerome - I'm flying into Portland tomorrow morning and landing around 9AM. Is there any opportunity for an early check in? If so, please let me know what time we'd be able to arrive. We're also planning to leave early on Sunday (by/before 9AM), so I will message you when we depart in case you want to start the cleaning process early.";
+    const draft =
+      "Good evening, Olivia, we can't guarantee early check-in since the unit needs preparation time, but if cleaning finishes before 4pm we'll message you right away. Thanks for the heads-up on your early Sunday departure—we'll note that.";
+
+    // Even if a buggy tool returned detected:true with bare "cleaning", policy must not wipe.
+    const policy = agent._applyCleaningIssueEscalationPolicy(
+      { typeOfMessageReceived: 'EARLY_CHECKIN', proposedResponse: draft, shouldReply: true, confidence: 1 },
+      { detected: true, matchedPhrase: 'cleaning', strength: 'weak', blocksAutoReply: false },
+      oliviaMsg
+    );
+    assert.equal(policy.applied, false);
+    assert.equal(policy.alertOnly, true);
+
+    // Logistics language in the guest message wins even if a buggy tool claimed "dirty".
+    const policy2 = agent._applyCleaningIssueEscalationPolicy(
+      { typeOfMessageReceived: 'EARLY_CHECKIN', proposedResponse: draft, shouldReply: true },
+      { detected: true, matchedPhrase: 'dirty', strength: 'strong', blocksAutoReply: true },
+      oliviaMsg
+    );
+    assert.equal(policy2.applied, false);
+
+    // Real strong in-stay cleaning complaint (no logistics) still escalates.
+    const realComplaint = agent._applyCleaningIssueEscalationPolicy(
+      { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'Sorry about the mess.', shouldReply: true },
+      { detected: true, matchedPhrase: 'dirty', strength: 'strong', blocksAutoReply: true },
+      'The bathroom was dirty when we arrived.'
+    );
+    assert.equal(realComplaint.applied, true);
+    assert.equal(realComplaint.shouldReply, false);
+
+    // Safety net restores wiped draft after judge APPROVE
+    const restored = agent._applyApprovedDraftSafetyNet(
+      {
+        typeOfMessageReceived: 'EARLY_CHECKIN',
+        proposedResponse: 'none',
+        shouldReply: false,
+        escalated: true,
+        confidence: 1,
+      },
+      {
+        preCleanDraft: draft,
+        preCleanShouldReply: true,
+        judgeVerdict: 'APPROVE',
+        reflectionDecision: 'APPROVED',
+      }
+    );
+    assert.equal(restored.applied, true);
+    assert.equal(restored.shouldReply, true);
+    assert.equal(restored.proposedResponse, draft);
+    assert.equal(restored.escalated, false);
+
+    // Safety net must NOT restore after judge REJECT
+    const notRestored = agent._applyApprovedDraftSafetyNet(
+      {
+        typeOfMessageReceived: 'EARLY_CHECKIN',
+        proposedResponse: 'none',
+        shouldReply: false,
+        escalated: true,
+        judgeForcedReject: true,
+      },
+      {
+        preCleanDraft: draft,
+        preCleanShouldReply: true,
+        judgeVerdict: 'REJECT',
+      }
+    );
+    assert.equal(notRestored.applied, false);
+  });
+
+  it('HARDENING: HeatPumpTool short-circuits with no action when not HVAC-relevant', async () => {
+    const { HeatPumpTool } = await import('../src/tools/hvac/HeatPumpTool.js');
+    let fetchCalled = false;
+    const fakeKumo = {
+      getStatusForListing: async () => {
+        fetchCalled = true;
+        return { summary: { modes: ['heat'] }, units: [] };
+      },
+      ensureConsistentForComplaint: async () => {
+        fetchCalled = true;
+        return { fixed: true, recommendedMode: 'auto', recommendedTempF: 65 };
+      },
+    };
+    const tool = new HeatPumpTool({ kumoClient: fakeKumo });
+    const msg =
+      "Is there any opportunity for an early check in? We'll leave early so you can start the cleaning process early.";
+    const result = await tool.execute(msg, {
+      listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+      guestName: 'Olivia',
+    });
+    assert.equal(result.guestMessageRelevant, false);
+    assert.equal(result.actionTaken, null);
+    assert.equal(result.skippedReason, 'not_hvac_relevant');
+    assert.equal(fetchCalled, false, 'must not call Kumo when not HVAC-relevant');
   });
 
   it('applies post-stay housekeeping policy in processMessage (eval runner path)', async () => {

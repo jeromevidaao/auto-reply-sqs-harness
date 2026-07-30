@@ -271,12 +271,13 @@ export class GuestMessagingAgent {
     }
 
     // Thermostat instructions — eval runner calls processMessage directly.
+    // HARDENING: only attach when guestMessageRelevant (never inject HVAC into early-check-in etc.).
     if (!context.earlyThermostatInfo) {
       const thermostatTool = this.tools.get('get_thermostat_instructions');
       if (thermostatTool) {
         try {
           const thermoInfo = await thermostatTool.execute(guestMessage, context);
-          if (thermoInfo?.detected) {
+          if (thermoInfo?.detected && thermoInfo?.guestMessageRelevant) {
             context.earlyThermostatInfo = thermoInfo;
           }
         } catch {
@@ -563,6 +564,64 @@ export class GuestMessagingAgent {
     return (postStay && (missingSetup || fyiIssue)) || (fyiIssue && missingSetup);
   }
 
+  /**
+   * Categories that are safe high-value auto-replies. A weak/false cleaning signal must
+   * never wipe a substantial draft for these (Olivia 2026-07-30).
+   */
+  _safeAutoReplyCategories() {
+    return [
+      'EARLY_CHECKIN',
+      'EARLY_CHECKIN_QUESTION',
+      'CHECK_IN_TIME_QUESTION',
+      'SELF_CHECKIN_QUESTION',
+      'NEW_RESERVATION_WELCOME',
+      'NEW_INQUIRY_WELCOME',
+      'THANK_YOU_MESSAGE',
+      'PARKING',
+      'LATE_CHECKOUT',
+      'STAY_EXTENSION',
+      'LAUNDRY_QUESTION',
+      'DIRECTIONS',
+      'WIFI',
+      'CHECKOUT',
+    ];
+  }
+
+  _messageCategory(parsed = {}) {
+    return Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived[0]
+      : parsed.typeOfMessageReceived;
+  }
+
+  _isSubstantialDraft(text = '') {
+    const t = (text || '').trim();
+    return t.length > 30 && t.toLowerCase() !== 'none';
+  }
+
+  _isLogisticsCleaningMention(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    return (
+      /\bcleaning\s+process\b/.test(lower) ||
+      /\bstart(?:ing)?\s+(?:the\s+)?cleaning\b/.test(lower) ||
+      /\bcleaning\s+team\b/.test(lower) ||
+      /\bcleaning\s+finishes?\b/.test(lower) ||
+      /\bcleaning\s+fee\b/.test(lower) ||
+      /\bextra\s+cleaning\b/.test(lower) ||
+      /\bin\s+case\s+you\s+want.{0,40}\bcleaning\b/.test(lower) ||
+      /\bif\s+cleaning\b/.test(lower)
+    );
+  }
+
+  /**
+   * Cleaning escalation: only *strong* real complaints may wipe auto-reply.
+   * Alert can still fire from the tool independently.
+   *
+   * HARDENING layers (Olivia incident):
+   * 1) logistics-only cleaning language → never escalate
+   * 2) weak strength / bare "cleaning" → never wipe draft
+   * 3) safe auto-reply category + substantial draft already approved → never wipe
+   * 4) only strong complaint phrases block send
+   */
   _applyCleaningIssueEscalationPolicy(parsed, cleaningIssue = {}, guestMessage = '') {
     if (!cleaningIssue.detected) {
       return { applied: false };
@@ -571,21 +630,46 @@ export class GuestMessagingAgent {
     if (this._isPostStayHousekeepingFeedback(guestMessage)) {
       return { applied: false };
     }
-    // Defense-in-depth for Olivia early-check-in logistics: "start the cleaning process early"
-    // is a courtesy, not a complaint. CleaningIssueTool should already return detected:false,
-    // but never force no-reply on pure EARLY_CHECKIN when the only signal was bare "cleaning".
-    const category = Array.isArray(parsed.typeOfMessageReceived)
-      ? parsed.typeOfMessageReceived[0]
-      : parsed.typeOfMessageReceived;
-    const earlyFlex = ['EARLY_CHECKIN', 'EARLY_CHECKIN_QUESTION', 'CHECK_IN_TIME_QUESTION', 'SELF_CHECKIN_QUESTION'];
-    const lower = (guestMessage || '').toLowerCase();
-    const logisticsCleaning =
-      /\bcleaning\s+process\b/.test(lower) ||
-      /\bstart(?:ing)?\s+(?:the\s+)?cleaning\b/.test(lower) ||
-      /\bcleaning\s+team\b/.test(lower) ||
-      /\bcleaning\s+finishes?\b/.test(lower);
-    if (earlyFlex.includes(category) && logisticsCleaning && cleaningIssue.matchedPhrase === 'cleaning') {
-      return { applied: false };
+
+    const category = this._messageCategory(parsed);
+    const draft = (parsed.proposedResponse || '').trim();
+    const substantial = this._isSubstantialDraft(draft);
+    const strength = cleaningIssue.strength || (cleaningIssue.matchedPhrase === 'cleaning' ? 'weak' : 'strong');
+    const blocksFromTool = cleaningIssue.blocksAutoReply === true || strength === 'strong';
+    const logistics = this._isLogisticsCleaningMention(guestMessage);
+    const safeCategory = this._safeAutoReplyCategories().includes(category);
+
+    // Layer 1–2: logistics or weak signal → keep draft, no wipe
+    // Bare matchedPhrase "cleaning" is always treated as weak (never wipe alone).
+    if (logistics || strength === 'weak' || cleaningIssue.matchedPhrase === 'cleaning') {
+      console.log(
+        '[Agent] → Cleaning signal present but NOT blocking auto-reply',
+        { strength, matchedPhrase: cleaningIssue.matchedPhrase, logistics, category }
+      );
+      return {
+        applied: false,
+        alertOnly: true,
+        reason: logistics ? 'logistics_cleaning_mention' : 'weak_cleaning_signal',
+      };
+    }
+
+    // Layer 3: only weak/ambiguous tool flags + safe category with a good draft.
+    // Real strong complaints (dirty / hair / not clean) still escalate even on EARLY_CHECKIN.
+    if (safeCategory && substantial && strength !== 'strong') {
+      console.log(
+        '[Agent] → SAFETY NET: preserving substantial draft for safe category (non-strong cleaning)',
+        { category, matchedPhrase: cleaningIssue.matchedPhrase, strength }
+      );
+      return {
+        applied: false,
+        alertOnly: true,
+        reason: 'preserve_safe_category_draft',
+      };
+    }
+
+    // Layer 4: only strong complaints wipe the send
+    if (!blocksFromTool) {
+      return { applied: false, alertOnly: true, reason: 'tool_does_not_block' };
     }
 
     parsed.proposedResponse = 'none';
@@ -597,7 +681,60 @@ export class GuestMessagingAgent {
       shouldReply: false,
       confidence: 1.0,
       escalated: true,
+      reason: 'strong_cleaning_complaint',
     };
+  }
+
+  /**
+   * Final Olivia-class safety net: if a later policy wiped shouldReply / draft but we still
+   * have a judge-approved (or reflection-approved) substantial draft for a safe category,
+   * restore the send. Never re-enable after judge REJECT or cancellation force-escalation.
+   */
+  _applyApprovedDraftSafetyNet(finalResult = {}, snapshot = {}) {
+    const {
+      preCleanDraft = '',
+      preCleanShouldReply = false,
+      judgeVerdict = null,
+      reflectionDecision = null,
+    } = snapshot;
+
+    if (finalResult.forceCancellationEscalation) {
+      return { applied: false };
+    }
+    if (finalResult.judgeForcedReject || judgeVerdict === 'REJECT') {
+      return { applied: false };
+    }
+
+    const category = this._messageCategory(finalResult);
+    const safeCategory = this._safeAutoReplyCategories().includes(category);
+    const wiped =
+      finalResult.shouldReply === false ||
+      !this._isSubstantialDraft(finalResult.proposedResponse);
+    const hadGoodDraft =
+      preCleanShouldReply !== false && this._isSubstantialDraft(preCleanDraft);
+    const judgeOk = !judgeVerdict || judgeVerdict === 'APPROVE' || judgeVerdict === 'REVISE';
+    const reflectionOk =
+      !reflectionDecision ||
+      reflectionDecision === 'APPROVED' ||
+      reflectionDecision === 'REVISED' ||
+      reflectionDecision === 'APPROVE';
+
+    if (safeCategory && wiped && hadGoodDraft && judgeOk && reflectionOk) {
+      console.log(
+        '[Agent] → SAFETY NET: restoring wiped approved draft for safe category',
+        { category, judgeVerdict, draftLen: preCleanDraft.length }
+      );
+      return {
+        applied: true,
+        proposedResponse: preCleanDraft,
+        shouldReply: true,
+        escalated: false,
+        confidence: Math.max(finalResult.confidence || 0, 0.95),
+        restoredBySafetyNet: true,
+        reason: 'restore_approved_safe_category_draft',
+      };
+    }
+    return { applied: false };
   }
 
   _applyPostStayHousekeepingFeedbackPolicy(parsed, context = {}, guestMessage = '') {
@@ -2551,30 +2688,38 @@ export class GuestMessagingAgent {
     }
 
     // === Cleaning issue detection (separate high-priority alert) ===
+    // Alert only on strong complaints — never page on logistics "cleaning process" language.
     const cleaningTool = this.tools.get('detect_cleaning_issue');
     const cleaningIssue = cleaningTool
       ? await cleaningTool.execute(guestMessage, enrichedContext)
       : { detected: false };
 
-    if (cleaningIssue.detected) {
-      console.log('[Agent] → Cleaning issue detected → triggering dedicated alert');
+    if (cleaningIssue.detected && (cleaningIssue.strength === 'strong' || cleaningIssue.blocksAutoReply)) {
+      console.log('[Agent] → Strong cleaning issue detected → triggering dedicated alert');
       await this.notification.notifyCleaningIssue({
         cleaningIssue,
         guestMessage,
         context: enrichedContext,
       });
+    } else if (cleaningIssue.detected) {
+      console.log(
+        '[Agent] → Weak/ambiguous cleaning signal — alert skipped (auto-reply path preserved)',
+        { matchedPhrase: cleaningIssue.matchedPhrase, strength: cleaningIssue.strength }
+      );
+    } else if (cleaningIssue.logisticsOnly) {
+      console.log('[Agent] → Logistics-only cleaning mention — no alert, no escalate');
     }
 
     // === Thermostat / HVAC instructions (KumoCloud + Nest warnings) ===
-    // Prefer early trace if we already ran it
+    // Prefer early trace if we already ran it. Late path only keeps HVAC when relevant.
     let thermostatInfo = enrichedContext.earlyThermostatInfo || null;
     if (!thermostatInfo) {
       const thermostatTool = this.tools.get('get_thermostat_instructions');
       if (thermostatTool) {
         const info = await thermostatTool.execute(guestMessage, enrichedContext);
-        if (info && info.detected) {
+        if (info && info.detected && info.guestMessageRelevant) {
           thermostatInfo = info;
-          console.log('[Agent] → Thermostat info generated (late)');
+          console.log('[Agent] → Thermostat info generated (late, HVAC-relevant)');
         }
       }
     } else {
@@ -2582,13 +2727,19 @@ export class GuestMessagingAgent {
     }
 
     // === Live heat pump status (KumoCloud) — prefer early, fall back to late fetch ===
+    // HARDENING: never call HeatPumpTool (and never setAllUnits) unless HVAC-relevant.
     let heatPumpInfo = enrichedContext.heatPumpInfo || null;
-    if (!heatPumpInfo) {
+    const hvacRelevant =
+      !!thermostatInfo?.guestMessageRelevant ||
+      !!enrichedContext.earlyThermostatInfo?.guestMessageRelevant;
+    if (heatPumpInfo) {
+      console.log('[Agent] → Using early heat pump live status');
+    } else if (hvacRelevant) {
       const hpTool = this.tools.get('get_heat_pump_status');
       if (hpTool) {
         try {
           const info = await hpTool.execute(guestMessage, enrichedContext);
-          if (info && (info.liveStatus || info.detected)) {
+          if (info && info.guestMessageRelevant && (info.liveStatus || info.detected)) {
             heatPumpInfo = info;
             console.log('[Agent] → Heat pump live status generated (late)');
           }
@@ -2597,7 +2748,7 @@ export class GuestMessagingAgent {
         }
       }
     } else {
-      console.log('[Agent] → Using early heat pump live status');
+      console.log('[Agent] → Skipping heat pump tool (message not HVAC-relevant)');
     }
 
     // === Cancellation handling (high-risk policy area) ===
@@ -3038,6 +3189,10 @@ export class GuestMessagingAgent {
       finalResult.escalated = postStayFeedbackPolicyFinal.escalated;
     }
 
+    // Snapshot draft before cleaning policy can wipe it (Olivia safety net).
+    const preCleanDraft = (finalResult.proposedResponse || '').trim();
+    const preCleanShouldReply = finalResult.shouldReply;
+
     const cleaningEscalationPolicyFinal = this._applyCleaningIssueEscalationPolicy(finalResult, cleaningIssue, guestMessage);
     if (cleaningEscalationPolicyFinal.applied) {
       console.log('[Agent] → Cleaning issue escalation policy applied (manual reply required)');
@@ -3046,6 +3201,23 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = cleaningEscalationPolicyFinal.shouldReply;
       finalResult.confidence = cleaningEscalationPolicyFinal.confidence;
       finalResult.escalated = cleaningEscalationPolicyFinal.escalated;
+    }
+
+    // Final restore: judge-approved substantial draft for safe categories must not die
+    // because a weak tool false-positive wiped the send.
+    const approvedDraftNet = this._applyApprovedDraftSafetyNet(finalResult, {
+      preCleanDraft,
+      preCleanShouldReply,
+      judgeVerdict: finalResult.conversationJudge?.verdict || finalResult.judgeVerdict || null,
+      reflectionDecision: finalResult.reflection?.decision || null,
+    });
+    if (approvedDraftNet.applied) {
+      finalResult.proposedResponse = approvedDraftNet.proposedResponse;
+      finalResult.shouldReply = approvedDraftNet.shouldReply;
+      finalResult.escalated = approvedDraftNet.escalated;
+      finalResult.confidence = approvedDraftNet.confidence;
+      finalResult.restoredBySafetyNet = true;
+      finalResult.safetyNetReason = approvedDraftNet.reason;
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);

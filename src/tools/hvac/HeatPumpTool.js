@@ -53,40 +53,41 @@ export class HeatPumpTool extends BaseTool {
       suggestedResponseSnippet: null,
     };
 
+    // HARDENING: short-circuit before any Kumo API / setAllUnits when not HVAC-relevant.
+    // Never touch devices or inject soft HVAC snippets into non-HVAC threads.
+    if (!seemsRelevant) {
+      result.message = 'Guest message is not HVAC-relevant — skipping live fetch and auto-fix.';
+      result.skippedReason = 'not_hvac_relevant';
+      return result;
+    }
+
     if (!listingId) {
       result.message = 'No listingId in context — cannot fetch live heat pump data.';
+      result.detected = true; // relevant but cannot act
       return result;
     }
 
     if (!this.kumoClient) {
       // Graceful no-op when not wired (local tests without mock, or before full deploy)
-      result.detected = seemsRelevant;
+      result.detected = true;
       result.message = 'KumoCloudClient not provided to HeatPumpTool (no live data).';
-      if (seemsRelevant) {
-        result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName);
-      }
+      result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName);
       return result;
     }
 
     try {
-      // Always fetch live status for relevant messages (cheap, ~3 devices)
+      // Only fetch live status for relevant messages
       const status = await this.kumoClient.getStatusForListing(listingId);
       result.liveStatus = status;
       result.detected = true;
 
-      // If this looks like a real problem report, attempt auto-remediation via the client's helper.
-      // The helper decides mode/temp based on keywords in the guest message and whether it sees mixed/wrong modes.
-      if (seemsRelevant) {
-        const fix = await this.kumoClient.ensureConsistentForComplaint(listingId, guestMessage);
-        result.actionTaken = fix;
-
-        result.suggestedResponseSnippet = this._buildLiveSnippet(guestName, status, fix);
-      } else {
-        result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName);
-      }
+      // Auto-remediation only on clear comfort complaints (already gated by seemsRelevant).
+      const fix = await this.kumoClient.ensureConsistentForComplaint(listingId, guestMessage);
+      result.actionTaken = fix;
+      result.suggestedResponseSnippet = this._buildLiveSnippet(guestName, status, fix);
     } catch (err) {
       result.error = err.message;
-      result.detected = seemsRelevant;
+      result.detected = true;
       // Still give the guest the safe instruction even if live fetch failed
       result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName);
     }

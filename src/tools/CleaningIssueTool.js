@@ -4,9 +4,15 @@ import { BaseTool } from './BaseTool.js';
  * CleaningIssueTool
  *
  * Detects cleaning-related *complaints* in guest messages (especially post-stay feedback).
- * Must NOT fire on non-complaint uses of the word "cleaning" — e.g. Olivia offering an early
- * Sunday departure "so you can start the cleaning process early", pet "extra cleaning" fees,
- * or "if cleaning finishes before 4pm" logistics language.
+ *
+ * HARDENING (Olivia 2026-07-30): Must NOT fire on non-complaint uses of the word "cleaning"
+ * — e.g. early Sunday departure "so you can start the cleaning process early", pet "extra
+ * cleaning" fees, or "if cleaning finishes before 4pm" logistics language.
+ *
+ * Returns strength:
+ *   - strong: real complaint phrases → may block auto-reply + alert
+ *   - weak: ambiguous "cleaning" near complaint words → alert-only, never block auto-reply
+ *   - (no detect): logistics-only mentions
  */
 export class CleaningIssueTool extends BaseTool {
   constructor() {
@@ -16,7 +22,8 @@ export class CleaningIssueTool extends BaseTool {
     });
 
     // Strong complaint phrases (substring match is OK — these are multi-word / specific).
-    this.cleaningPatterns = [
+    // Bare "cleaning" is NEVER in this list.
+    this.strongComplaintPatterns = [
       'hair in the shower',
       'stained',
       'dirty',
@@ -49,10 +56,19 @@ export class CleaningIssueTool extends BaseTool {
       'not stocked',
       'wasn\'t stocked',
       'was not stocked',
+      'poor cleaning',
+      'bad cleaning',
+      'terrible cleaning',
+      'cleaning was poor',
+      'cleaning was bad',
+      'cleaning issue',
+      'cleaning problem',
     ];
 
-    // Standalone "cleaning" only counts as a complaint when the surrounding wording
-    // is not clearly logistics / early-departure courtesy / fee language.
+    // Back-compat alias used by older call sites / tests
+    this.cleaningPatterns = this.strongComplaintPatterns;
+
+    // Standalone "cleaning" only in logistics / courtesy / fee language — never a complaint.
     // Olivia 2026-07-30: "...start the cleaning process early" must NOT match.
     this.nonComplaintCleaningPatterns = [
       /\bcleaning\s+process\b/,
@@ -69,51 +85,87 @@ export class CleaningIssueTool extends BaseTool {
       /\buntil\s+cleaning\b/,
       /\bcleaning\s+is\s+still\b/,
       /\bmessage\s+you\s+(?:when|as soon as).{0,40}\bcleaning\b/,
+      /\bif\s+cleaning\b/,
+      /\bonce\s+cleaning\b/,
+      /\bafter\s+(?:the\s+)?cleaning\s+team\b/,
+      /\bso\s+(?:that\s+)?(?:you|the\s+team|cleaners?).{0,40}\bcleaning\b/,
+      /\bin\s+case\s+you\s+want.{0,40}\bcleaning\b/,
+      /\bwant\s+to\s+start\s+(?:the\s+)?cleaning\b/,
+      /\bprepare\s+(?:the\s+)?(?:unit|place|apartment).{0,30}\bcleaning\b/,
     ];
   }
 
   /**
-   * True when "cleaning" appears only in non-complaint / logistics contexts
-   * (or does not appear at all as a bare token worth escalating on).
+   * True when "cleaning" appears only in non-complaint / logistics contexts.
    */
+  isLogisticsOnlyCleaningMention(text = '') {
+    const t = (text || '').toLowerCase();
+    if (!/\bcleaning\b/.test(t)) return false;
+    const hasLogistics = this.nonComplaintCleaningPatterns.some((re) => re.test(t));
+    if (!hasLogistics) return false;
+    const hasStrong = this.strongComplaintPatterns.some((p) => t.includes(p));
+    return !hasStrong;
+  }
+
+  // Alias used internally / older name
   _isNonComplaintCleaningMention(text = '') {
-    if (!/\bcleaning\b/.test(text)) return false;
-    // If any non-complaint pattern matches and there is no strong complaint pattern, treat as logistics.
-    const hasNonComplaint = this.nonComplaintCleaningPatterns.some((re) => re.test(text));
-    if (!hasNonComplaint) return false;
-    const hasStrongComplaint = this.cleaningPatterns.some((p) => text.includes(p));
-    return !hasStrongComplaint;
+    return this.isLogisticsOnlyCleaningMention(text);
   }
 
   async execute(input, context = {}) {
     const message = typeof input === 'string' ? input : input?.message;
 
     if (!message || typeof message !== 'string') {
-      return { detected: false };
+      return { detected: false, strength: null, blocksAutoReply: false };
     }
 
     const text = message.toLowerCase();
 
-    // Prefer specific complaint phrases first (never bare "cleaning" alone).
-    let matched = this.cleaningPatterns.find((pattern) => text.includes(pattern));
+    // Logistics-only mentions (Olivia) — hard no-detect.
+    if (this.isLogisticsOnlyCleaningMention(text)) {
+      return {
+        detected: false,
+        strength: null,
+        blocksAutoReply: false,
+        logisticsOnly: true,
+        matchedPhrase: null,
+        reason: 'logistics_only_cleaning_mention',
+      };
+    }
 
-    // Bare "cleaning" only if it looks like a real complaint and is not logistics.
-    if (!matched && /\bcleaning\b/.test(text) && !this._isNonComplaintCleaningMention(text)) {
-      // Require complaint-ish neighborhood around "cleaning" (issue / problem / dirty / bad / poor / not).
+    // Prefer specific strong complaint phrases (never bare "cleaning" alone).
+    let matched = this.strongComplaintPatterns.find((pattern) => text.includes(pattern));
+    let strength = matched ? 'strong' : null;
+
+    // Weak: bare "cleaning" near complaint-ish words, only if NOT logistics.
+    if (!matched && /\bcleaning\b/.test(text)) {
       const complaintyCleaning =
         /\b(?:poor|bad|terrible|awful|issue|problem|complaint|dirty|not|never|wasn't|wasnt|didn'?t|was not)\b.{0,40}\bcleaning\b/.test(text) ||
         /\bcleaning\b.{0,40}\b(?:issue|problem|poor|bad|terrible|awful|dirty|not done|never done|incomplete)\b/.test(text) ||
         /\b(?:the\s+)?cleaning\s+(?:was|is)\s+(?:poor|bad|terrible|awful|incomplete|not)\b/.test(text);
       if (complaintyCleaning) {
         matched = 'cleaning';
+        // Bare "cleaning" is always weak — alert ok, never wipe a good draft alone.
+        strength = 'weak';
       }
     }
 
     if (!matched) {
-      return { detected: false };
+      return { detected: false, strength: null, blocksAutoReply: false };
     }
 
-    console.log('[CleaningIssueTool] Cleaning complaint detected. Matched phrase:', matched);
+    // Strong phrases that are housekeeping setup (Amy) still block-or-not is decided by agent
+    // policies (post-stay FYI allows reply). blocksAutoReply here = tool recommendation only.
+    const blocksAutoReply = strength === 'strong';
+
+    console.log(
+      '[CleaningIssueTool] Cleaning complaint detected. Matched phrase:',
+      matched,
+      'strength:',
+      strength,
+      'blocksAutoReply:',
+      blocksAutoReply
+    );
 
     const matchIndex = text.indexOf(matched);
     const start = Math.max(0, matchIndex - 80);
@@ -124,7 +176,9 @@ export class CleaningIssueTool extends BaseTool {
       detected: true,
       type: 'cleaning',
       matchedPhrase: matched,
-      summary: `Guest mentioned a cleaning issue related to "${matched}".`,
+      strength,
+      blocksAutoReply,
+      summary: `Guest mentioned a cleaning issue related to "${matched}" (${strength}).`,
       contextSnippet,
       fullMessage: message,
       reservation: {
