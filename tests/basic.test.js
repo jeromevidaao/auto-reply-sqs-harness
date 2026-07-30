@@ -1410,6 +1410,42 @@ describe('Post-stay housekeeping feedback (no LLM)', () => {
     assert.equal(result.matchedPhrase, 'no sheets');
   });
 
+  it('does not treat early-departure "cleaning process" logistics as a cleaning complaint (Olivia incident)', async () => {
+    const { CleaningIssueTool } = await import('../src/tools/CleaningIssueTool.js');
+    const tool = new CleaningIssueTool();
+    const msg =
+      "Hi Jerome - I'm flying into Portland tomorrow morning and landing around 9AM. Is there any opportunity for an early check in? If so, please let me know what time we'd be able to arrive. We're also planning to leave early on Sunday (by/before 9AM), so I will message you when we depart in case you want to start the cleaning process early.";
+    const result = await tool.execute(msg, {
+      guestName: 'Olivia',
+      reservationId: '22471edf-6221-4900-9609-88a925499e9a',
+      propertyName: 'Cozy, Central 2 Bd Apt, Parking',
+    });
+    assert.equal(result.detected, false, 'early-departure courtesy mentioning cleaning process must not escalate');
+  });
+
+  it('still detects real cleaning complaints that use the word cleaning', async () => {
+    const { CleaningIssueTool } = await import('../src/tools/CleaningIssueTool.js');
+    const tool = new CleaningIssueTool();
+    const result = await tool.execute(
+      'The cleaning was poor — the bathroom was dirty when we arrived.',
+      { guestName: 'Test' }
+    );
+    assert.equal(result.detected, true);
+  });
+
+  it('HeatPumpTool does not treat "opportunity" early-check-in as HVAC (Olivia unit substring)', async () => {
+    const { HeatPumpTool } = await import('../src/tools/hvac/HeatPumpTool.js');
+    const tool = new HeatPumpTool(); // no kumo client — relevance only
+    const msg =
+      "Hi Jerome - I'm flying into Portland tomorrow morning and landing around 9AM. Is there any opportunity for an early check in? If so, please let me know what time we'd be able to arrive. We're also planning to leave early on Sunday (by/before 9AM), so I will message you when we depart in case you want to start the cleaning process early.";
+    const result = await tool.execute(msg, {
+      listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+      guestName: 'Olivia',
+    });
+    assert.equal(result.guestMessageRelevant, false, '"opportunity" must not match keyword unit');
+    assert.equal(result.actionTaken, null);
+  });
+
   it('auto-replies to post-stay housekeeping feedback with warm ack (Amy incident)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

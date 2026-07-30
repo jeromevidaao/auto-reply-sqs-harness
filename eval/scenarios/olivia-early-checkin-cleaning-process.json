@@ -1,0 +1,42 @@
+{
+  "id": "olivia-early-checkin-cleaning-process",
+  "description": "Olivia: early check-in ask + early Sunday departure courtesy that mentions 'cleaning process'. Must auto-reply EARLY_CHECKIN; must NOT treat as cleaning complaint.",
+  "guestMessage": "Hi Jerome - I'm flying into Portland tomorrow morning and landing around 9AM. Is there any opportunity for an early check in? If so, please let me know what time we'd be able to arrive. We're also planning to leave early on Sunday (by/before 9AM), so I will message you when we depart in case you want to start the cleaning process early.",
+  "context": {
+    "guestName": "Olivia",
+    "checkIn": "2026-07-31T16:00:00-04:00",
+    "checkOut": "2026-08-02T10:00:00-04:00",
+    "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "propertyName": "Cozy, Central 2 Bd Apt, Parking",
+    "reservationId": "22471edf-6221-4900-9609-88a925499e9a",
+    "conversation_id": "2101c152-cc0c-4c44-ae44-01b1ff163eb1",
+    "asOfDate": "2026-07-30",
+    "conversationHistory": [
+      {
+        "role": "host",
+        "body": "You're welcome, Olivia!",
+        "created_at": "2026-07-28T20:01:52Z"
+      },
+      {
+        "role": "guest",
+        "body": "Thank you so much! We actually won't be brining our dog after all, but thank you!",
+        "created_at": "2026-07-28T20:01:01Z"
+      }
+    ],
+    "conversationTraces": {
+      "hasRecentHostMessage": false,
+      "duplicateRisk": false,
+      "earlyUnitReadyOffered": false,
+      "historyFetchFailed": false,
+      "historySource": "scenario",
+      "recentMessageCount": 2
+    }
+  },
+  "rubric": {
+    "expectedCategory": ["EARLY_CHECKIN", "EARLY_CHECKIN_QUESTION", "CHECK_IN_TIME_QUESTION"],
+    "shouldReply": true,
+    "requiredPhrases": ["4pm", "Olivia"],
+    "forbiddenPhrases": ["hair", "sorry about the cleaning", "cleaning issue"]
+  },
+  "notes": "Production 2026-07-30: bare 'cleaning' in CleaningIssueTool matched 'start the cleaning process early', applied cleaning escalation (shouldReply false, proposedResponse none), and HeatPumpTool substring 'unit' inside 'opportunity' auto-set Apt 3 heat pumps. Fix: logistics cleaning exclusion + HVAC word boundaries. Agent should auto-reply early-check-in policy and acknowledge early Sunday departure."
+}

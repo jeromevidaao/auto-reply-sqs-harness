@@ -571,6 +571,22 @@ export class GuestMessagingAgent {
     if (this._isPostStayHousekeepingFeedback(guestMessage)) {
       return { applied: false };
     }
+    // Defense-in-depth for Olivia early-check-in logistics: "start the cleaning process early"
+    // is a courtesy, not a complaint. CleaningIssueTool should already return detected:false,
+    // but never force no-reply on pure EARLY_CHECKIN when the only signal was bare "cleaning".
+    const category = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived[0]
+      : parsed.typeOfMessageReceived;
+    const earlyFlex = ['EARLY_CHECKIN', 'EARLY_CHECKIN_QUESTION', 'CHECK_IN_TIME_QUESTION', 'SELF_CHECKIN_QUESTION'];
+    const lower = (guestMessage || '').toLowerCase();
+    const logisticsCleaning =
+      /\bcleaning\s+process\b/.test(lower) ||
+      /\bstart(?:ing)?\s+(?:the\s+)?cleaning\b/.test(lower) ||
+      /\bcleaning\s+team\b/.test(lower) ||
+      /\bcleaning\s+finishes?\b/.test(lower);
+    if (earlyFlex.includes(category) && logisticsCleaning && cleaningIssue.matchedPhrase === 'cleaning') {
+      return { applied: false };
+    }
 
     parsed.proposedResponse = 'none';
 

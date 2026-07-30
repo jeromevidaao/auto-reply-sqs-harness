@@ -39,18 +39,10 @@ export class HeatPumpTool extends BaseTool {
     const listingId = context.listingId;
     const guestName = context.guestName || null;
 
-    const lower = guestMessage.toLowerCase();
-    const isRemotePerUnitQuestion =
-      /\bremote/.test(lower) &&
-      (
-        /\b(?:one|the|a|single)\b.{0,30}\bremote\b.{0,50}\b(?:both|two|all|multiple)\b/.test(lower) ||
-        /\bremote\b.{0,50}\b(?:both|two|all)\b.{0,30}\b(?:unit|units|head|heads|room|rooms|air)\b/.test(lower) ||
-        /\b(?:both|two|all)\b.{0,30}\b(?:unit|units|air)\b.{0,50}\b(?:one|the|a|single)\b.{0,20}\bremote\b/.test(lower) ||
-        (/\b(?:both|two|all)\s+air\s+units?\b/.test(lower) && /\bremote/.test(lower))
-      ) &&
-      !/\b(?:cold|hot|freezing|not (?:working|blowing|cooling)|no air|too (?:hot|cold)|turn (?:up|down)|broken|stuck|warm up|cool down)\b/.test(lower);
-    const tempKeywords = ['hot', 'cold', 'warm', 'cool', 'temperature', 'thermostat', 'heat', 'ac', 'air conditioning', 'too warm', 'too cold', 'freezing', 'boiling', 'no air', 'not blowing', 'air not', 'stuffy', 'remotes', 'unit', 'units', 'air', 'settings'];
-    const seemsRelevant = !isRemotePerUnitQuestion && tempKeywords.some(kw => lower.includes(kw));
+    // Word-boundary / phrase-based relevance (same discipline as ThermostatTool).
+    // Naive substring matching falsely treated "opportunity" as HVAC because it contains "unit"
+    // (Olivia early-check-in 2026-07-30) and auto-set all heat pumps on a non-HVAC message.
+    const seemsRelevant = this._isGuestMessageHvacRelevant(guestMessage);
 
     const result = {
       detected: false,
@@ -100,6 +92,74 @@ export class HeatPumpTool extends BaseTool {
     }
 
     return result;
+  }
+
+  /**
+   * Detect genuine HVAC / comfort complaints. Uses word boundaries and phrase patterns
+   * to avoid false positives (e.g. "unit" inside "opportunity", "hot" inside "hotel",
+   * "air" inside "Airbnb").
+   */
+  _isGuestMessageHvacRelevant(guestMessage = '') {
+    const m = (guestMessage || '').toLowerCase();
+
+    if (this._isRemotePerUnitQuestion(guestMessage)) {
+      return false;
+    }
+
+    if (/\bhotel recommendations?\b/.test(m) || /\brecommend(?:ations?)?\b.*\bhotels?\b/.test(m) || /\bhotels?\b.*\brecommend/.test(m)) {
+      return false;
+    }
+    if (/\bairbnb\b/.test(m) && !this._hasExplicitHvacLanguage(m.replace(/\bairbnb\b/g, ' '))) {
+      return false;
+    }
+
+    return this._hasExplicitHvacLanguage(m);
+  }
+
+  _isRemotePerUnitQuestion(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    if (!/\bremote/.test(lower)) {
+      return false;
+    }
+
+    const asksAboutSharedRemote =
+      /\b(?:one|the|a|single)\b.{0,30}\bremote\b.{0,50}\b(?:both|two|all|multiple)\b/.test(lower) ||
+      /\bremote\b.{0,50}\b(?:both|two|all)\b.{0,30}\b(?:unit|units|head|heads|room|rooms|air)\b/.test(lower) ||
+      /\b(?:both|two|all)\b.{0,30}\b(?:unit|units|air)\b.{0,50}\b(?:one|the|a|single)\b.{0,20}\bremote\b/.test(lower) ||
+      (/\b(?:both|two|all)\s+air\s+units?\b/.test(lower) && /\bremote/.test(lower));
+
+    if (!asksAboutSharedRemote) {
+      return false;
+    }
+
+    return !/\b(?:cold|hot|freezing|not (?:working|blowing|cooling)|no air|too (?:hot|cold)|turn (?:up|down)|broken|stuck|warm up|cool down)\b/.test(lower);
+  }
+
+  _hasExplicitHvacLanguage(m = '') {
+    const hvacPatterns = [
+      /\bthermostat\b/,
+      /\btemperature\b/,
+      /\btoo (?:hot|cold|warm|cool)\b/,
+      /\b(?:cold|hot|freezing) in (?:here|the)\b/,
+      /\bit'?s (?:cold|hot|freezing|boiling)\b/,
+      /\bturn(?:ing)? (?:up|down) the heat\b/,
+      /\bheat pump\b/,
+      /\bair conditioning\b/,
+      /\bno air\b/,
+      /\b(?:ac|a\/c)\b/,
+      /\bheat(?:ing)?\b/,
+      /\bfreezing\b/,
+      /\bnest\b/,
+      /\bremotes?\b/,
+      /\bno air coming\b/,
+      /\b(?:either|both).{0,40}\bunits?\b/,
+      /\bunits?\b.{0,30}(?:on|off|air|ac|heat|cool|remote|setting|blowing)/,
+      /\bcool down\b/,
+      /\bwarm up\b/,
+      /\bstuffy\b/,
+      /\bnot blowing\b/,
+    ];
+    return hvacPatterns.some((p) => p.test(m));
   }
 
   _buildSoftInstructionSnippet(guestName) {
