@@ -143,3 +143,7 @@ The goal is the highest quality responses possible by ensuring every pass in the
 ---
 
 Built to make the guest experience consistently excellent while making the developer experience for improving the agent delightful.
+
+## Repository Privacy
+
+Switching all repositories to private is a GitHub account setting change performed outside the UI or API and is explicitly out of scope for code edits in this harness.
