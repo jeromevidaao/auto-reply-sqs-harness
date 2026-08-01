@@ -6,6 +6,11 @@
  * - Real SQS traffic from grok_message (the shapes the old monolithic system actually sends):
  *     { body: "<json-string>" }                 → often contains nested { data: { body, conversation_id, ... } }
  *     { data: { body, reservation_id, conversation_id, ... } }
+ * - Real SQS traffic from grok_reservation (reservation.created / reservation.changed):
+ *     API Gateway envelope with act=reservation and Hospitable reservation payload.
+ *     Pending→just-accepted (request-to-book) triggers a welcome that opens with
+ *     "I just accepted your inquiry" then normal NEW_RESERVATION_WELCOME logistics.
+ *     Instant book (accepted with no prior pending) is skipped here — guest message path covers it.
  *
  * The extraction logic below is intentionally tolerant so we don't drop messages during the cutover.
  */
@@ -20,6 +25,12 @@ import { SQSClient, CreateQueueCommand, SendMessageCommand } from '@aws-sdk/clie
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 import { loadHostContacts } from '../src/config/hostContacts.js';
 import { notifyOwnerAndroid, clip } from '../src/adapters/notification/fcm.js';
+import {
+  analyzeReservationAccept,
+  extractReservationIdFromLifecycle,
+  isReservationLifecyclePayload,
+  shouldProcessAcceptWelcome,
+} from '../src/utils/reservationAccept.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 const sns = new SNSClient({ region: 'us-east-1' });
@@ -210,8 +221,144 @@ export const handler = async (event, context) => {
   }
 
   const extracted = extractMessageAndContext(event);
-  const guestMessage = extracted.message;
-  const msgContext = { ...extracted.context, ...(event?.context || {}), ...(event?.payload?.context || {}) };
+  let guestMessage = extracted.message;
+  let msgContext = { ...extracted.context, ...(event?.context || {}), ...(event?.payload?.context || {}) };
+
+  // === Reservation lifecycle (grok_reservation): pending → just accepted → welcome ===
+  // API Gateway posts act=reservation with full reservation object (no chat body).
+  // When the host just accepted a request-to-book, open with "I just accepted your inquiry".
+  try {
+    let outerForAct = null;
+    if (event?.Records?.[0]?.body) {
+      try { outerForAct = JSON.parse(event.Records[0].body); } catch { /* ignore */ }
+    } else if (event?.queryStringParameters || event?.body) {
+      outerForAct = event;
+    }
+    const actParam = outerForAct?.queryStringParameters?.act || null;
+    if (actParam) msgContext.act = actParam;
+
+    // Re-hydrate reservation webhook: extract() may leave message empty and miss reservationId (= data.id)
+    if (typeof outerForAct?.body === 'string') {
+      try {
+        const webhook = JSON.parse(outerForAct.body);
+        if (webhook?.action && String(webhook.action).startsWith('reservation.') && webhook?.data) {
+          msgContext = {
+            ...webhook.data,
+            ...msgContext,
+            action: webhook.action || msgContext.action,
+            _webhookId: webhook.id || msgContext._webhookId,
+            act: actParam || msgContext.act,
+            // Reservation UUID is data.id on lifecycle webhooks
+            reservationId: webhook.data.id || msgContext.reservationId || msgContext.reservation_id || null,
+            reservation_id: webhook.data.id || msgContext.reservation_id || msgContext.reservationId || null,
+            conversation_id: webhook.data.conversation_id || msgContext.conversation_id || null,
+            guestName: msgContext.guestName || webhook.data.guest?.first_name || null,
+            guest: webhook.data.guest || msgContext.guest,
+            checkIn: msgContext.checkIn || webhook.data.check_in || webhook.data.arrival_date,
+            checkOut: msgContext.checkOut || webhook.data.check_out || webhook.data.departure_date,
+            listingId: msgContext.listingId || webhook.data.properties?.[0]?.id,
+            propertyName: msgContext.propertyName || webhook.data.properties?.[0]?.name,
+            reservationStatus:
+              msgContext.reservationStatus ||
+              webhook.data.reservation_status?.current?.category ||
+              webhook.data.status,
+            reservation_status: webhook.data.reservation_status || msgContext.reservation_status,
+            bookingTimestamp: msgContext.bookingTimestamp || webhook.data.booking_date,
+            bookingDate: msgContext.bookingDate || webhook.data.booking_date,
+            isInquiry: false,
+            _reservationLifecycle: true,
+          };
+          if (webhook.data.guests) {
+            const pc = Number(webhook.data.guests.pet_count || 0);
+            if (msgContext.petCount == null) msgContext.petCount = pc;
+            if (msgContext.hasPets == null) msgContext.hasPets = pc > 0;
+            if (msgContext.infantCount == null) {
+              msgContext.infantCount = Number(webhook.data.guests.infant_count || 0);
+            }
+            if (msgContext.childCount == null) {
+              msgContext.childCount = Number(webhook.data.guests.child_count || 0);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Handler] Reservation webhook rehydrate non-fatal:', e?.message || e);
+      }
+    }
+
+    if (isReservationLifecyclePayload(outerForAct || {}, msgContext) || msgContext._reservationLifecycle) {
+      // 5-minute window on accepted.changed_at (see reservationAccept.js). Old backlog SQS msgs skip.
+      const analysis = analyzeReservationAccept(msgContext);
+      msgContext.acceptAnalysis = analysis;
+      msgContext.reservationStatus = analysis.currentCategory || msgContext.reservationStatus;
+      console.log('[Handler] Reservation lifecycle event:', JSON.stringify({
+        action: msgContext.action,
+        reservationId: extractReservationIdFromLifecycle(msgContext),
+        analysis: {
+          isAccepted: analysis.isAccepted,
+          wasPendingBeforeAccept: analysis.wasPendingBeforeAccept,
+          isInstantBookStyle: analysis.isInstantBookStyle,
+          justAcceptedFromPending: analysis.justAcceptedFromPending,
+          acceptedAt: analysis.acceptedAt,
+        },
+      }));
+
+      if (!shouldProcessAcceptWelcome(analysis)) {
+        console.log(
+          '[Handler] ⛔ Reservation lifecycle skipped (not a fresh pending→accept; instant book and stale accepts use guest-message path or no-op)',
+          analysis.isInstantBookStyle ? 'instantBook' : 'other'
+        );
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            skipped: true,
+            reason: analysis.isInstantBookStyle
+              ? 'Instant book — no "I just accepted your inquiry" path (guest message handles welcome)'
+              : 'Reservation lifecycle not a fresh pending→accept welcome',
+            analysis,
+          }),
+        };
+      }
+
+      msgContext.justAcceptedInquiry = true;
+      msgContext.justAcceptedFromPending = true;
+      const resId = extractReservationIdFromLifecycle(msgContext);
+      msgContext.reservationId = resId;
+      msgContext.reservation_id = resId;
+
+      // Load latest guest message from history (old auto-reply-sqs reservation path)
+      if (resId && !guestMessage) {
+        try {
+          const hc = new HospitableClient();
+          const thread = await hc.getReservationMessages(resId, 20);
+          const list = Array.isArray(thread) ? thread : (thread?.data || []);
+          const guestMsgs = list.filter(
+            (m) => (m.sender_type || m.sender?.type || '').toLowerCase() === 'guest'
+          );
+          // Prefer chronological latest
+          guestMsgs.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+          const latest = guestMsgs[guestMsgs.length - 1];
+          if (latest?.body) {
+            guestMessage = latest.body;
+            msgContext.conversationHistory = list.slice(-15);
+            console.log('[Handler] Loaded latest guest message for accept-welcome, len=', guestMessage.length);
+          } else {
+            // No prior guest text — still welcome using a minimal synthetic intro so logistics send
+            const name = msgContext.guestName || msgContext.guest?.first_name || 'there';
+            guestMessage = `Hi! Looking forward to our stay. — ${name}`;
+            msgContext._syntheticGuestMessageForAccept = true;
+            console.log('[Handler] No prior guest messages; using synthetic intro for accept-welcome');
+          }
+        } catch (err) {
+          console.warn('[Handler] Fetch guest messages for accept-welcome failed:', err?.message || err);
+          const name = msgContext.guestName || msgContext.guest?.first_name || 'there';
+          guestMessage = `Hi! Looking forward to our stay. — ${name}`;
+          msgContext._syntheticGuestMessageForAccept = true;
+        }
+      }
+    }
+  } catch (lifecycleErr) {
+    console.warn('[Handler] Reservation lifecycle handling non-fatal:', lifecycleErr?.message || lifecycleErr);
+  }
 
   // Helper: infer pet count when structured data (webhook + /inquiries) is missing but the guest
   // explicitly declares pets in their message. This covers real-world cases like the Nicole inquiry
@@ -593,7 +740,11 @@ export const handler = async (event, context) => {
   const messagePlatformId = msgContext.platform_id || (msgContext.id && typeof msgContext.id === 'string' && !msgContext.id.includes('-') ? msgContext.id : (typeof msgContext.id === 'number' ? msgContext.id : null));
   const convForDedup = msgContext.conversation_id || msgContext.conversationId || msgContext.reservation_id || msgContext.reservationId || null;
   let dedupKey = webhookIdForDedup;
-  if (messagePlatformId && convForDedup) {
+  if (msgContext.justAcceptedInquiry && (msgContext.reservationId || msgContext.reservation_id)) {
+    // One accept-welcome per reservation + accept timestamp (not per guest message id)
+    const acceptAt = msgContext.acceptAnalysis?.acceptedAt || 'unknown';
+    dedupKey = `reservation-accept:${msgContext.reservationId || msgContext.reservation_id}:${acceptAt}`;
+  } else if (messagePlatformId && convForDedup) {
     dedupKey = `guestmsg:${convForDedup}:${messagePlatformId}`;
   }
   if (dedupKey) {

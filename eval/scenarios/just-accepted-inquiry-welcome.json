@@ -1,0 +1,40 @@
+{
+  "id": "just-accepted-inquiry-welcome",
+  "description": "Host just accepted a pending request-to-book. Welcome must open with I just accepted your inquiry then logistics. Not instant book.",
+  "guestMessage": "Hi Jerome, thanks for considering our request — we would love to stay Aug 31 to Sep 2 with our dog if possible!",
+  "context": {
+    "guestName": "Dashiell",
+    "guestDisplayName": "Dashiell",
+    "checkIn": "2026-08-31",
+    "checkOut": "2026-09-02",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio",
+    "reservationId": "dash-accept-welcome-001",
+    "reservationStatus": "accepted",
+    "justAcceptedInquiry": true,
+    "justAcceptedFromPending": true,
+    "acceptAnalysis": {
+      "isInstantBookStyle": false,
+      "justAcceptedFromPending": true,
+      "wasPendingBeforeAccept": true
+    },
+    "hasPets": true,
+    "petCount": 1,
+    "asOfDate": "2026-08-01",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "NEW_RESERVATION_WELCOME",
+    "shouldReply": true,
+    "requiredPhrases": [
+      "I just accepted your inquiry",
+      "4pm",
+      "self-check-in"
+    ],
+    "forbiddenPhrases": [
+      "feel free to book",
+      "let me know if you have any questions"
+    ]
+  },
+  "notes": "Pending→accept welcome opener. Instant book must not use this phrase."
+}

@@ -599,6 +599,105 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(result.officialPolicyUrl?.includes('help/article/475'));
   });
 
+  it('detects pending→just-accepted and not instant book (reservationAccept util)', async () => {
+    const {
+      analyzeReservationAccept,
+      shouldProcessAcceptWelcome,
+      ensureJustAcceptedOpener,
+      JUST_ACCEPTED_INQUIRY_OPENER,
+    } = await import('../src/utils/reservationAccept.js');
+
+    const now = '2026-08-01T02:22:00.000Z';
+    const pendingThenAccept = {
+      status: 'accepted',
+      reservation_status: {
+        current: { category: 'accepted' },
+        history: [
+          { category: 'request', changed_at: '2026-08-01T01:03:10+00:00', sub_category: 'request to book' },
+          { category: 'accepted', changed_at: '2026-08-01T02:19:54+00:00', sub_category: null },
+        ],
+      },
+    };
+    const a = analyzeReservationAccept(pendingThenAccept, { now });
+    assert.equal(a.wasPendingBeforeAccept, true);
+    assert.equal(a.isInstantBookStyle, false);
+    assert.equal(a.justAcceptedFromPending, true);
+    assert.equal(shouldProcessAcceptWelcome(a), true);
+
+    const instant = analyzeReservationAccept(
+      {
+        status: 'accepted',
+        reservation_status: {
+          current: { category: 'accepted' },
+          history: [{ category: 'accepted', changed_at: '2026-08-01T02:19:54+00:00' }],
+        },
+      },
+      { now }
+    );
+    assert.equal(instant.isInstantBookStyle, true);
+    assert.equal(instant.justAcceptedFromPending, false);
+    assert.equal(shouldProcessAcceptWelcome(instant), false);
+
+    const stale = analyzeReservationAccept(pendingThenAccept, {
+      now: '2026-08-01T03:00:00.000Z', // >5 min after accept
+    });
+    assert.equal(stale.justAcceptedFromPending, false);
+    assert.equal(shouldProcessAcceptWelcome(stale), false);
+
+    const withGreeting = ensureJustAcceptedOpener(
+      'Good afternoon, Dashiell, Welcome! Check-in is at 4pm with self-check-in and parking.',
+      'Dashiell'
+    );
+    assert.match(withGreeting, new RegExp(JUST_ACCEPTED_INQUIRY_OPENER, 'i'));
+    assert.match(withGreeting, /Good afternoon, Dashiell/i);
+    assert.match(withGreeting, /4pm/i);
+  });
+
+  it('applies "I just accepted your inquiry" opener via agent policy', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyJustAcceptedInquiryPolicy(
+      {
+        typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+        proposedResponse:
+          'Good afternoon, Dashiell, Welcome! Check-in is at 4pm with self-check-in. I will send the detailed check-in instructions 3 days before your arrival.',
+        shouldReply: true,
+      },
+      {
+        guestName: 'Dashiell',
+        justAcceptedInquiry: true,
+        acceptAnalysis: { isInstantBookStyle: false },
+      },
+      'Looking forward to the stay'
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /I just accepted your inquiry/i);
+    assert.equal(applied.shouldReply, true);
+  });
+
+  it('does not apply accept opener for instant book analysis', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyJustAcceptedInquiryPolicy(
+      {
+        typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+        proposedResponse: 'Good afternoon, Hammad, Welcome! Check-in is at 4pm.',
+        shouldReply: true,
+      },
+      {
+        guestName: 'Hammad',
+        justAcceptedInquiry: true,
+        acceptAnalysis: { isInstantBookStyle: true },
+      },
+      'Hello'
+    );
+    assert.equal(applied.applied, false);
+  });
+
   it('strips policy link when reservation already cancelled (Julia deterministic policy)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

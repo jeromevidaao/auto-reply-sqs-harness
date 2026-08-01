@@ -17,6 +17,10 @@ import {
   phoneDigitHints,
   setHostContactsForTests,
 } from './config/hostContacts.js';
+import {
+  JUST_ACCEPTED_INQUIRY_OPENER,
+  ensureJustAcceptedOpener,
+} from './utils/reservationAccept.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -458,6 +462,15 @@ export class GuestMessagingAgent {
       parsed.proposedResponse = alreadyCancelledPolicy.proposedResponse;
       shouldReply = alreadyCancelledPolicy.shouldReply;
       confidence = alreadyCancelledPolicy.confidence;
+    }
+
+    // Pending request-to-book just accepted by host → natural "I just accepted your inquiry" opener.
+    const justAcceptedPolicy = this._applyJustAcceptedInquiryPolicy(parsed, context, guestMessage);
+    if (justAcceptedPolicy.applied) {
+      parsed.typeOfMessageReceived = justAcceptedPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = justAcceptedPolicy.proposedResponse;
+      shouldReply = justAcceptedPolicy.shouldReply;
+      confidence = justAcceptedPolicy.confidence;
     }
 
     const postWelcomeThanksPolicy = this._applyPostWelcomeThankYouPolicy(parsed, context, guestMessage);
@@ -1297,6 +1310,11 @@ export class GuestMessagingAgent {
     const traces = context.conversationTraces || {};
     const hasReservation = !!(context.reservationId || context.reservation_id || context.reservation?.id);
     if (!hasReservation) return false;
+    // Host just accepted pending inquiry: always treat as first welcome (even synthetic guest text).
+    if (context.justAcceptedInquiry || context.justAcceptedFromPending) {
+      if (traces.earlyUnitReadyOffered) return false;
+      return true;
+    }
     if (traces.hasRecentHostMessage || traces.earlyUnitReadyOffered) return false;
     if (this._looksLikePlausibleFollowUp(guestMessage)) return false;
 
@@ -1379,6 +1397,32 @@ export class GuestMessagingAgent {
 
     parsed.typeOfMessageReceived = typeOfMessageReceived;
     return { applied: true, typeOfMessageReceived };
+  }
+
+  /**
+   * Host just accepted a pending request-to-book: open welcome with
+   * "I just accepted your inquiry" then normal logistics (not for instant book).
+   */
+  _applyJustAcceptedInquiryPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!context.justAcceptedInquiry && !context.justAcceptedFromPending) {
+      return { applied: false };
+    }
+    // Instant-book style must not claim we accepted an inquiry
+    if (context.acceptAnalysis?.isInstantBookStyle) {
+      return { applied: false };
+    }
+
+    const draft = ensureJustAcceptedOpener(
+      parsed.proposedResponse || '',
+      context.guestDisplayName || context.guestName || ''
+    );
+    return {
+      applied: true,
+      typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+      proposedResponse: draft,
+      shouldReply: true,
+      confidence: 1.0,
+    };
   }
 
   /**
@@ -2224,6 +2268,17 @@ export class GuestMessagingAgent {
           'or any language that treats cancellation as still open. Empathize (e.g. medical/family hardship), ' +
           'acknowledge the reservation is already cancelled so no further cancel action is needed, and wish them well. ' +
           'shouldReply:true. Do not escalate solely to dump a policy link.'
+      );
+    }
+
+    // Host just accepted a pending request-to-book (not instant book).
+    if (context.justAcceptedInquiry || context.justAcceptedFromPending) {
+      lines.push(
+        `- CRITICAL JUST ACCEPTED INQUIRY (request-to-book → host accept): You (the host) just accepted this guest's pending inquiry/request. ` +
+          `proposedResponse MUST be NEW_RESERVATION_WELCOME with shouldReply:true. After the time greeting + name, ` +
+          `start the substance with the exact phrase "${JUST_ACCEPTED_INQUIRY_OPENER}" (e.g. "Good afternoon, Dashiell, I just accepted your inquiry. ..."), ` +
+          `then continue with the normal rich welcome logistics (4pm, self-check-in, parking, 3-day instructions when applicable). ` +
+          `Do NOT say "feel free to book" — they are already confirmed. Do NOT use this opener for instant book.`
       );
     }
 
@@ -3560,6 +3615,20 @@ export class GuestMessagingAgent {
         finalResult.cancellationInfo.alreadyCancelled = true;
         finalResult.cancellationInfo.includePolicyLink = false;
       }
+    }
+
+    const justAcceptedFinal = this._applyJustAcceptedInquiryPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (justAcceptedFinal.applied) {
+      console.log('[Agent] → Just-accepted inquiry opener applied ("I just accepted your inquiry")');
+      finalResult.typeOfMessageReceived = justAcceptedFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = justAcceptedFinal.proposedResponse;
+      finalResult.shouldReply = justAcceptedFinal.shouldReply;
+      finalResult.confidence = justAcceptedFinal.confidence;
+      finalResult.escalated = false;
     }
 
     const preCheckInParkingPolicyFinal = this._applyPreCheckInParkingPolicy(finalResult, enrichedContext, guestMessage);
