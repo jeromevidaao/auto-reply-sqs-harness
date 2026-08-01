@@ -353,6 +353,14 @@ export class GuestMessagingAgent {
       confidence = postCheckoutThanksPolicy.confidence;
     }
 
+    // Early checkout signal → heatPumpConfig so HeatPump Lambda forces AC off this stay.
+    // Best-effort; never block guest reply.
+    try {
+      await this._recordEarlyCheckoutIfSignaled(guestMessage, context);
+    } catch (e) {
+      console.warn('[agent] early checkout record failed', e?.message || e);
+    }
+
     const eventPolicy = this._applyEventRequestPolicy(parsed, context, guestMessage);
     if (eventPolicy.applied) {
       parsed.typeOfMessageReceived = 'EVENT_REQUEST';
@@ -813,6 +821,53 @@ export class GuestMessagingAgent {
   /**
    * Guest message signals actual checkout / end-of-stay departure (not a brief step-out).
    */
+  /**
+   * When guest messages actual mid-stay / early departure, stamp heatPumpConfig
+   * listing:{airbnbListingId} with earlyCheckoutDate=today so HeatPump force-offs.
+   */
+  async _recordEarlyCheckoutIfSignaled(guestMessage = '', context = {}) {
+    if (!this._looksLikeActualCheckout(guestMessage, context)) return false;
+    if (this._isTemporaryDepartureDuringStay(guestMessage, context)) return false;
+    // Prefer Airbnb numeric listing id (same as heatPumpConfig / dashboard).
+    const listingId = String(
+      context.airbnbListingId ||
+        context.listingId ||
+        context.listing_id ||
+        ''
+    ).trim();
+    if (!listingId || !/^\d+$/.test(listingId)) return false;
+
+    const checkOut = (context.checkOut || context.check_out || '').toString().slice(0, 10);
+    const today = this._todayDateStr(context);
+    // Only "early" if calendar checkout is still in the future (or unknown).
+    if (checkOut && checkOut <= today) return false;
+
+    const { DynamoDBClient } = await import('@aws-sdk/client-dynamodb');
+    const { DynamoDBDocumentClient, GetCommand, PutCommand } = await import('@aws-sdk/lib-dynamodb');
+    const region = process.env.AWS_REGION || 'us-east-1';
+    const table = process.env.HEAT_PUMP_CONFIG_TABLE || 'heatPumpConfig';
+    const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));
+    const key = `listing:${listingId}`;
+    let existing = {};
+    try {
+      const got = await ddb.send(new GetCommand({ TableName: table, Key: { configKey: key } }));
+      existing = got.Item || {};
+    } catch {
+      existing = {};
+    }
+    const item = {
+      ...existing,
+      configKey: key,
+      earlyCheckoutDate: today,
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'auto-reply-early-checkout',
+    };
+    if (item.autoEnabled === undefined) item.autoEnabled = true;
+    await ddb.send(new PutCommand({ TableName: table, Item: item }));
+    console.log(`[agent] early checkout recorded for ${key} date=${today}`);
+    return true;
+  }
+
   _looksLikeActualCheckout(guestMessage = '', context = {}) {
     if (this._looksLikeStayExtensionRequest(guestMessage, context)) {
       return false;
