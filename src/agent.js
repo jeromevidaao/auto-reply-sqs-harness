@@ -477,6 +477,17 @@ export class GuestMessagingAgent {
       confidence = postStayFeedbackPolicy.confidence;
     }
 
+    // Dashiell incident: never ask for dates when checkIn/checkOut already on reservation/inquiry.
+    const knownDatesPolicy = this._applyKnownStayDatesPolicy(parsed, context, guestMessage);
+    if (knownDatesPolicy.applied) {
+      if (knownDatesPolicy.typeOfMessageReceived) {
+        parsed.typeOfMessageReceived = knownDatesPolicy.typeOfMessageReceived;
+      }
+      parsed.proposedResponse = knownDatesPolicy.proposedResponse;
+      shouldReply = knownDatesPolicy.shouldReply ?? shouldReply;
+      confidence = Math.max(confidence, knownDatesPolicy.confidence ?? 0);
+    }
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',
@@ -1117,6 +1128,155 @@ export class GuestMessagingAgent {
       shouldReply: true,
       confidence: 1.0,
       escalated: false,
+    };
+  }
+
+  /**
+   * True when reservation/inquiry already has stay dates (check-in and ideally check-out).
+   * Used to prevent "let me know the exact dates" replies (Dashiell incident).
+   */
+  _contextHasStayDates(context = {}) {
+    const ci = (context.checkIn || context.check_in || context.arrival_date || '').toString().trim();
+    if (!ci || ci.length < 8) return false;
+    // Require a parseable calendar day (YYYY-MM-DD…)
+    return /^\d{4}-\d{2}-\d{2}/.test(ci);
+  }
+
+  _formatStayDatesForReply(context = {}) {
+    const ciRaw = (context.checkIn || context.check_in || '').toString().trim();
+    const coRaw = (context.checkOut || context.check_out || '').toString().trim();
+    const fmt = (iso) => {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso.slice(0, 10) + 'T12:00:00');
+        if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+        return d.toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+          timeZone: 'America/New_York',
+        });
+      } catch {
+        return iso.slice(0, 10);
+      }
+    };
+    const ci = fmt(ciRaw);
+    const co = fmt(coRaw);
+    if (ci && co) return `${ci} → ${co}`;
+    return ci || co || '';
+  }
+
+  /** Draft asks the guest to supply dates we already have. */
+  _draftAsksGuestForStayDates(draft = '') {
+    const t = String(draft || '');
+    if (!t || t === 'none') return false;
+    if (
+      /let me know (the |your )?(exact )?dates/i.test(t) ||
+      /what dates (are you|were you|do you)/i.test(t) ||
+      /which dates (are you|were you|do you)/i.test(t) ||
+      /when (are you|were you) (hoping|thinking|looking|planning) to (stay|visit|come|arrive)/i.test(t) ||
+      /exact dates you'?re thinking/i.test(t) ||
+      /dates you'?re (thinking|looking|hoping|interested)/i.test(t) ||
+      /send (me |us )?(your |the )?(exact )?dates/i.test(t) ||
+      /once (you|I) (have|know|get) (your |the )?dates/i.test(t) ||
+      /check availability (once|when|after) you/i.test(t)
+    ) {
+      return true;
+    }
+    // "I'll check availability right away" only counts when paired with a date ask.
+    if (/availability right away/i.test(t) && /dates/i.test(t)) return true;
+    return false;
+  }
+
+  /**
+   * Dashiell incident (Aug 2026): context already had checkIn/checkOut on the
+   * reservation/inquiry, but NEW_INQUIRY_WELCOME asked "Let me know the exact dates
+   * you're thinking of". Never ask for dates we already have; acknowledge them.
+   * Also reclassify NEW_INQUIRY_WELCOME → NEW_RESERVATION_WELCOME when a reservation
+   * id is present and isInquiry is false.
+   */
+  _applyKnownStayDatesPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._contextHasStayDates(context)) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const datePhrase = this._formatStayDatesForReply(context);
+    const hasReservation =
+      !!(context.reservationId || context.reservation_id || context.reservation?.id) &&
+      context.isInquiry !== true;
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const isInquiryWelcome = categories.includes('NEW_INQUIRY_WELCOME');
+
+    let typeFix = null;
+    if (hasReservation && isInquiryWelcome) {
+      typeFix = 'NEW_RESERVATION_WELCOME';
+    }
+
+    const asksDates = this._draftAsksGuestForStayDates(draft);
+    if (!asksDates && !typeFix) {
+      return { applied: false };
+    }
+
+    let proposedResponse = draft;
+    if (asksDates && draft && draft !== 'none') {
+      // Drop sentences that solicit dates / availability-after-dates.
+      const sentences = draft.split(/(?<=[.!?])\s+/);
+      const kept = sentences.filter((s) => {
+        const t = s.trim();
+        if (!t) return false;
+        return !this._draftAsksGuestForStayDates(t);
+      });
+      proposedResponse = kept.join(' ').replace(/\s+/g, ' ').trim();
+      // Ensure we explicitly acknowledge the known dates (once).
+      const alreadyMentions = datePhrase
+        ? proposedResponse.toLowerCase().includes(datePhrase.toLowerCase().slice(0, 12)) ||
+          /I see your stay is/i.test(proposedResponse)
+        : false;
+      if (datePhrase && !alreadyMentions) {
+        const ack = `I see your stay is ${datePhrase}.`;
+        if (/Looking forward/i.test(proposedResponse)) {
+          proposedResponse = proposedResponse.replace(
+            /(Looking forward)/i,
+            `${ack} $1`
+          );
+        } else if (/\n\s*Jerome/i.test(proposedResponse)) {
+          proposedResponse = proposedResponse.replace(
+            /\n\s*(Jerome)/i,
+            `\n\n${ack}\n\n$1`
+          );
+        } else {
+          proposedResponse = `${proposedResponse} ${ack}`.trim();
+        }
+      }
+      proposedResponse = proposedResponse
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+\./g, '.')
+        .replace(/\.\s*\./g, '.')
+        .trim();
+    }
+
+    if (!proposedResponse || proposedResponse === 'none') {
+      return typeFix
+        ? {
+            applied: true,
+            typeOfMessageReceived: typeFix,
+            proposedResponse: draft || 'none',
+            shouldReply: parsed.shouldReply,
+            confidence: parsed.confidence,
+          }
+        : { applied: false };
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived: typeFix || parsed.typeOfMessageReceived,
+      proposedResponse,
+      shouldReply: true,
+      confidence: Math.max(parsed.confidence || 0, 0.95),
+      reason: asksDates ? 'strip_date_ask_known_stay_dates' : 'reclassify_inquiry_to_reservation',
     };
   }
 
@@ -1978,7 +2138,21 @@ export class GuestMessagingAgent {
     }
     if (context.checkIn) lines.push(`- Check-in: ${context.checkIn}`);
     if (context.checkOut) lines.push(`- Check-out: ${context.checkOut}`);
+    if (context.isInquiry != null) lines.push(`- isInquiry: ${context.isInquiry}`);
+    if (context.reservationId || context.reservation_id) {
+      lines.push(`- reservationId: ${context.reservationId || context.reservation_id}`);
+    }
     if (context.listingId) lines.push(`- Listing ID: ${context.listingId}`);
+
+    // Dashiell incident: inquiry/reservation already has stay dates — never ask the guest for them.
+    if (this._contextHasStayDates(context)) {
+      const datePhrase = this._formatStayDatesForReply(context);
+      lines.push(
+        `- CRITICAL STAY DATES ALREADY KNOWN (Dashiell incident): Check-in/check-out are already on this reservation or inquiry` +
+          (datePhrase ? ` (${datePhrase})` : '') +
+          `. You MUST acknowledge these specific dates. NEVER ask the guest for dates — forbidden phrases include: "let me know the exact dates", "exact dates you're thinking of", "what dates are you looking at", "when are you hoping to stay", "send me your dates", "I'll check availability once you share dates". For NEW_INQUIRY_WELCOME, talk availability/book next steps for THESE dates. If isInquiry is false / a reservationId is present, prefer NEW_RESERVATION_WELCOME (they already booked those dates) and do not invite them to "book when ready" as if dates were unknown.`
+      );
+    }
     const pc = (context.petCount != null ? context.petCount : (context.hasPets ? 1 : 0));
     lines.push(`- Pets: ${context.hasPets ? 'yes' : 'no'} (count: ${pc})`);
     if (context.hasPets != null) lines.push(`- hasPets (from reservation/inquiry): ${context.hasPets}`);
@@ -3242,6 +3416,24 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = postStayFeedbackPolicyFinal.shouldReply;
       finalResult.confidence = postStayFeedbackPolicyFinal.confidence;
       finalResult.escalated = postStayFeedbackPolicyFinal.escalated;
+    }
+
+    const knownDatesPolicyFinal = this._applyKnownStayDatesPolicy(finalResult, enrichedContext, guestMessage);
+    if (knownDatesPolicyFinal.applied) {
+      console.log(
+        '[Agent] → Known stay dates policy applied (never ask guest for dates already on reservation/inquiry)',
+        knownDatesPolicyFinal.reason || ''
+      );
+      if (knownDatesPolicyFinal.typeOfMessageReceived) {
+        finalResult.typeOfMessageReceived = knownDatesPolicyFinal.typeOfMessageReceived;
+      }
+      finalResult.proposedResponse = knownDatesPolicyFinal.proposedResponse;
+      if (knownDatesPolicyFinal.shouldReply != null) {
+        finalResult.shouldReply = knownDatesPolicyFinal.shouldReply;
+      }
+      if (knownDatesPolicyFinal.confidence != null) {
+        finalResult.confidence = Math.max(finalResult.confidence || 0, knownDatesPolicyFinal.confidence);
+      }
     }
 
     // Snapshot draft before cleaning policy can wipe it (Olivia safety net).

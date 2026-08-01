@@ -1650,6 +1650,80 @@ describe('Post-stay housekeeping feedback (no LLM)', () => {
   });
 });
 
+describe('Known stay dates policy (Dashiell — no LLM)', () => {
+  it('strips "let me know the exact dates" when checkIn/checkOut already known', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const badDraft =
+      "Good evening, Dashiell, thanks for reaching out! We'd love to host you and your family for a short getaway. " +
+      "Since you mentioned your well-behaved dog, the $30 pet fee is already included for one pet, and we just ask that pets stay off the beds and sofa. " +
+      "Let me know the exact dates you're thinking of and I'll check availability right away. " +
+      "Looking forward to potentially hosting you in Portland.\n\nJerome & Ruby";
+
+    const applied = agent._applyKnownStayDatesPolicy(
+      {
+        typeOfMessageReceived: 'NEW_INQUIRY_WELCOME',
+        proposedResponse: badDraft,
+        shouldReply: true,
+        confidence: 0.9,
+      },
+      {
+        guestName: 'Dashiell',
+        checkIn: '2026-08-31T16:00:00-04:00',
+        checkOut: '2026-09-02T10:00:00-04:00',
+        reservationId: '0e101acf-d179-47f5-8ebd-059638bdde37',
+        isInquiry: false,
+        hasPets: true,
+        petCount: 1,
+      },
+      'Hi we have a well behaved dog and would love a short getaway'
+    );
+
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'NEW_RESERVATION_WELCOME');
+    assert.ok(applied.proposedResponse.includes('$30 pet fee'));
+    assert.ok(applied.proposedResponse.includes('beds and sofa'));
+    assert.doesNotMatch(applied.proposedResponse, /exact dates you'?re thinking/i);
+    assert.doesNotMatch(applied.proposedResponse, /let me know (the |your )?(exact )?dates/i);
+    assert.match(applied.proposedResponse, /I see your stay is/i);
+    assert.match(applied.proposedResponse, /August|2026/i);
+  });
+
+  it('does not rewrite when context has no stay dates', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const draft = "Let me know the exact dates you're thinking of and I'll check availability right away.";
+    const applied = agent._applyKnownStayDatesPolicy(
+      { typeOfMessageReceived: 'NEW_INQUIRY_WELCOME', proposedResponse: draft },
+      { guestName: 'Sam', isInquiry: true },
+      'Do you have availability?'
+    );
+    assert.equal(applied.applied, false);
+  });
+
+  it('injects critical known-dates line into user prompt', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const prompt = agent._buildUserPrompt('Hi with our dog', {
+      guestName: 'Dashiell',
+      checkIn: '2026-08-31T16:00:00-04:00',
+      checkOut: '2026-09-02T10:00:00-04:00',
+      reservationId: '0e101acf-d179-47f5-8ebd-059638bdde37',
+      isInquiry: false,
+      hasPets: true,
+      petCount: 1,
+    });
+    assert.match(prompt, /CRITICAL STAY DATES ALREADY KNOWN/);
+    assert.match(prompt, /NEVER ask the guest for dates/i);
+  });
+});
+
 describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
   // These tests require a real GROK_API_KEY.
   // The mock LLM has been permanently removed (even for unit tests).
