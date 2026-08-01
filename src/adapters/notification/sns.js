@@ -190,8 +190,10 @@ export class SnsNotificationAdapter {
     console.log(message);
 
     // Primary: Android push (same owner_alerts channel as cleaning / battery).
+    // buildEscalationFcmContent already puts proposedResponse/draft in data so the
+    // Android app can open the conversation composer prefilled on tap.
     const fcmContent = buildEscalationFcmContent({ decision, guestMessage, context });
-    // Include a short unsent-reply preview when present (fits tray BigText).
+    // Tray BigText preview (short); full draft rides in data.proposedResponse.
     const proposed = (decision && typeof decision.proposedResponse === 'string')
       ? decision.proposedResponse
       : '';

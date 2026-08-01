@@ -130,12 +130,22 @@ export async function notifyOwnerAndroid(opts) {
   }
 
   const accessToken = await getFcmAccessToken(saJson);
+  // FCM data total ~4KB. Most fields stay short; proposedResponse (manual-reply
+  // unsent draft) gets a longer budget so Android can prefill the composer.
+  const FIELD_CLIP = {
+    proposedResponse: 1800,
+    draft: 1800,
+    guestMessage: 500,
+  };
   const payloadData = {
     title: clip(title, 120),
     body: clip(body, 900),
     type: String(type || 'generic'),
     ...Object.fromEntries(
-      Object.entries(data).map(([k, v]) => [String(k), clip(v == null ? '' : v, 400)])
+      Object.entries(data).map(([k, v]) => {
+        const max = FIELD_CLIP[k] ?? 400;
+        return [String(k), clip(v == null ? '' : v, max)];
+      })
     ),
   };
 
@@ -244,6 +254,16 @@ export function buildEscalationFcmContent({ decision, guestMessage, context }) {
     '';
   const listingName = context.propertyName || context.listing?.name || '';
 
+  // Unsent auto-reply draft (judge declined to send). Android opens the
+  // conversation composer prefilled with this text on notification tap.
+  let proposedResponse = '';
+  if (decision && typeof decision.proposedResponse === 'string') {
+    const p = decision.proposedResponse.trim();
+    if (p && p.toLowerCase() !== 'none') {
+      proposedResponse = p;
+    }
+  }
+
   return {
     type: 'manual_reply_needed',
     title,
@@ -259,6 +279,9 @@ export function buildEscalationFcmContent({ decision, guestMessage, context }) {
       listingId: String(listingId || ''),
       listingName: String(listingName || ''),
       confidence: String(decision?.confidence ?? ''),
+      // Full-ish draft for composer prefill (clipped further in notifyOwnerAndroid).
+      proposedResponse: String(proposedResponse),
+      draft: String(proposedResponse),
     },
   };
 }
