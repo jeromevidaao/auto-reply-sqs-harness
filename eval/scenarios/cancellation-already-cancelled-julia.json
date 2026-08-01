@@ -1,0 +1,29 @@
+{
+  "id": "cancellation-already-cancelled-julia",
+  "description": "Guest mid-stay had a family medical emergency, already cancelled the reservation on Airbnb, then messaged about cancellation options. Auto must NOT send help/article/475 or cancel-options language — status from Hospitable is already cancelled.",
+  "guestMessage": "Hi there, we’re enjoying our stay so far.\n\nUnfortunately we will need to leave tomorrow morning instead of Monday morning. My mom had a serious medical emergency in Hartford on her drive up to Maine and had to have surgery today. We’re sad to cut our trip short but need to head to Connecticut tomorrow. I’m wondering what our cancellation options are.\n\nJulia · Booker\nSorry for any inconvenience it’s so extremely unexpected for us",
+  "context": {
+    "guestName": "Julia",
+    "guestDisplayName": "Julia",
+    "checkIn": "2026-07-25",
+    "checkOut": "2026-07-28",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "reservationId": "julia-already-cancelled-res-001",
+    "reservationStatus": "cancelled",
+    "asOfDate": "2026-07-26",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": "CANCELLATION_NOTIFICATION",
+    "shouldReply": true,
+    "requiredPhrases": ["sorry", "already"],
+    "forbiddenPhrases": [
+      "airbnb.com/help/article/475",
+      "help/article/475",
+      "cancellation options",
+      "official policy"
+    ]
+  },
+  "notes": "Julia medical early-departure incident. reservationStatus=cancelled from Hospitable. Empathize and acknowledge cancel is done; never link policy or offer cancel steps."
+}

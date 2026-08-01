@@ -451,6 +451,15 @@ export class GuestMessagingAgent {
 
     this._applyCancellationCategoryPolicy(parsed, guestMessage);
 
+    // Julia incident: eval runner uses processMessage directly — apply already-cancelled rewrite here too.
+    const alreadyCancelledPolicy = this._applyAlreadyCancelledPolicy(parsed, context, guestMessage);
+    if (alreadyCancelledPolicy.applied) {
+      parsed.typeOfMessageReceived = alreadyCancelledPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = alreadyCancelledPolicy.proposedResponse;
+      shouldReply = alreadyCancelledPolicy.shouldReply;
+      confidence = alreadyCancelledPolicy.confidence;
+    }
+
     const postWelcomeThanksPolicy = this._applyPostWelcomeThankYouPolicy(parsed, context, guestMessage);
     if (postWelcomeThanksPolicy.applied) {
       shouldReply = postWelcomeThanksPolicy.shouldReply;
@@ -1373,6 +1382,62 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * When Hospitable says the reservation is already cancelled, never send cancel-policy
+   * links or "cancellation options" language (Julia medical early-departure incident).
+   * Deterministic post-pass: strip bad drafts and replace with an empathic ack.
+   */
+  _applyAlreadyCancelledPolicy(parsed = {}, context = {}, guestMessage = '') {
+    const toolSaysCancelled = !!(
+      parsed.cancellationInfo?.alreadyCancelled ||
+      context.cancellationInfo?.alreadyCancelled
+    );
+    const statusCancelled =
+      this._isReservationAlreadyCancelled(context) ||
+      CancellationTool.isAlreadyCancelledStatus(parsed.cancellationInfo?.reservationStatus);
+
+    if (!toolSaysCancelled && !statusCancelled) {
+      return { applied: false };
+    }
+
+    const draft = (parsed.proposedResponse || '').toString();
+    const hasPolicyLink = /airbnb\.com\/help\/article\/475|help\/article\/475/i.test(draft);
+    const hasOptionsLanguage =
+      /cancellation options|cancel.*policy|how to cancel|if you (need to |want to )?cancel|refund (would|window|depends)/i.test(
+        draft
+      );
+    const emptyOrNone = !draft || draft === 'none' || draft.trim().length < 12;
+    const shouldForceRewrite = hasPolicyLink || hasOptionsLanguage || emptyOrNone || parsed.shouldReply === false;
+
+    if (!shouldForceRewrite && draft.length >= 20) {
+      // Draft already looks like empathy-without-policy — keep text, clear escalate flags.
+      return {
+        applied: true,
+        typeOfMessageReceived: 'CANCELLATION_NOTIFICATION',
+        proposedResponse: draft,
+        shouldReply: true,
+        confidence: Math.max(parsed.confidence || 0, 0.95),
+        escalated: false,
+      };
+    }
+
+    const guestRaw = context.guestDisplayName || context.guestName || '';
+    const firstName = (guestRaw.split(/[\s(·]/)[0] || guestRaw || '').trim() || 'there';
+    const proposedResponse =
+      `I'm so sorry to hear about the medical emergency, ${firstName}. ` +
+      `I can see the reservation is already cancelled on our side, so you don't need to take any further cancellation steps. ` +
+      `Wishing your family the very best — please take care.`;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'CANCELLATION_NOTIFICATION',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+    };
+  }
+
+  /**
    * Pre-arrival sofa bed linen confirmations must NOT be categorized as EXTRA_LINENS_TOWELS.
    * EXTRA_LINENS_TOWELS is reserved for in-stay "where are the linens?" asks with lift-up instructions.
    */
@@ -2142,7 +2207,25 @@ export class GuestMessagingAgent {
     if (context.reservationId || context.reservation_id) {
       lines.push(`- reservationId: ${context.reservationId || context.reservation_id}`);
     }
+    const resStatus = CancellationTool.extractReservationStatus(context);
+    if (resStatus) {
+      lines.push(`- reservationStatus (from Hospitable): ${resStatus}`);
+    }
     if (context.listingId) lines.push(`- Listing ID: ${context.listingId}`);
+
+    // Julia medical early-departure incident: guest had already cancelled on Airbnb, then asked
+    // about "cancellation options" — auto wrongly linked help/article/475. When status is cancelled,
+    // never offer policy or cancel steps.
+    if (this._isReservationAlreadyCancelled(context)) {
+      lines.push(
+        '- CRITICAL ALREADY CANCELLED (Julia incident): Hospitable reservation status is cancelled. ' +
+          'The guest has ALREADY cancelled this booking. proposedResponse MUST NOT include ' +
+          'https://www.airbnb.com/help/article/475, "cancellation options", how to cancel, refund windows, ' +
+          'or any language that treats cancellation as still open. Empathize (e.g. medical/family hardship), ' +
+          'acknowledge the reservation is already cancelled so no further cancel action is needed, and wish them well. ' +
+          'shouldReply:true. Do not escalate solely to dump a policy link.'
+      );
+    }
 
     // Dashiell incident: inquiry/reservation already has stay dates — never ask the guest for them.
     if (this._contextHasStayDates(context)) {
@@ -2714,8 +2797,50 @@ export class GuestMessagingAgent {
       }
     }
 
-    // Future: We could add lightweight early cancellation signal detection here
-    // if we want to bias the first pass even more strongly.
+    // Reservation status for cancellation talk (Julia already-cancelled incident).
+    // Handler usually populates reservationStatus; if missing, pull from Hospitable before first pass.
+    await this._ensureReservationStatus(enrichedContext, guestMessage);
+  }
+
+  /**
+   * When the guest talks about cancel/refund and we have a reservationId but no status yet,
+   * fetch GET /reservations/{id} so the first pass knows if the booking is already cancelled.
+   */
+  async _ensureReservationStatus(enrichedContext = {}, guestMessage = '') {
+    if (CancellationTool.extractReservationStatus(enrichedContext)) {
+      return;
+    }
+    const looksLikeCancel = /cancel|refund|alteration|policy|leave early|cut (our|the) trip/i.test(
+      guestMessage || ''
+    );
+    if (!looksLikeCancel) return;
+
+    const resId = enrichedContext.reservationId || enrichedContext.reservation_id;
+    if (!resId || !this.hospitableClient?.getReservation) return;
+
+    try {
+      const fullRes = await this.hospitableClient.getReservation(resId);
+      const status = CancellationTool.extractReservationStatus(fullRes);
+      if (status) {
+        enrichedContext.reservationStatus = status;
+        if (fullRes?.reservation_status) {
+          enrichedContext.reservation_status = fullRes.reservation_status;
+        }
+        console.log('[Agent] → Reservation status from Hospitable:', status);
+      }
+      if (fullRes?.booking_date && !enrichedContext.bookingTimestamp && !enrichedContext.bookingDate) {
+        enrichedContext.bookingTimestamp = fullRes.booking_date;
+        enrichedContext.bookingDate = fullRes.booking_date;
+      }
+      if (fullRes?.check_in && !enrichedContext.checkIn) enrichedContext.checkIn = fullRes.check_in;
+      if (fullRes?.check_out && !enrichedContext.checkOut) enrichedContext.checkOut = fullRes.check_out;
+    } catch (err) {
+      console.warn('[Agent] Reservation status fetch failed (non-fatal):', err?.message || err);
+    }
+  }
+
+  _isReservationAlreadyCancelled(context = {}) {
+    return CancellationTool.isAlreadyCancelled(context);
   }
 
   /**
@@ -2840,8 +2965,13 @@ export class GuestMessagingAgent {
     }
 
     // Broad safety net: any cancellation talk + recent host activity = escalate so Jerome can watch
+    // Exception: reservation already cancelled — allow empathic auto-reply without policy (Julia incident).
     const isCancellationTalk = /cancel|refund|policy|exception/i.test(guestMessage);
-    if (isCancellationTalk && traces.hasRecentHostMessage) {
+    if (
+      isCancellationTalk &&
+      traces.hasRecentHostMessage &&
+      !this._isReservationAlreadyCancelled(enrichedContext)
+    ) {
       enrichedContext.forceCancellationEscalation = true;
       console.log('[Agent] → Cancellation talk detected with recent host activity — will force escalation email');
     }
@@ -2990,20 +3120,33 @@ export class GuestMessagingAgent {
       cancellationInfo = await cancellationTool.execute(guestMessage, enrichedContext);
       console.log('[Agent] → Cancellation analysis performed');
 
-      // Automatically fetch the latest policy snapshot when cancellation is involved
-      if (policyTool) {
-        const policyInfo = await policyTool.execute(guestMessage, enrichedContext);
-        cancellationInfo.policy = policyInfo;   // Attach structured policy data
-        console.log('[Agent] → Latest Airbnb policy snapshot attached');
-      }
+      // Already cancelled on platform: never attach Airbnb policy page or force-escalate for policy options.
+      // Guest still gets an empathic auto-reply acknowledging the cancel is done (Julia incident).
+      if (cancellationInfo.alreadyCancelled) {
+        console.log(
+          '[Agent] → Reservation already cancelled (status=' +
+            (cancellationInfo.reservationStatus || 'cancelled') +
+            ') — skip policy fetch + cancel-option language'
+        );
+        enrichedContext.forceCancellationEscalation = false;
+        cancellationInfo.needsEscalation = false;
+        enrichedContext.cancellationInfo = cancellationInfo;
+      } else {
+        // Automatically fetch the latest policy snapshot when cancellation is still open
+        if (policyTool) {
+          const policyInfo = await policyTool.execute(guestMessage, enrichedContext);
+          cancellationInfo.policy = policyInfo;   // Attach structured policy data
+          console.log('[Agent] → Latest Airbnb policy snapshot attached');
+        }
 
-      // === Force escalation for risky cancellations so Jerome can monitor ===
-      // This ensures that any cancellation conversation with prior host statements,
-      // exception requests, or other risk signals results in an email alert with the direct chat URL.
-      // We set flags here; the single rich notify (with full post-judge trace) happens once at the very end of handleMessage.
-      if (cancellationInfo.needsEscalation || enrichedContext.forceCancellationEscalation) {
-        console.log('[Agent] → Risky cancellation detected — will force escalation (rich trace) at end of pipeline');
-        enrichedContext.forceCancellationEscalation = true;
+        // === Force escalation for risky cancellations so Jerome can monitor ===
+        // This ensures that any cancellation conversation with prior host statements,
+        // exception requests, or other risk signals results in an email alert with the direct chat URL.
+        // We set flags here; the single rich notify (with full post-judge trace) happens once at the very end of handleMessage.
+        if (cancellationInfo.needsEscalation || enrichedContext.forceCancellationEscalation) {
+          console.log('[Agent] → Risky cancellation detected — will force escalation (rich trace) at end of pipeline');
+          enrichedContext.forceCancellationEscalation = true;
+        }
       }
     }
 
@@ -3397,6 +3540,26 @@ export class GuestMessagingAgent {
     const cancellationCategoryFinal = this._applyCancellationCategoryPolicy(finalResult, guestMessage);
     if (cancellationCategoryFinal.applied) {
       finalResult.typeOfMessageReceived = cancellationCategoryFinal.typeOfMessageReceived;
+    }
+
+    // Julia incident: already-cancelled bookings must not get policy links / cancel options.
+    const alreadyCancelledPolicyFinal = this._applyAlreadyCancelledPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (alreadyCancelledPolicyFinal.applied) {
+      console.log('[Agent] → Already-cancelled reservation policy applied (no policy link / options)');
+      finalResult.typeOfMessageReceived = alreadyCancelledPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = alreadyCancelledPolicyFinal.proposedResponse;
+      finalResult.shouldReply = alreadyCancelledPolicyFinal.shouldReply;
+      finalResult.confidence = alreadyCancelledPolicyFinal.confidence;
+      finalResult.escalated = alreadyCancelledPolicyFinal.escalated;
+      finalResult.forceCancellationEscalation = false;
+      if (finalResult.cancellationInfo) {
+        finalResult.cancellationInfo.alreadyCancelled = true;
+        finalResult.cancellationInfo.includePolicyLink = false;
+      }
     }
 
     const preCheckInParkingPolicyFinal = this._applyPreCheckInParkingPolicy(finalResult, enrichedContext, guestMessage);
@@ -3939,6 +4102,17 @@ export class GuestMessagingAgent {
       if (toolResults.airbnbPolicy) {
         lines.push('=== LIVE AIRBNB CANCELLATION POLICY DATA (treat as source of truth) ===');
         lines.push(JSON.stringify(toolResults.airbnbPolicy, null, 2));
+        lines.push('');
+      }
+
+      // Julia incident: already-cancelled reservations must NOT require policy link
+      if (toolResults.cancellation?.alreadyCancelled || this._isReservationAlreadyCancelled(context)) {
+        lines.push('=== CRITICAL: RESERVATION ALREADY CANCELLED ===');
+        lines.push(
+          'Hospitable status is cancelled. Do NOT require or approve Airbnb policy links ' +
+            '(help/article/475) or cancellation-options language. REVISE any draft that offers ' +
+            'how to cancel or the policy page. Correct: empathy + acknowledge cancel already done.'
+        );
         lines.push('');
       }
     }

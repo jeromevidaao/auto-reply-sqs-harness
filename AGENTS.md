@@ -26,6 +26,7 @@ Local-first evaluation harness + core agent logic for the Grok-powered guest mes
 This rule exists because the harness directly affects live guest replies and the Lambda is auto-deployed from main. Skipping hygiene has caused production drift in the past.
 
 ## Recent Key Behaviors (as of June 2026)
+- **Already-cancelled reservation (Julia medical early-departure)**: When Hospitable `reservation_status.current.category` (or legacy `status`) is `cancelled`, never send Airbnb help/article/475 or "cancellation options" language. Handler enriches `reservationStatus` from `getReservation`; agent also fetches status on cancel-talk if missing; `CancellationTool` sets `alreadyCancelled`; deterministic `_applyAlreadyCancelledPolicy` rewrites bad drafts. Eval: `cancellation-already-cancelled-julia`.
 - **HVAC / Heat Pump (KumoCloud)**: 
   - ThermostatTool provides per-unit static instructions + neutral language: "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat."
   - HeatPumpTool (new) connects to the real KumoCloud v3 API using the same device serials + login as the prior production system.

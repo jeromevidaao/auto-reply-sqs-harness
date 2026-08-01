@@ -336,7 +336,24 @@ export const handler = async (event, context) => {
         }
         if (fullRes.arrival_date && !msgContext.checkIn) msgContext.checkIn = fullRes.arrival_date; // some shapes
         if (fullRes.departure_date && !msgContext.checkOut) msgContext.checkOut = fullRes.departure_date;
-        console.log('[Handler] Enriched msgContext from reservation details (pet/dates/listing for welcome & pet logic)');
+        // Reservation status (Julia already-cancelled incident): prefer reservation_status.current.category
+        const statusCategory =
+          fullRes.reservation_status?.current?.category ||
+          fullRes.reservation_status?.current?.status ||
+          fullRes.status ||
+          null;
+        if (statusCategory) {
+          msgContext.reservationStatus = statusCategory;
+          msgContext.reservation_status = fullRes.reservation_status || { current: { category: statusCategory } };
+        }
+        if (fullRes.booking_date && !msgContext.bookingTimestamp && !msgContext.bookingDate) {
+          msgContext.bookingTimestamp = fullRes.booking_date;
+          msgContext.bookingDate = fullRes.booking_date;
+        }
+        console.log(
+          '[Handler] Enriched msgContext from reservation details (pet/dates/listing/status for welcome & cancel logic)',
+          statusCategory ? `status=${statusCategory}` : 'status=unknown'
+        );
       }
     } catch (e) {
       console.warn('[Handler] Early reservation enrichment skipped (non-fatal):', e?.message || e);
@@ -531,6 +548,7 @@ export const handler = async (event, context) => {
     checkIn: msgContext.checkIn || msgContext.check_in,
     checkOut: msgContext.checkOut || msgContext.check_out,
     bookingDate: msgContext.bookingDate,
+    reservationStatus: msgContext.reservationStatus || null,
     hasPets: msgContext.hasPets,
     petCount: msgContext.petCount,
     infantCount: msgContext.infantCount,

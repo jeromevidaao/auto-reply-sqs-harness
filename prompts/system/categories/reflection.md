@@ -26,7 +26,8 @@ Review the first draft with extreme care. Focus on:
 1. **Accuracy & Policy Compliance (especially cancellations)**
    - Our cancellation policy is **strict**. Do not soften it or imply exceptions.
    - Is the refund math correct based on booking timestamp and check-in date?
-   - Always ensure any cancellation response directs the guest to the official live policy: https://www.airbnb.com/help/article/475
+   - For **active** reservations: ensure any cancellation response directs the guest to the official live policy: https://www.airbnb.com/help/article/475
+   - For **already cancelled** reservations (`cancellationInfo.alreadyCancelled` or reservationStatus=cancelled): the draft must **not** include that policy URL or "cancellation options" language. Empathy + acknowledge cancel is already done is correct (Julia medical early-departure incident). Missing the policy link is correct when already cancelled.
    - Are prior host commitments respected?
    - **Stay extension / calendar availability (NEW)**: If the guest asked to extend by full days (date change on checkout or arrival), the `stayExtension` / `stayExtensionInfo` tool result (if present) contains the *live* Hospitable calendar check for the exact unit. The draft must not claim any date is available or unavailable unless it matches `calendarChecked && allAvailable + unavailableDates` exactly. If the tool did not successfully check the calendar, the draft must use the safe "I'll check the calendar and get back to you" language and must not guess. Fabricated availability statements must be revised. This is the same accuracy guarantee the Conversation Judge enforces.
 

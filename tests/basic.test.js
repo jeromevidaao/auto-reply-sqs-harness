@@ -567,6 +567,72 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(parsed.typeOfMessageReceived, 'CANCELLATION_POLICY');
   });
 
+  it('CancellationTool detects already-cancelled status and blocks policy link (Julia incident)', async () => {
+    const { CancellationTool } = await import('../src/tools/cancellation/CancellationTool.js');
+    const tool = new CancellationTool();
+    const msg =
+      "Unfortunately we will need to leave tomorrow morning. My mom had a serious medical emergency. I'm wondering what our cancellation options are.";
+    const result = await tool.execute(msg, {
+      guestName: 'Julia',
+      reservationStatus: 'cancelled',
+      checkIn: '2026-07-25',
+      checkOut: '2026-07-28',
+    });
+    assert.equal(result.alreadyCancelled, true);
+    assert.equal(result.includePolicyLink, false);
+    assert.equal(result.officialPolicyUrl, null);
+    assert.equal(result.needsEscalation, false);
+    assert.equal(result.recommendedAction, 'acknowledge_already_cancelled');
+    assert.match(result.policyNote || '', /Do NOT include/i);
+  });
+
+  it('CancellationTool still offers policy link when reservation is accepted', async () => {
+    const { CancellationTool } = await import('../src/tools/cancellation/CancellationTool.js');
+    const tool = new CancellationTool();
+    const result = await tool.execute('What refund would we get if we cancel?', {
+      reservationStatus: 'accepted',
+      bookingTimestamp: '2026-05-01T12:00:00Z',
+      checkIn: '2026-08-01',
+    });
+    assert.equal(result.alreadyCancelled, false);
+    assert.equal(result.includePolicyLink, true);
+    assert.ok(result.officialPolicyUrl?.includes('help/article/475'));
+  });
+
+  it('strips policy link when reservation already cancelled (Julia deterministic policy)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg =
+      "I'm wondering what our cancellation options are. My mom had a serious medical emergency.";
+    const ctx = {
+      guestName: 'Julia',
+      reservationStatus: 'cancelled',
+      checkIn: '2026-07-25',
+      checkOut: '2026-07-28',
+    };
+    const badDraft =
+      "Good afternoon Julia, so sorry to hear about the medical emergency. For details on cancellation options, please see Airbnb's official policy page: https://www.airbnb.com/help/article/475";
+    const applied = agent._applyAlreadyCancelledPolicy(
+      {
+        typeOfMessageReceived: 'CANCELLATION_POLICY_EXCEPTION',
+        proposedResponse: badDraft,
+        shouldReply: true,
+        cancellationInfo: { alreadyCancelled: true, reservationStatus: 'cancelled' },
+      },
+      ctx,
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, true);
+    assert.equal(applied.escalated, false);
+    assert.equal(applied.typeOfMessageReceived, 'CANCELLATION_NOTIFICATION');
+    assert.doesNotMatch(applied.proposedResponse, /help\/article\/475/i);
+    assert.doesNotMatch(applied.proposedResponse, /cancellation options/i);
+    assert.match(applied.proposedResponse, /already cancelled/i);
+  });
+
   it('rejects premature designated-spot confirmation before check-in (Amie incident)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

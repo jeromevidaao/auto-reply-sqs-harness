@@ -14,6 +14,17 @@ This module contains the detailed cancellation rules extracted from production.
 - If Jerome already addressed refunds/cancellations, **do not contradict**.
 - If uncertain whether your response might contradict Jerome → set category to "UNCATEGORIZED" (no reply).
 
+## Already Cancelled (Hospitable status)
+
+When context shows `reservationStatus` / Hospitable `reservation_status.current.category` is **cancelled** (or tool `cancellationInfo.alreadyCancelled=true`):
+
+- The guest has **already** cancelled on the platform. Cancellation is done.
+- **Do NOT** link `https://www.airbnb.com/help/article/475`.
+- **Do NOT** discuss "cancellation options", how to cancel, refund windows, or policy tiers.
+- **Do** empathize (especially medical/family emergencies), acknowledge the reservation is already cancelled, and wish them well.
+- Category: **CANCELLATION_NOTIFICATION** (not CANCELLATION_POLICY / EXCEPTION) for this path.
+- Canonical incident: Julia — mid-stay medical emergency, guest had just cancelled, then asked about options; auto wrongly sent the policy page.
+
 ## Refund Rules (Strict)
 
 Calculate exact refund based on timing:
