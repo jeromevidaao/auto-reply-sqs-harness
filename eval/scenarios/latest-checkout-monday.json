@@ -1,0 +1,22 @@
+{
+  "id": "latest-checkout-monday",
+  "description": "Guest thanks and asks for latest checkout time on Monday. Must always auto-reply (was previously missed). High confidence required.",
+  "guestMessage": "Sounds great! Thank you! And what is the latest time we are able to check out Monday?",
+  "context": {
+    "guestName": "Guest",
+    "checkIn": "2026-08-10",
+    "checkOut": "2026-08-12",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "bookingTimestamp": "2026-08-01T10:00:00Z",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": ["THANK_YOU_MESSAGE", "CHECKOUT"],
+    "shouldReply": true,
+    "requiredPhrases": ["10am", "checkout is strictly"],
+    "minConfidence": 0.95,
+    "shouldAlwaysReply": true
+  },
+  "notes": "Exact production miss: multi-intent thanks + latest checkout time. Response must include literal 10am (not only 10:00 AM) so requiredPhrases match. shouldReply true + high confidence."
+}

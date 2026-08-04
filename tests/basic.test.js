@@ -732,6 +732,32 @@ describe('EventRequestTool (no LLM)', () => {
     assert.match(applied.proposedResponse, /already cancelled/i);
   });
 
+  it('always auto-replies latest checkout time with 10am (production miss)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg =
+      'Sounds great! Thank you! And what is the latest time we are able to check out Monday?';
+    const applied = agent._applyLatestCheckoutTimePolicy(
+      {
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: 'none',
+        shouldReply: false,
+        confidence: 0.4,
+      },
+      { guestName: 'Guest' },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, true);
+    assert.equal(applied.confidence, 1.0);
+    assert.deepEqual(applied.typeOfMessageReceived, ['THANK_YOU_MESSAGE', 'CHECKOUT']);
+    assert.match(applied.proposedResponse, /10am/i);
+    assert.match(applied.proposedResponse, /checkout is strictly/i);
+    assert.match(applied.proposedResponse, /welcome/i);
+  });
+
   it('rejects premature designated-spot confirmation before check-in (Amie incident)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
