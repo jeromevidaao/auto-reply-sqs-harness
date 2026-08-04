@@ -464,6 +464,15 @@ export class GuestMessagingAgent {
       confidence = alreadyCancelledPolicy.confidence;
     }
 
+    // Latest checkout time (+ thanks) must always auto-reply at 10am (missed production message).
+    const latestCheckoutPolicy = this._applyLatestCheckoutTimePolicy(parsed, context, guestMessage);
+    if (latestCheckoutPolicy.applied) {
+      parsed.typeOfMessageReceived = latestCheckoutPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = latestCheckoutPolicy.proposedResponse;
+      shouldReply = latestCheckoutPolicy.shouldReply;
+      confidence = latestCheckoutPolicy.confidence;
+    }
+
     // Pending request-to-book just accepted by host → natural "I just accepted your inquiry" opener.
     const justAcceptedPolicy = this._applyJustAcceptedInquiryPolicy(parsed, context, guestMessage);
     if (justAcceptedPolicy.applied) {
@@ -1420,6 +1429,70 @@ export class GuestMessagingAgent {
       applied: true,
       typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
       proposedResponse: draft,
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
+  /**
+   * Multi-intent thanks + "latest time we are able to check out" (optional day name).
+   * Production miss: low confidence / no auto-reply. Always force shouldReply + 10am.
+   */
+  _applyLatestCheckoutTimePolicy(parsed = {}, context = {}, guestMessage = '') {
+    const msg = String(guestMessage || '').trim();
+    if (!msg) return { applied: false };
+    // Exact production miss + close variants (latest/last checkout time, optional day)
+    const asksLatestCheckout =
+      /what is the (latest|last) time we (are able to|can) check\s*out/i.test(msg) ||
+      /latest (time|check[\s-]?out).*(check\s*out|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i.test(
+        msg
+      );
+    if (!asksLatestCheckout) return { applied: false };
+
+    const draft = String(parsed.proposedResponse || '');
+    const has10am = /10\s*(:00)?\s*am/i.test(draft);
+    const hasStrict =
+      /checkout is strictly|check[\s-]?out is (strictly )?(at )?10/i.test(draft);
+    const thanks = /thank/i.test(msg);
+    const needsRewrite =
+      !draft ||
+      draft === 'none' ||
+      draft.length < 12 ||
+      !has10am ||
+      !hasStrict ||
+      parsed.shouldReply === false ||
+      (parsed.confidence != null && Number(parsed.confidence) < 0.95);
+
+    if (!needsRewrite) {
+      return {
+        applied: true,
+        typeOfMessageReceived: thanks
+          ? ['THANK_YOU_MESSAGE', 'CHECKOUT']
+          : 'CHECKOUT',
+        proposedResponse: draft,
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
+    const guestRaw = context.guestDisplayName || context.guestName || '';
+    const firstName = (guestRaw.split(/[\s(·]/)[0] || guestRaw || '').trim();
+    const welcome = thanks
+      ? firstName && firstName.toLowerCase() !== 'guest'
+        ? `You're welcome, ${firstName}! `
+        : `You're welcome! `
+      : '';
+    const proposedResponse = `${welcome}Checkout is strictly at 10am.`.replace(
+      /\s+/g,
+      ' '
+    ).trim();
+
+    return {
+      applied: true,
+      typeOfMessageReceived: thanks
+        ? ['THANK_YOU_MESSAGE', 'CHECKOUT']
+        : 'CHECKOUT',
+      proposedResponse,
       shouldReply: true,
       confidence: 1.0,
     };
@@ -3615,6 +3688,19 @@ export class GuestMessagingAgent {
         finalResult.cancellationInfo.alreadyCancelled = true;
         finalResult.cancellationInfo.includePolicyLink = false;
       }
+    }
+
+    const latestCheckoutFinal = this._applyLatestCheckoutTimePolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (latestCheckoutFinal.applied) {
+      console.log('[Agent] → Latest checkout time policy applied (always auto-reply 10am)');
+      finalResult.typeOfMessageReceived = latestCheckoutFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = latestCheckoutFinal.proposedResponse;
+      finalResult.shouldReply = latestCheckoutFinal.shouldReply;
+      finalResult.confidence = latestCheckoutFinal.confidence;
     }
 
     const justAcceptedFinal = this._applyJustAcceptedInquiryPolicy(
