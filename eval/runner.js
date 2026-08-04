@@ -105,6 +105,32 @@ async function main() {
       else notes.push(`shouldReply mismatch`);
     }
 
+    // Production-miss hardening: must always auto-reply (Cassidy / capture script)
+    if (rubric.shouldAlwaysReply === true || scenario.productionMiss === true) {
+      maxScore++;
+      const draft = (result.proposedResponse || '').trim();
+      const ok =
+        result.shouldReply === true &&
+        draft &&
+        draft !== 'none' &&
+        draft.length >= 12;
+      if (ok) score++;
+      else {
+        notes.push(
+          `shouldAlwaysReply failed (shouldReply=${result.shouldReply}, draftLen=${draft.length})`
+        );
+      }
+    }
+
+    // Minimum confidence floor (honest unit tests / production-miss goldens)
+    if (rubric.minConfidence != null && Number.isFinite(Number(rubric.minConfidence))) {
+      maxScore++;
+      const need = Number(rubric.minConfidence);
+      const got = Number(result.confidence);
+      if (Number.isFinite(got) && got + 1e-9 >= need) score++;
+      else notes.push(`minConfidence failed: need >=${need}, got ${got}`);
+    }
+
     // Must not contain forbidden phrases
     if (rubric.forbiddenPhrases) {
       maxScore++;

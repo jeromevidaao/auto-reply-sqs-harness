@@ -25,6 +25,26 @@ Local-first evaluation harness + core agent logic for the Grok-powered guest mes
 
 This rule exists because the harness directly affects live guest replies and the Lambda is auto-deployed from main. Skipping hygiene has caused production drift in the past.
 
+## Production miss → Grok eval golden (mandatory after any missed auto-reply)
+
+When a guest message was **not** auto-replied but should have been (Cassidy checkout class, etc.):
+
+1. Capture a regression scenario (writes `eval/scenarios/<id>.json` with `shouldAlwaysReply`, `minConfidence`, `productionMiss`):
+   ```bash
+   npm run scenario:add-miss -- \
+     --id short-slug \
+     --message 'exact guest text' \
+     --category THANK_YOU_MESSAGE,CHECKOUT \
+     --required '10am,checkout is strictly' \
+     --guest Name --listing <uuid> --property 'Apt name'
+   ```
+2. Prefer a **deterministic policy** in `src/agent.js` when the miss is a clear operational pattern (latest checkout, wifi, etc.).
+3. Unit-test the policy in `tests/basic.test.js` (no Grok required).
+4. `npm test` → commit → push → CI **Grok eval** must pass (`shouldAlwaysReply` + `minConfidence` scored in `eval/runner.js`).
+5. CloudWatch no-reply path logs `PRODUCTION_MISS_CANDIDATE` JSON for mining.
+
+Runtime hardening (`src/utils/replyPolicy.js`): high confidence (≥0.9) + sendable draft forces `shouldReply`; operational multi-intent asks also force reply at ≥0.75 conf.
+
 ## Recent Key Behaviors (as of June 2026)
 - **Just-accepted inquiry welcome (request-to-book → host Accept)**: `grok_reservation` lifecycle webhooks (`reservation.created` / `reservation.changed`) are processed when `reservation_status.history` shows prior pending/request then `accepted` within ~5 minutes. Welcome is NEW_RESERVATION_WELCOME opening with **"I just accepted your inquiry"** then normal logistics. **Instant book** (accepted-only history, no prior pending) is skipped on this path — guest `message.created` still handles that welcome without the accept opener. Util: `src/utils/reservationAccept.js`. Eval: `just-accepted-inquiry-welcome`.
 - **Already-cancelled reservation (Julia medical early-departure)**: When Hospitable `reservation_status.current.category` (or legacy `status`) is `cancelled`, never send Airbnb help/article/475 or "cancellation options" language. Handler enriches `reservationStatus` from `getReservation`; agent also fetches status on cancel-talk if missing; `CancellationTool` sets `alreadyCancelled`; deterministic `_applyAlreadyCancelledPolicy` rewrites bad drafts. Eval: `cancellation-already-cancelled-julia`.

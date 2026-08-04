@@ -1157,7 +1157,29 @@ export const handler = async (event, context) => {
         throw new Error(errMsg);
       }
     } else if (result.shouldReply === false && !result.escalated) {
+      // Structured production-miss breadcrumb for mining → eval goldens
+      // (npm run scenario:add-miss -- --id … --message "…")
+      const draftPreview = String(result.proposedResponse || '').slice(0, 200);
       console.log('ℹ️ Decision was to not reply (no message sent).');
+      console.log(
+        'PRODUCTION_MISS_CANDIDATE',
+        JSON.stringify({
+          guestMessage: String(guestMessage || msgContext.body || '').slice(0, 500),
+          typeOfMessageReceived: result.typeOfMessageReceived,
+          confidence: result.confidence,
+          shouldReply: result.shouldReply,
+          draftPreview,
+          reservationId:
+            msgContext.reservationId || msgContext.reservation_id || null,
+          conversationId:
+            msgContext.conversation_id || msgContext.airbnb_conversation_id || null,
+          listingId: msgContext.listingId || msgContext.property?.id || null,
+          propertyName: msgContext.propertyName || msgContext.property?.name || null,
+          replyForceReason: result.replyForceReason || null,
+          captureHint:
+            'node scripts/add-production-miss-scenario.js --id <slug> --message "…" --required "…" --category …',
+        })
+      );
     }
 
     console.log('\n⏱️  Total handler duration:', duration, 'ms');

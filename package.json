@@ -10,6 +10,7 @@
     "simulate": "node simulator/cli.js",
     "eval": "node eval/runner.js",
     "eval:report": "node eval/runner.js --report",
+    "scenario:add-miss": "node scripts/add-production-miss-scenario.js",
     "lint": "echo 'Add eslint later if desired'"
   },
   "keywords": [

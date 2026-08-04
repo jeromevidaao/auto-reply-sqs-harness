@@ -21,6 +21,7 @@ import {
   JUST_ACCEPTED_INQUIRY_OPENER,
   ensureJustAcceptedOpener,
 } from './utils/reservationAccept.js';
+import { applyHighConfidenceForceReply } from './utils/replyPolicy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -519,12 +520,34 @@ export class GuestMessagingAgent {
       confidence = Math.max(confidence, knownDatesPolicy.confidence ?? 0);
     }
 
+    // Cassidy / production-miss hardening: high conf + sendable draft → always auto-reply.
+    // Also forces operational multi-intent asks (thanks + checkout/wifi/parking questions).
+    const force = applyHighConfidenceForceReply({
+      shouldReply,
+      confidence,
+      proposedResponse: parsed.proposedResponse,
+      escalated: false,
+      typeOfMessageReceived: parsed.typeOfMessageReceived,
+      guestMessage,
+    });
+    if (force.force || force.reason) {
+      if (force.shouldReply !== shouldReply || force.confidence !== confidence) {
+        console.log(
+          `[Agent] → High-confidence / operational force-reply applied (${force.reason}): ` +
+            `shouldReply ${shouldReply}→${force.shouldReply} conf ${confidence}→${force.confidence}`
+        );
+      }
+      shouldReply = force.shouldReply;
+      confidence = force.confidence;
+    }
+
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse: parsed.proposedResponse || 'none',
       shouldReply,
       confidence,
-      rawModelOutput: raw
+      rawModelOutput: raw,
+      replyForceReason: force.reason || null,
     };
   }
 
@@ -3783,6 +3806,33 @@ export class GuestMessagingAgent {
       finalResult.confidence = approvedDraftNet.confidence;
       finalResult.restoredBySafetyNet = true;
       finalResult.safetyNetReason = approvedDraftNet.reason;
+    }
+
+    // Final force-reply (Cassidy miss class): after all policies/judge/safety nets.
+    // High conf + sendable draft, or operational multi-intent ask, must auto-send.
+    if (!finalResult.escalated) {
+      const forceFinal = applyHighConfidenceForceReply({
+        shouldReply: finalResult.shouldReply,
+        confidence: finalResult.confidence,
+        proposedResponse: finalResult.proposedResponse,
+        escalated: !!finalResult.escalated,
+        typeOfMessageReceived: finalResult.typeOfMessageReceived,
+        guestMessage,
+      });
+      if (
+        forceFinal.reason &&
+        (forceFinal.shouldReply !== finalResult.shouldReply ||
+          forceFinal.confidence !== finalResult.confidence)
+      ) {
+        console.log(
+          `[Agent] → Final force-reply (${forceFinal.reason}): ` +
+            `shouldReply ${finalResult.shouldReply}→${forceFinal.shouldReply} ` +
+            `conf ${finalResult.confidence}→${forceFinal.confidence}`
+        );
+        finalResult.shouldReply = forceFinal.shouldReply;
+        finalResult.confidence = forceFinal.confidence;
+        finalResult.replyForceReason = forceFinal.reason;
+      }
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);

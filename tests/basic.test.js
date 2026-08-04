@@ -758,6 +758,60 @@ describe('EventRequestTool (no LLM)', () => {
     assert.match(applied.proposedResponse, /welcome/i);
   });
 
+  it('high-confidence force-reply: sendable draft + conf>=0.9 forces shouldReply', async () => {
+    const { applyHighConfidenceForceReply, isOperationalMustReplyAsk, buildProductionMissScenario } =
+      await import('../src/utils/replyPolicy.js');
+
+    const forced = applyHighConfidenceForceReply({
+      shouldReply: false,
+      confidence: 0.95,
+      proposedResponse: "You're welcome! Checkout is strictly at 10am.",
+      typeOfMessageReceived: ['THANK_YOU_MESSAGE', 'CHECKOUT'],
+      guestMessage:
+        'Sounds great! Thank you! And what is the latest time we are able to check out Monday?',
+    });
+    assert.equal(forced.shouldReply, true);
+    assert.ok(forced.reason);
+
+    // Operational multi-intent ask at medium-high conf
+    assert.equal(
+      isOperationalMustReplyAsk(
+        'Sounds great! Thank you! And what is the latest time we are able to check out Monday?'
+      ),
+      true
+    );
+    const op = applyHighConfidenceForceReply({
+      shouldReply: false,
+      confidence: 0.8,
+      proposedResponse: 'Checkout is strictly at 10am.',
+      typeOfMessageReceived: 'CHECKOUT',
+      guestMessage:
+        'Sounds great! Thank you! And what is the latest time we are able to check out Monday?',
+    });
+    assert.equal(op.shouldReply, true);
+
+    // Pure OTHER_MESSAGE alone is not forced
+    const other = applyHighConfidenceForceReply({
+      shouldReply: false,
+      confidence: 0.99,
+      proposedResponse: 'Thanks for letting us know.',
+      typeOfMessageReceived: 'OTHER_MESSAGE',
+      guestMessage: 'just fyi nothing needed',
+    });
+    assert.equal(other.shouldReply, false);
+
+    const scen = buildProductionMissScenario({
+      id: 'demo-miss',
+      guestMessage: 'What is the wifi password?',
+      requiredPhrases: ['wifi'],
+      expectedCategory: 'WIFI',
+    });
+    assert.equal(scen.productionMiss, true);
+    assert.equal(scen.rubric.shouldAlwaysReply, true);
+    assert.equal(scen.rubric.shouldReply, true);
+    assert.ok(scen.rubric.minConfidence >= 0.95);
+  });
+
   it('rejects premature designated-spot confirmation before check-in (Amie incident)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

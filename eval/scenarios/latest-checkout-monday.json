@@ -18,5 +18,8 @@
     "minConfidence": 0.95,
     "shouldAlwaysReply": true
   },
-  "notes": "Exact production miss: multi-intent thanks + latest checkout time. Response must include literal 10am (not only 10:00 AM) so requiredPhrases match. shouldReply true + high confidence."
+  "notes": "Exact production miss: multi-intent thanks + latest checkout time. Response must include literal 10am (not only 10:00 AM) so requiredPhrases match. shouldReply true + high confidence. Captured via production-miss pipeline; CI Grok eval enforces shouldAlwaysReply + minConfidence.",
+  "productionMiss": true,
+  "unitTestEnforced": true
 }
+
