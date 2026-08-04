@@ -22,6 +22,7 @@ import {
   ensureJustAcceptedOpener,
 } from './utils/reservationAccept.js';
 import { applyHighConfidenceForceReply } from './utils/replyPolicy.js';
+import { getTimeBasedGreeting } from './utils/timeGreeting.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -518,6 +519,22 @@ export class GuestMessagingAgent {
       parsed.proposedResponse = knownDatesPolicy.proposedResponse;
       shouldReply = knownDatesPolicy.shouldReply ?? shouldReply;
       confidence = Math.max(confidence, knownDatesPolicy.confidence ?? 0);
+    }
+
+    // Roberto incident: first host reply on a new booking (even short "Ok") must welcome + send.
+    const firstHostWelcomePolicy = this._applyFirstHostNewBookingWelcomePolicy(
+      { ...parsed, shouldReply },
+      context,
+      guestMessage
+    );
+    if (firstHostWelcomePolicy.applied) {
+      parsed.typeOfMessageReceived = firstHostWelcomePolicy.typeOfMessageReceived;
+      parsed.proposedResponse = firstHostWelcomePolicy.proposedResponse;
+      shouldReply = firstHostWelcomePolicy.shouldReply;
+      confidence = firstHostWelcomePolicy.confidence;
+      console.log(
+        `[Agent] → First-host new-booking welcome policy (processMessage): ${firstHostWelcomePolicy.reason}`
+      );
     }
 
     // Cassidy / production-miss hardening: high conf + sendable draft → always auto-reply.
@@ -1400,6 +1417,207 @@ export class GuestMessagingAgent {
     }
 
     return { applied: true, shouldReply: true, confidence: 1.0, escalated: false };
+  }
+
+  /**
+   * First host reply opportunity on a confirmed reservation (Roberto "Ok" incident).
+   * True when no prior host message exists in the thread and the reservation is not cancelled.
+   * Covers empty history, live-fetched first guest msg, and isFirstHostMessage greeting signals.
+   */
+  _isFirstHostOnConfirmedReservation(context = {}) {
+    const hasReservation = !!(
+      context.reservationId ||
+      context.reservation_id ||
+      context.reservation?.id
+    );
+    if (!hasReservation) return false;
+    if (this._isReservationAlreadyCancelled(context)) return false;
+
+    const traces = context.conversationTraces || {};
+    if (traces.recentWelcomeSent || traces.earlyUnitReadyOffered) return false;
+    if (traces.hasRecentHostMessage) return false;
+
+    const g = traces.greeting;
+    if (g && g.isFirstHostMessage === true) return true;
+    if (g && typeof g.numHostMessages === 'number' && g.numHostMessages === 0) return true;
+
+    const hist = context.conversationHistory;
+    if (Array.isArray(hist)) {
+      const hostCount = hist.filter((m) => {
+        const role = String(m?.sender_type || m?.role || m?.sender?.type || m?.sender_role || '').toLowerCase();
+        return role === 'host' || role === 'owner' || role === 'cohost';
+      }).length;
+      if (hostCount === 0) return true;
+      return false;
+    }
+
+    // No history array + no recent host signal → treat as first host (webhook-only / processMessage tests).
+    return true;
+  }
+
+  /**
+   * Short first-booking ack/hello with no operational ask (Roberto "Ok", "Hi", "Thanks", etc.).
+   */
+  _isShortNewBookingAck(guestMessage = '') {
+    const msg = (guestMessage || '').trim();
+    if (!msg || msg.length > 100) return false;
+    if (/\?/.test(msg)) return false;
+    if (/(can we|would it|is it possible|do you|can you|where is|how do|wifi|password|code|parking|pet fee|check.?in|check.?out)/i.test(msg)) {
+      return false;
+    }
+    // Single emoji / single token acks and simple hellos
+    if (/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s!.]*$/u.test(msg) && msg.length <= 8) {
+      return true;
+    }
+    return /^(ok+|okay|k|kk|hi|hello|hey|yo|thanks|thank you|thx|great|perfect|cool|yes|yep|yup|sure|sounds good|got it)[\s!.]*$/i.test(msg);
+  }
+
+  /**
+   * Deterministic rich-enough first welcome when LLM returns none / too-curt draft.
+   * Same-day vs future logistics mirror welcome-messages.md core rules (no forbidden closers).
+   */
+  _buildFirstHostWelcomeDraft(context = {}, guestMessage = '') {
+    const rawName = context.guestDisplayName || context.guestName || '';
+    const firstName = String(rawName).split(/[\s(·]/)[0].trim() || '';
+    const nameBit = firstName ? ` ${firstName}` : '';
+    const g = context.conversationTraces?.greeting;
+    const greeting =
+      (g?.timeBasedGreeting && String(g.timeBasedGreeting).trim()) ||
+      getTimeBasedGreeting(new Date()).greeting ||
+      'Hello';
+
+    const checkInRaw =
+      context.checkIn ||
+      context.check_in ||
+      context.arrival_date ||
+      context.arrivalDate ||
+      null;
+    let daysUntil = null;
+    let isSameDay = false;
+    if (checkInRaw) {
+      try {
+        const checkInDate = new Date(checkInRaw);
+        if (!Number.isNaN(checkInDate.getTime())) {
+          const nowNy = new Date(
+            new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })
+          );
+          const cinNy = new Date(
+            checkInDate.toLocaleString('en-US', { timeZone: 'America/New_York' })
+          );
+          const startToday = new Date(nowNy.getFullYear(), nowNy.getMonth(), nowNy.getDate());
+          const startCin = new Date(cinNy.getFullYear(), cinNy.getMonth(), cinNy.getDate());
+          daysUntil = Math.round((startCin - startToday) / 86400000);
+          isSameDay = daysUntil <= 0;
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    const lines = [];
+    lines.push(
+      `${greeting}${nameBit ? ',' + nameBit : ''}, welcome — thanks for booking with us!`
+    );
+
+    if (isSameDay) {
+      lines.push(
+        'Check-in starts at 4pm with self-check-in. If the cleaning is completed before 4pm, we will message you.'
+      );
+    } else if (daysUntil != null && daysUntil >= 3) {
+      lines.push(
+        'Check-in is at 4pm with self-check-in. I will send the detailed check-in instructions 3 days before your arrival.'
+      );
+    } else if (daysUntil != null && daysUntil >= 0) {
+      lines.push(
+        'Check-in is at 4pm with self-check-in. I will be sending you the detailed check-in instructions shortly.'
+      );
+    } else {
+      lines.push('Check-in is at 4pm with self-check-in.');
+    }
+
+    lines.push(
+      'You will have one dedicated off-street parking spot at the property.'
+    );
+    lines.push('Looking forward to hosting you in Portland.');
+    lines.push('');
+    lines.push('Jerome & Ruby');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Roberto incident (2026-08-04): guest first post-booking message was just "Ok".
+   * LLM classified OTHER_MESSAGE + shouldReply:false; reflection/judge left it unsent.
+   * Rule: on a confirmed reservation, the first host reply opportunity MUST auto-reply with
+   * NEW_RESERVATION_WELCOME logistics (never escalate-only for short acks like ok/hi/thanks).
+   */
+  _applyFirstHostNewBookingWelcomePolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._isFirstHostOnConfirmedReservation(context)) {
+      return { applied: false };
+    }
+    // Do not override post-welcome thanks / in-stay pure acks when host already welcomed
+    if (this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
+      return { applied: false };
+    }
+
+    const categories = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const draft = (parsed.proposedResponse || '').trim();
+    const hasSendable =
+      draft &&
+      draft !== 'none' &&
+      draft.length >= 40 &&
+      /4\s*pm|self-?check|parking|check-?in/i.test(draft);
+    const shortAck = this._isShortNewBookingAck(guestMessage);
+    const noOrWeakDraft =
+      !draft ||
+      draft === 'none' ||
+      draft.length < 40 ||
+      /let me know if you have any questions|let me know if questions|happy to hear|feel free to book/i.test(
+        draft
+      );
+    const otherOrNone =
+      categories.includes('OTHER_MESSAGE') ||
+      categories.includes('GENERAL_ACKNOWLEDGMENT') ||
+      !parsed.typeOfMessageReceived;
+    const welcomeAlready =
+      categories.includes('NEW_RESERVATION_WELCOME') ||
+      categories.includes('NEW_INQUIRY_WELCOME');
+    const withheld = parsed.shouldReply === false || parsed.escalated === true;
+
+    // Always force when first host + (short ack OR withheld OR weak welcome draft OR misclassified OTHER)
+    const shouldForce =
+      shortAck ||
+      withheld ||
+      (welcomeAlready && noOrWeakDraft) ||
+      (otherOrNone && (shortAck || noOrWeakDraft));
+
+    if (!shouldForce && hasSendable && parsed.shouldReply === true) {
+      return { applied: false };
+    }
+    if (!shouldForce && !shortAck && !withheld && !otherOrNone) {
+      // Specific operational category with sendable draft already set to reply — leave it.
+      if (hasSendable && parsed.shouldReply !== false) {
+        return { applied: false };
+      }
+    }
+
+    const proposedResponse = hasSendable
+      ? draft
+      : this._buildFirstHostWelcomeDraft(context, guestMessage);
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+      reason: shortAck
+        ? 'first_host_short_ack_welcome'
+        : 'first_host_new_booking_force_welcome',
+    };
   }
 
   /**
@@ -3135,9 +3353,23 @@ export class GuestMessagingAgent {
     // Strong safety net for pure first-post-booking intros on confirmed reservations (Emma, Cheryl, Abby cases).
     // If the LLM misclassifies as OTHER_MESSAGE or withholds reply (e.g. history fetch failed conservatism),
     // force NEW_RESERVATION_WELCOME + shouldReply true + confidence 1.0 when a substantial response exists.
+    // Also covers Roberto short-ack first host ("Ok") via first-host new-booking policy.
     const welcomeCategories = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'];
     const isPureWelcomeIntro = this._isPureFirstPostBookingIntro(guestMessage, enrichedContext);
-    if (isPureWelcomeIntro) {
+    const firstHostSafety = this._applyFirstHostNewBookingWelcomePolicy(decision, enrichedContext, guestMessage);
+    if (firstHostSafety.applied) {
+      console.log(
+        `[Agent] → SAFETY NET: First-host new-booking welcome (${firstHostSafety.reason})`
+      );
+      finalDecision = {
+        ...decision,
+        typeOfMessageReceived: firstHostSafety.typeOfMessageReceived,
+        proposedResponse: firstHostSafety.proposedResponse,
+        shouldReply: true,
+        confidence: 1.0,
+        escalated: false,
+      };
+    } else if (isPureWelcomeIntro) {
       const hasSubstantialResponse = decision.proposedResponse && decision.proposedResponse !== 'none' && decision.proposedResponse.length > 20;
       if (decision.typeOfMessageReceived === 'OTHER_MESSAGE' && hasSubstantialResponse) {
         console.log('[Agent] → SAFETY NET: Forcing NEW_RESERVATION_WELCOME + conf 1.0 + shouldReply for pure first-post-booking intro (misclassified as OTHER_MESSAGE)');
@@ -3159,12 +3391,14 @@ export class GuestMessagingAgent {
       }
     }
 
-    if (enrichedContext.recentHostActivity && decision.shouldReply &&
+    if (enrichedContext.recentHostActivity && finalDecision.shouldReply &&
         !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext) &&
-        decision.typeOfMessageReceived !== 'THANK_YOU_MESSAGE') {
+        finalDecision.typeOfMessageReceived !== 'THANK_YOU_MESSAGE' &&
+        // Never suppress the mandatory first-host new-booking welcome (Roberto).
+        !this._isFirstHostOnConfirmedReservation(enrichedContext)) {
       console.log('[Agent] → Recent host activity detected after first pass — forcing suppression to prevent duplicate reply');
       finalDecision = {
-        ...decision,
+        ...finalDecision,
         shouldReply: false,
         proposedResponse: 'none',
         suppressedDueToRecentHost: true,
@@ -3399,6 +3633,16 @@ export class GuestMessagingAgent {
             this._isPureFirstPostBookingIntro(guestMessage, enrichedContext) &&
             reflection.revisedResponse.length > 20) {
           console.log('[Agent] → Reflection revised pure welcome — forcing shouldReply true (Cheryl/Emma safeguard)');
+          finalResult.shouldReply = true;
+          finalResult.confidence = 1.0;
+          finalResult.escalated = false;
+        } else if (
+          ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'].includes(revCat) &&
+          this._isFirstHostOnConfirmedReservation(enrichedContext) &&
+          reflection.revisedResponse.length > 20
+        ) {
+          // Roberto "Ok": reflection correctly reclassified to welcome but left shouldReply false.
+          console.log('[Agent] → Reflection revised first-host welcome — forcing shouldReply true (Roberto safeguard)');
           finalResult.shouldReply = true;
           finalResult.confidence = 1.0;
           finalResult.escalated = false;
@@ -3666,6 +3910,26 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = pureWelcomePolicyFinal.shouldReply;
       finalResult.confidence = pureWelcomePolicyFinal.confidence;
       finalResult.escalated = pureWelcomePolicyFinal.escalated;
+    }
+
+    // Final hard gate (Roberto): first host message on a new booking must send a welcome.
+    // Runs after reflection/judge so APPROVE-no-reply cannot leave the guest unanswered.
+    const firstHostWelcomeFinal = this._applyFirstHostNewBookingWelcomePolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (firstHostWelcomeFinal.applied) {
+      console.log(
+        `[Agent] → First-host new-booking welcome policy applied (final): ${firstHostWelcomeFinal.reason}`
+      );
+      finalResult.typeOfMessageReceived = firstHostWelcomeFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = firstHostWelcomeFinal.proposedResponse;
+      finalResult.shouldReply = firstHostWelcomeFinal.shouldReply;
+      finalResult.confidence = firstHostWelcomeFinal.confidence;
+      finalResult.escalated = firstHostWelcomeFinal.escalated;
+      finalResult.firstHostWelcomeForced = true;
+      finalResult.firstHostWelcomeReason = firstHostWelcomeFinal.reason;
     }
 
     const postWelcomeThanksPolicyFinal = this._applyPostWelcomeThankYouPolicy(finalResult, enrichedContext, guestMessage);

@@ -27,6 +27,8 @@ This rule exists because the harness directly affects live guest replies and the
 
 ## Production miss → Grok eval golden (mandatory after any missed auto-reply)
 
+- **Roberto short "Ok" first booking (2026-08-04, Apt 3)**: Guest's first post-booking message was only "Ok". LLM → OTHER_MESSAGE + shouldReply:false; reflection reclassified NEW_RESERVATION_WELCOME but left shouldReply false; judge APPROVED no-reply. Fix: `_isFirstHostOnConfirmedReservation` + `_applyFirstHostNewBookingWelcomePolicy` forces NEW_RESERVATION_WELCOME + send (+ deterministic logistics draft when draft is none/curt). Applies to all short first-host acks (ok/hi/thanks). Eval: `roberto-ok-first-booking-welcome`. **R2 chat "fix" that shipped dead Kotlin/TS + fake reprocess.js was a no-op** — real fix lives in `src/agent.js` only.
+
 When a guest message was **not** auto-replied but should have been (Cassidy checkout class, etc.):
 
 1. Capture a regression scenario (writes `eval/scenarios/<id>.json` with `shouldAlwaysReply`, `minConfidence`, `productionMiss`):

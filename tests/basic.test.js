@@ -555,6 +555,84 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(applied.escalated, false);
   });
 
+  it('HARDENING: Roberto short "Ok" first host on new booking must force NEW_RESERVATION_WELCOME + reply', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Ok';
+    const ctx = {
+      reservationId: '512e11da-a9b7-4b80-bb9c-bd422243053a',
+      guestName: 'Roberto',
+      guestDisplayName: 'Roberto',
+      checkIn: '2026-08-04T16:00:00-04:00',
+      checkOut: '2026-08-05T10:00:00-04:00',
+      listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+      propertyName: 'Cozy, Central 2 Bd Apt, Parking',
+      conversationHistory: [],
+      conversationTraces: {
+        hasRecentHostMessage: false,
+        historySource: 'live_fetched',
+        recentMessageCount: 1,
+        greeting: {
+          isFirstHostMessage: true,
+          numHostMessages: 0,
+          numGuestMessages: 1,
+          shouldUseGreeting: true,
+          timeBasedGreeting: 'Good afternoon',
+        },
+      },
+    };
+    assert.equal(agent._isFirstHostOnConfirmedReservation(ctx), true);
+    assert.equal(agent._isShortNewBookingAck(msg), true);
+    assert.equal(agent._isPureFirstPostBookingIntro(msg, ctx), false, 'short Ok is not pure-intro (≥25 chars)');
+
+    const applied = agent._applyFirstHostNewBookingWelcomePolicy(
+      {
+        typeOfMessageReceived: 'OTHER_MESSAGE',
+        proposedResponse: 'none',
+        shouldReply: false,
+        escalated: true,
+        confidence: 1.0,
+      },
+      ctx,
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, true);
+    assert.equal(applied.escalated, false);
+    assert.equal(applied.typeOfMessageReceived, 'NEW_RESERVATION_WELCOME');
+    assert.equal(applied.confidence, 1.0);
+    assert.ok(applied.proposedResponse && applied.proposedResponse !== 'none');
+    assert.match(applied.proposedResponse, /Roberto/i);
+    assert.match(applied.proposedResponse, /4pm/i);
+    assert.match(applied.proposedResponse, /self-check-in/i);
+    assert.match(applied.proposedResponse, /parking/i);
+    assert.doesNotMatch(applied.proposedResponse, /let me know if you have any questions/i);
+  });
+
+  it('HARDENING: first-host welcome is not applied after host already messaged', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const ctx = {
+      reservationId: '512e11da-a9b7-4b80-bb9c-bd422243053a',
+      conversationTraces: {
+        hasRecentHostMessage: true,
+        recentWelcomeSent: true,
+        greeting: { isFirstHostMessage: false, numHostMessages: 1 },
+      },
+    };
+    assert.equal(agent._isFirstHostOnConfirmedReservation(ctx), false);
+    const applied = agent._applyFirstHostNewBookingWelcomePolicy(
+      { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'none', shouldReply: false },
+      ctx,
+      'Ok'
+    );
+    assert.equal(applied.applied, false);
+  });
+
   it('normalizes bare CANCELLATION to CANCELLATION_POLICY for refund questions', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

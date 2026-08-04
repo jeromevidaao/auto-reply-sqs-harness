@@ -1,0 +1,45 @@
+{
+  "id": "roberto-ok-first-booking-welcome",
+  "description": "Production miss 2026-08-04: Roberto booked Apt 3 (same-day) and sent only 'Ok'. Agent classified OTHER_MESSAGE + shouldReply:false and escalated manual-needed with no host reply. First host message on a confirmed reservation must always auto-reply with NEW_RESERVATION_WELCOME logistics (4pm, self-check-in, parking).",
+  "guestMessage": "Ok",
+  "context": {
+    "guestName": "Roberto",
+    "guestDisplayName": "Roberto",
+    "reservationId": "512e11da-a9b7-4b80-bb9c-bd422243053a",
+    "conversation_id": "a84e0147-1b7a-4500-b58f-6489adae5132",
+    "checkIn": "2026-08-04T16:00:00-04:00",
+    "checkOut": "2026-08-05T10:00:00-04:00",
+    "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "propertyName": "Cozy, Central 2 Bd Apt, Parking",
+    "bookingTimestamp": "2026-08-04T19:34:56Z",
+    "asOfDate": "2026-08-04",
+    "conversationHistory": [],
+    "conversationTraces": {
+      "hasRecentHostMessage": false,
+      "historySource": "live_fetched",
+      "recentMessageCount": 1,
+      "greeting": {
+        "isFirstHostMessage": true,
+        "numHostMessages": 0,
+        "numGuestMessages": 1,
+        "shouldUseGreeting": true,
+        "timeBasedGreeting": "Good afternoon"
+      }
+    }
+  },
+  "rubric": {
+    "expectedCategory": ["NEW_RESERVATION_WELCOME"],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "requiredPhrases": ["4pm", "self-check-in", "parking", "Roberto"],
+    "forbiddenPhrases": [
+      "let me know if you have any questions",
+      "let me know if questions",
+      "feel free to book"
+    ]
+  },
+  "notes": "Roberto incident. Deterministic first-host new-booking policy in agent.js must force send even when LLM says OTHER_MESSAGE + none. shouldAlwaysReply + minConfidence enforced in eval runner.",
+  "productionMiss": true,
+  "unitTestEnforced": true
+}
