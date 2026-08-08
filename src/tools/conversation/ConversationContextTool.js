@@ -1,6 +1,10 @@
 import { BaseTool } from '../BaseTool.js';
 import { ConversationHistoryRequiredError } from '../../errors/ConversationHistoryRequiredError.js';
-import { getTimeBasedGreeting, analyzeGreetingContext } from '../../utils/timeGreeting.js';
+import {
+  getTimeBasedGreeting,
+  analyzeGreetingContext,
+  resolveNowForGreeting,
+} from '../../utils/timeGreeting.js';
 
 /**
  * ConversationContextTool
@@ -315,18 +319,17 @@ export class ConversationContextTool extends BaseTool {
     // === Greeting context analysis (first host message, first-of-day, recent greeting for suppression) ===
     // Uses live messages if fetched, else falls back to provided conversationHistory.
     // This powers smart "greet only on first message of day / first host reply" behavior.
-    // For eval scenarios with asOfDate/bookingTimestamp (e.g. abby birthday welcome), derive a stable "now"
-    // so timeBasedGreeting in traces is deterministic and can match documented expectations (afternoon for abby).
+    // Clock for time-of-day greeting:
+    //   - Live production: real now (America/New_York via getTimeBasedGreeting)
+    //   - Eval freeze: asOfDate / simulatedToday / today → 2pm NY that day (stable goldens)
+    //   - NEVER bookingTimestamp — that is when the guest booked, not when we reply
+    //     (Nancy incident 2026-08: "Good evening" at 9:46 AM ET because booking was evening).
     try {
-      let nowForGreeting = new Date();
-      const asOf = context.asOfDate || context.simulatedToday || context.today;
-      if (asOf) {
-        // Pick ~2pm NY (Good afternoon) on the asOf date to align with golden notes for future-welcome scenarios like abby.
-        // 18:00Z == 14:00 EDT on that calendar date.
-        nowForGreeting = new Date(String(asOf).slice(0,10) + 'T18:00:00Z');
-      } else if (context.bookingTimestamp) {
-        nowForGreeting = new Date(context.bookingTimestamp);
-      }
+      const nowForGreeting = resolveNowForGreeting({
+        asOfDate: context.asOfDate,
+        simulatedToday: context.simulatedToday,
+        today: context.today,
+      });
 
       const messagesForGreeting = allRecentMessages.length > 0
         ? allRecentMessages

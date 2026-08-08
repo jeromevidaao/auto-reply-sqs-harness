@@ -6,6 +6,12 @@ import { GuestMessagingAgent } from '../src/agent.js';
 import { setHostContactsForTests, TEST_HOST_CONTACTS, clearHostContactsCache } from '../src/config/hostContacts.js';
 import { EventRequestTool } from '../src/tools/event/EventRequestTool.js';
 import { ThermostatTool } from '../src/tools/hvac/ThermostatTool.js';
+import {
+  getTimeBasedGreeting,
+  resolveNowForGreeting,
+  stripLeadingFormalTimeGreeting,
+  alignLeadingTimeGreeting,
+} from '../src/utils/timeGreeting.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRootForTests = path.resolve(__dirname, '..');
@@ -1278,6 +1284,136 @@ describe('Post-checkout thank-you safeguards (no LLM)', () => {
     assert.equal(guarded.deterministicGuard, true);
     assert.match(guarded.revisedResponse, /you're welcome, rene/i);
     assert.doesNotMatch(guarded.revisedResponse, /events or gatherings/i);
+  });
+
+  it('strips wrong formal time greeting from checkout thank-you (Nancy morning incident)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    // LLM (or stale booking-time clock) said Good evening at ~9:46 AM ET.
+    const parsed = {
+      typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+      proposedResponse:
+        "Good evening, Nancy, You're welcome! Safe travels and hope you enjoyed the stay.",
+    };
+    const nancyCtx = {
+      guestName: 'Nancy',
+      guestDisplayName: 'Nancy',
+      checkIn: '2026-08-06',
+      checkOut: '2026-08-08',
+      asOfDate: '2026-08-08',
+      // Booking was in the evening — must NOT drive the reply greeting.
+      bookingTimestamp: '2026-07-15T23:30:00Z',
+    };
+    const msg =
+      'Thanks so much for hosting us! We checked out and left the keys. Safe travels yourself!';
+    const applied = agent._applyPostCheckoutThankYouPolicy(parsed, nancyCtx, msg);
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /you're welcome/i);
+    assert.doesNotMatch(applied.proposedResponse, /good evening/i);
+    assert.doesNotMatch(applied.proposedResponse, /good morning/i);
+    assert.doesNotMatch(applied.proposedResponse, /good afternoon/i);
+    assert.match(applied.proposedResponse, /safe travels|enjoyed/i);
+  });
+});
+
+describe('Eastern time-of-day greeting (Nancy incident)', () => {
+  it('getTimeBasedGreeting is morning at 9:46 AM America/New_York', () => {
+    // 2026-08-08 13:46 UTC = 9:46 AM EDT
+    const info = getTimeBasedGreeting(new Date('2026-08-08T13:46:00.000Z'));
+    assert.equal(info.hour, 9);
+    assert.equal(info.greeting, 'Good morning');
+  });
+
+  it('getTimeBasedGreeting is afternoon at 2pm ET and evening at 6pm ET', () => {
+    assert.equal(
+      getTimeBasedGreeting(new Date('2026-08-08T18:00:00.000Z')).greeting,
+      'Good afternoon'
+    );
+    assert.equal(
+      getTimeBasedGreeting(new Date('2026-08-08T22:30:00.000Z')).greeting,
+      'Good evening'
+    );
+  });
+
+  it('resolveNowForGreeting ignores booking time and uses real now unless asOfDate set', () => {
+    const withAsOf = resolveNowForGreeting({ asOfDate: '2026-08-08' });
+    // Frozen eval clock is 18:00Z → 2pm EDT → afternoon
+    assert.equal(getTimeBasedGreeting(withAsOf).greeting, 'Good afternoon');
+
+    const liveMorning = resolveNowForGreeting({
+      now: new Date('2026-08-08T13:46:00.000Z'),
+      // bookingTimestamp must be ignored by resolveNowForGreeting (not even a param).
+    });
+    assert.equal(getTimeBasedGreeting(liveMorning).greeting, 'Good morning');
+  });
+
+  it('alignLeadingTimeGreeting rewrites Good evening → Good morning at 9:46 AM ET', () => {
+    const morning = new Date('2026-08-08T13:46:00.000Z');
+    const out = alignLeadingTimeGreeting(
+      "Good evening, Nancy, You're welcome! Safe travels and hope you enjoyed the stay.",
+      morning
+    );
+    assert.match(out, /^Good morning, Nancy,/i);
+    assert.doesNotMatch(out, /good evening/i);
+  });
+
+  it('stripLeadingFormalTimeGreeting removes TOD prefix for thank-you drafts', () => {
+    const out = stripLeadingFormalTimeGreeting(
+      "Good evening, Nancy, You're welcome! Safe travels and hope you enjoyed the stay."
+    );
+    assert.match(out, /^You're welcome/i);
+    assert.doesNotMatch(out, /good evening/i);
+  });
+
+  it('_sanitizeTimeOfDayGreeting strips thank-you formal greeting and aligns others', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const morningCtx = {
+      asOfInstant: '2026-08-08T13:46:00.000Z',
+      nowForGreeting: new Date('2026-08-08T13:46:00.000Z'),
+    };
+    const thanks = agent._sanitizeTimeOfDayGreeting(
+      "Good evening, Nancy, You're welcome! Safe travels and hope you enjoyed the stay.",
+      morningCtx,
+      'THANK_YOU_MESSAGE'
+    );
+    assert.match(thanks, /^You're welcome/i);
+    assert.doesNotMatch(thanks, /good (evening|morning|afternoon)/i);
+
+    const ops = agent._sanitizeTimeOfDayGreeting(
+      'Good evening, Henry, the lock box is on top.',
+      morningCtx,
+      'APT2_STREET_DOOR_LOCKOUT'
+    );
+    assert.match(ops, /^Good morning, Henry,/i);
+  });
+
+  it('Apt2 lockout fallback uses live TOD not hardcoded Good evening', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const apt2 = {
+      guestName: 'Henry',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+      guestPhone: '6468040123',
+      nowForGreeting: new Date('2026-08-08T13:46:00.000Z'),
+    };
+    const lockedOutMsg =
+      'We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb.';
+    const applied = agent._applyApt2StreetDoorLockoutPolicy(
+      { typeOfMessageReceived: 'APT2_STREET_DOOR_LOCKOUT', proposedResponse: 'none' },
+      apt2,
+      lockedOutMsg
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /^Good morning, Henry,/i);
+    assert.doesNotMatch(applied.proposedResponse, /good evening/i);
   });
 });
 

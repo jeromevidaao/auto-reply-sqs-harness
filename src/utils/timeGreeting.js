@@ -3,13 +3,45 @@
  * All times are Eastern (America/New_York) as per host location and prior system.
  */
 
+/** Leading formal time-of-day greeting (Good morning/afternoon/evening), optional name. */
+export const FORMAL_TIME_GREETING_PREFIX_RE =
+  /^(Good\s+(?:morning|afternoon|evening))(\s*,?\s*[^,!\n?]{0,40})?([,!]\s*)/i;
+
+/**
+ * Resolve "now" for time-based greetings.
+ * Live production always uses real clock. Eval may freeze via asOfDate / simulatedToday / today
+ * (2pm NY on that calendar day for stable afternoon goldens).
+ * NEVER use bookingTimestamp — that is when the guest booked, not when we reply
+ * (Nancy incident: "Good evening" at 9:46 AM ET because booking was evening).
+ */
+export function resolveNowForGreeting(options = {}) {
+  const asOf = options.asOfDate || options.simulatedToday || options.today || options.asOf;
+  if (asOf) {
+    // ~2pm America/New_York on the frozen calendar day (18:00Z == 14:00 EDT).
+    return new Date(String(asOf).slice(0, 10) + 'T18:00:00Z');
+  }
+  if (options.now instanceof Date && !Number.isNaN(options.now.getTime())) {
+    return options.now;
+  }
+  if (options.asOfInstant) {
+    const d = new Date(options.asOfInstant);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return new Date();
+}
+
 export function getTimeBasedGreeting(date = new Date()) {
-  const nyHourStr = date.toLocaleString('en-US', {
+  // Prefer hourCycle h23 so midnight is 0 not 24 (ICU variance).
+  const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     hour: 'numeric',
-    hour12: false
-  });
-  const hour = parseInt(nyHourStr, 10) || 0;
+    hourCycle: 'h23',
+  }).formatToParts(date instanceof Date ? date : new Date(date));
+  const hourPart = parts.find((p) => p.type === 'hour');
+  let hour = parseInt(hourPart?.value ?? '0', 10);
+  if (Number.isNaN(hour)) hour = 0;
+  // Normalize 24 → 0 if any environment still returns 24 for midnight.
+  if (hour === 24) hour = 0;
 
   const dayOfWeek = date.toLocaleString('en-US', {
     timeZone: 'America/New_York',
@@ -47,6 +79,41 @@ export function getTimeBasedGreeting(date = new Date()) {
     isFriday,
     hour
   };
+}
+
+/**
+ * Strip a leading "Good morning/afternoon/evening[, Name]," from a draft.
+ * Thank-you replies must not use formal time greetings (see thank-you-message.md).
+ */
+export function stripLeadingFormalTimeGreeting(text = '') {
+  const s = String(text || '').trim();
+  if (!s) return s;
+  const stripped = s.replace(FORMAL_TIME_GREETING_PREFIX_RE, '').trim();
+  // Capitalize first letter of remaining body if we stripped a prefix.
+  if (stripped && stripped !== s) {
+    return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+  }
+  return s;
+}
+
+/**
+ * If draft starts with Good morning/afternoon/evening, rewrite that word to match
+ * current Eastern time-of-day. Leaves Hi/Hey/Hello and the rest of the message alone.
+ * Nancy incident defense: LLM said "Good evening" at 9:46 AM ET.
+ */
+export function alignLeadingTimeGreeting(text = '', date = new Date()) {
+  const s = String(text || '').trim();
+  if (!s) return s;
+  const m = s.match(FORMAL_TIME_GREETING_PREFIX_RE);
+  if (!m) return s;
+  const correct = getTimeBasedGreeting(date).greeting;
+  // Preserve original casing style of the rest (name + comma/space) from group 2+3.
+  const restAfterGreeting = s.slice(m[1].length);
+  if (m[1].toLowerCase() === correct.toLowerCase()) {
+    // Already correct; normalize casing of the greeting word only.
+    return correct + restAfterGreeting;
+  }
+  return correct + restAfterGreeting;
 }
 
 /**

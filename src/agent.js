@@ -22,7 +22,12 @@ import {
   ensureJustAcceptedOpener,
 } from './utils/reservationAccept.js';
 import { applyHighConfidenceForceReply } from './utils/replyPolicy.js';
-import { getTimeBasedGreeting } from './utils/timeGreeting.js';
+import {
+  getTimeBasedGreeting,
+  resolveNowForGreeting,
+  stripLeadingFormalTimeGreeting,
+  alignLeadingTimeGreeting,
+} from './utils/timeGreeting.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -593,10 +598,12 @@ export class GuestMessagingAgent {
     const draft = (parsed.proposedResponse || '').trim();
     let proposedResponse = standard;
 
-    // Preserve a leading time-based greeting + name if the model already produced one.
+    // Preserve a leading greeting + name if the model already produced one,
+    // but correct Good morning/afternoon/evening to real Eastern TOD.
     const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
     if (greetingMatch) {
-      proposedResponse = greetingMatch[0].trimEnd() + ' ' + standard;
+      const prefix = this._alignLeadingTimeGreeting(greetingMatch[0].trimEnd(), context);
+      proposedResponse = prefix + ' ' + standard;
     }
 
     return { applied: true, proposedResponse };
@@ -998,16 +1005,18 @@ export class GuestMessagingAgent {
     const naturalName = this._guestDisplayFirstName(context);
     const draft = (parsed.proposedResponse || '').trim();
     const eventDecline = /not able to accommodate events|gatherings/i.test(draft);
-    const isGoodThankYouAck = !eventDecline && /you're welcome|you are welcome/i.test(draft);
+    // Thank-you category: no formal Good morning/afternoon/evening (Nancy incident).
+    const draftBody = stripLeadingFormalTimeGreeting(draft);
+    const isGoodThankYouAck = !eventDecline && /you're welcome|you are welcome/i.test(draftBody);
 
-    let proposedResponse = draft;
+    let proposedResponse = draftBody;
     if (!isGoodThankYouAck) {
       let recovered = null;
       const raw = parsed.rawModelOutput;
       if (raw) {
         try {
           const r = typeof raw === 'string' ? JSON.parse(raw) : raw;
-          const pr = (r.proposedResponse || '').trim();
+          const pr = stripLeadingFormalTimeGreeting((r.proposedResponse || '').trim());
           if (/you're welcome|you are welcome/i.test(pr) && !/not able to accommodate events/i.test(pr)) {
             recovered = pr;
           }
@@ -1017,6 +1026,9 @@ export class GuestMessagingAgent {
       }
       proposedResponse = recovered || `You're welcome, ${naturalName}! Safe travels and hope you enjoyed your stay.`;
     }
+
+    // Hard rule: never ship formal time greeting on thank-you (even if LLM left one).
+    proposedResponse = stripLeadingFormalTimeGreeting(proposedResponse);
 
     parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
     parsed.proposedResponse = proposedResponse;
@@ -1061,7 +1073,7 @@ export class GuestMessagingAgent {
     }
 
     const naturalName = this._guestDisplayFirstName(context);
-    const draft = (parsed.proposedResponse || '').trim();
+    const draft = stripLeadingFormalTimeGreeting((parsed.proposedResponse || '').trim());
     const hasEndOfStayFarewell = /safe travels|hope you enjoyed|glad you had a good stay|have a (?:great|wonderful|safe) trip|enjoyed your stay/i.test(draft);
 
     let proposedResponse = draft;
@@ -1076,6 +1088,8 @@ export class GuestMessagingAgent {
         proposedResponse += '!';
       }
     }
+
+    proposedResponse = stripLeadingFormalTimeGreeting(proposedResponse);
 
     parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
     parsed.proposedResponse = proposedResponse;
@@ -1117,10 +1131,12 @@ export class GuestMessagingAgent {
     const prematurelyConfirms = /spot is available|designated spot is available|yes[,!]?\s+(the\s+)?designated spot|you can park (in |at )?the (designated )?spot|parking spot is available/i.test(draft);
 
     const name = this._guestDisplayFirstName(context);
+    const correctGreeting = getTimeBasedGreeting(this._nowForGreeting(context)).greeting;
     const g = context.conversationTraces?.greeting;
-    const greetingPrefix = (g?.shouldUseGreeting && g?.timeBasedGreeting)
-      ? `${g.timeBasedGreeting}, ${name},`
-      : (draft.match(/^(Good (?:morning|afternoon|evening)),?\s+\w+,?/i)?.[0]?.trim() || `Hi ${name},`);
+    // Prefer live Eastern TOD over stale traces / LLM "Good evening" at morning hours.
+    const greetingPrefix = (g?.shouldUseGreeting)
+      ? `${correctGreeting}, ${name},`
+      : `Hi ${name},`;
 
     const policyBody = 'check-in is at 4pm, so we can\'t guarantee the designated parking spot before then. The cleaning team may still be using it while the unit is being prepared. We\'ll message you as soon as the spot is ready for you.';
 
@@ -1183,11 +1199,13 @@ export class GuestMessagingAgent {
     const repeatsLogistics = /4\s*pm|self-check-in|parking|pet fee|3 days before|check-in instructions|off-street|not allowed on the bed/i.test(draft);
     const welcomeCategory = ['NEW_RESERVATION_WELCOME', 'NEW_INQUIRY_WELCOME'].includes(parsed.typeOfMessageReceived);
 
-    let proposedResponse = draft;
-    if (!draft || draft === 'none' || repeatsLogistics || welcomeCategory ||
-        !/you're welcome|you are welcome/i.test(draft)) {
+    let proposedResponse = stripLeadingFormalTimeGreeting(draft);
+    if (!proposedResponse || proposedResponse === 'none' || repeatsLogistics || welcomeCategory ||
+        !/you're welcome|you are welcome/i.test(proposedResponse)) {
       proposedResponse = `You're welcome, ${naturalName}!`;
     }
+
+    proposedResponse = stripLeadingFormalTimeGreeting(proposedResponse);
 
     parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
     parsed.proposedResponse = proposedResponse;
@@ -1200,6 +1218,51 @@ export class GuestMessagingAgent {
       confidence: 1.0,
       escalated: false,
     };
+  }
+
+  /**
+   * Clock for time-of-day greetings (Eastern). Eval may freeze via asOfDate; live uses real now.
+   * Never bookingTimestamp — that is booking time, not reply time.
+   */
+  _nowForGreeting(context = {}) {
+    return resolveNowForGreeting({
+      asOfDate: context.asOfDate,
+      simulatedToday: context.simulatedToday,
+      today: context.today,
+      asOfInstant: context.asOfInstant,
+      now: context.nowForGreeting instanceof Date ? context.nowForGreeting : undefined,
+    });
+  }
+
+  /**
+   * Correct a leading Good morning/afternoon/evening to match Eastern time-of-day.
+   * Used when policy paths preserve an LLM greeting prefix that may be wrong.
+   */
+  _alignLeadingTimeGreeting(text = '', context = {}) {
+    return alignLeadingTimeGreeting(text, this._nowForGreeting(context));
+  }
+
+  /**
+   * Final sanitize before send:
+   * - Thank-you: strip formal time greetings entirely
+   * - Otherwise: if draft starts with Good morning/afternoon/evening, force correct Eastern TOD
+   * Nancy incident: "Good evening, Nancy, You're welcome!..." at 9:46 AM ET.
+   */
+  _sanitizeTimeOfDayGreeting(proposedResponse = '', context = {}, typeOfMessageReceived = null) {
+    const text = (proposedResponse || '').trim();
+    if (!text || text === 'none') return text;
+
+    const cats = Array.isArray(typeOfMessageReceived)
+      ? typeOfMessageReceived
+      : [typeOfMessageReceived].filter(Boolean);
+    const isThankYou = cats.includes('THANK_YOU_MESSAGE') ||
+      (/^you're welcome|^you are welcome/i.test(stripLeadingFormalTimeGreeting(text)) &&
+        /safe travels|hope you enjoyed|enjoyed (?:your|the) stay/i.test(text));
+
+    if (isThankYou) {
+      return stripLeadingFormalTimeGreeting(text);
+    }
+    return this._alignLeadingTimeGreeting(text, context);
   }
 
   /**
@@ -1480,11 +1543,8 @@ export class GuestMessagingAgent {
     const rawName = context.guestDisplayName || context.guestName || '';
     const firstName = String(rawName).split(/[\s(·]/)[0].trim() || '';
     const nameBit = firstName ? ` ${firstName}` : '';
-    const g = context.conversationTraces?.greeting;
-    const greeting =
-      (g?.timeBasedGreeting && String(g.timeBasedGreeting).trim()) ||
-      getTimeBasedGreeting(new Date()).greeting ||
-      'Hello';
+    // Live Eastern TOD — do not trust stale traces that may have used booking time.
+    const greeting = getTimeBasedGreeting(this._nowForGreeting(context)).greeting || 'Hello';
 
     const checkInRaw =
       context.checkIn ||
@@ -2487,11 +2547,14 @@ export class GuestMessagingAgent {
 
     const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
     const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(·]/)[0];
+    const correctGreeting = getTimeBasedGreeting(this._nowForGreeting(context)).greeting;
     let proposedResponse = standard;
     if (greetingMatch) {
-      proposedResponse = `${greetingMatch[0].trimEnd()} ${standard}`;
+      // Align TOD if LLM used wrong period; keep Hi/Hey/Hello as-is.
+      const prefix = this._alignLeadingTimeGreeting(greetingMatch[0].trimEnd(), context);
+      proposedResponse = `${prefix} ${standard}`;
     } else if (firstName) {
-      proposedResponse = `Good evening, ${firstName},\n\n${standard}`;
+      proposedResponse = `${correctGreeting}, ${firstName},\n\n${standard}`;
     }
 
     return {
@@ -4159,6 +4222,24 @@ export class GuestMessagingAgent {
         console.error('[Agent] Escalation notify failed (non-fatal):', notifyErr.message);
       }
       finalResult._escalationNotified = true;
+    }
+
+    // Final Eastern time-of-day guard (Nancy incident): never ship "Good evening" at 9:46 AM ET.
+    // Thank-you: strip formal greetings. Other categories: align morning/afternoon/evening.
+    if (finalResult.proposedResponse && finalResult.proposedResponse !== 'none') {
+      const beforeGreeting = finalResult.proposedResponse;
+      const afterGreeting = this._sanitizeTimeOfDayGreeting(
+        beforeGreeting,
+        enrichedContext,
+        finalResult.typeOfMessageReceived
+      );
+      if (afterGreeting !== beforeGreeting) {
+        console.log(
+          `[Agent] → Time-of-day greeting sanitized: "${String(beforeGreeting).slice(0, 48)}..." → "${String(afterGreeting).slice(0, 48)}..."`
+        );
+        finalResult.proposedResponse = afterGreeting;
+        finalResult.timeGreetingSanitized = true;
+      }
     }
 
     return finalResult;
