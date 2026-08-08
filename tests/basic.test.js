@@ -1367,7 +1367,7 @@ describe('Eastern time-of-day greeting (Nancy incident)', () => {
     assert.doesNotMatch(out, /good evening/i);
   });
 
-  it('_sanitizeTimeOfDayGreeting strips thank-you formal greeting and aligns others', () => {
+  it('_sanitizeTimeOfDayGreeting strips pure thank-you formal greeting and aligns others', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' }
@@ -1390,6 +1390,15 @@ describe('Eastern time-of-day greeting (Nancy incident)', () => {
       'APT2_STREET_DOOR_LOCKOUT'
     );
     assert.match(ops, /^Good morning, Henry,/i);
+
+    // Multi-intent (sofa-bed-linens-amy): keep greeting, align TOD — do not strip.
+    const multi = agent._sanitizeTimeOfDayGreeting(
+      "Good evening, Amy, You're welcome! Yes we provide sheets under the sofa.",
+      morningCtx,
+      ['THANK_YOU_MESSAGE', 'SLEEPING_ARRANGEMENTS']
+    );
+    assert.match(multi, /^Good morning, Amy,/i);
+    assert.match(multi, /sheets under the sofa/i);
   });
 
   it('Apt2 lockout fallback uses live TOD not hardcoded Good evening', () => {

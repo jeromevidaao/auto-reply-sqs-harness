@@ -1244,8 +1244,9 @@ export class GuestMessagingAgent {
 
   /**
    * Final sanitize before send:
-   * - Thank-you: strip formal time greetings entirely
-   * - Otherwise: if draft starts with Good morning/afternoon/evening, force correct Eastern TOD
+   * - Pure thank-you only: strip formal time greetings (thank-you-message.md)
+   * - Multi-intent (thanks + laundry/linens/parking/etc.): keep greeting but align Eastern TOD
+   * - Other categories: if draft starts with Good morning/afternoon/evening, force correct TOD
    * Nancy incident: "Good evening, Nancy, You're welcome!..." at 9:46 AM ET.
    */
   _sanitizeTimeOfDayGreeting(proposedResponse = '', context = {}, typeOfMessageReceived = null) {
@@ -1255,12 +1256,32 @@ export class GuestMessagingAgent {
     const cats = Array.isArray(typeOfMessageReceived)
       ? typeOfMessageReceived
       : [typeOfMessageReceived].filter(Boolean);
-    const isThankYou = cats.includes('THANK_YOU_MESSAGE') ||
-      (/^you're welcome|^you are welcome/i.test(stripLeadingFormalTimeGreeting(text)) &&
-        /safe travels|hope you enjoyed|enjoyed (?:your|the) stay/i.test(text));
+    // Categories that never need a formal TOD greeting on their own.
+    const pureThanksOnly = new Set([
+      'THANK_YOU_MESSAGE',
+      'CHECKOUT',
+      'FYI_STATEMENT',
+      'REVIEW_SUBMITTED',
+      'REVIEW_PROMISE',
+      'GUEST_CHECKOUT',
+    ]);
+    const hasThanks = cats.includes('THANK_YOU_MESSAGE');
+    const hasOperational = cats.some((c) => c && !pureThanksOnly.has(c));
+    const pureThankYouCategory = hasThanks && !hasOperational;
 
-    if (isThankYou) {
-      return stripLeadingFormalTimeGreeting(text);
+    // Content heuristic when category is missing or pure thanks: short welcome-ack style.
+    const body = stripLeadingFormalTimeGreeting(text);
+    const looksLikePureThanksBody =
+      /^(you're welcome|you are welcome)/i.test(body) &&
+      !/\b(laundry|soap bubble|wifi|password|parking|4\s*pm|lock box|remote|sheets|linens|towels|check-in|check-out is)\b/i.test(body);
+
+    if (pureThankYouCategory || (cats.length === 0 && looksLikePureThanksBody) ||
+        (pureThankYouCategory === false && hasThanks === false && looksLikePureThanksBody &&
+          /safe travels|hope you enjoyed|enjoyed (?:your|the) stay/i.test(body))) {
+      // Only strip when this is clearly a pure thanks ack — not multi-intent ops.
+      if (pureThankYouCategory || looksLikePureThanksBody) {
+        return stripLeadingFormalTimeGreeting(text);
+      }
     }
     return this._alignLeadingTimeGreeting(text, context);
   }
