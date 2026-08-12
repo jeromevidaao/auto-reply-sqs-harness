@@ -34,8 +34,11 @@ export class StayExtensionTool extends BaseTool {
    * Shared detection regex — also used by agent pre-filters.
    * Covers Lilly-style later checkout AND Anna-style "begin stay one night earlier on 10/15".
    */
+  // Full calendar-day changes only — NOT hour-based "early check-in" (Olivia) or "late checkout at 12pm".
+  // Anna: "begin our stay one night earlier — on Thursday, 10/15"
+  // Lilly: "extend our stay by one day / check out on the 29th"
   static FULL_DAY_EXTENSION_RE =
-    /(extend.*(stay|booking|reservation|night|day)|one more (day|night)|extra (day|night)|stay (one|an) (extra|more) (day|night)|checkout on the \d|check out on the \d|check-out on the \d|arriv(e|ing|al).*(one|a) (day|night) (early|earlier|before)|come (one|a) (day|night) (early|earlier)|change (my )?(checkout|check.out|departure|check out|check.?in|arrival) (date|to)|move checkout|push checkout|leave on the \d|through the \d|until the \d|begin (our |the |my )?stay.*(one|a) (night|day) earlier|start (our |the |my )?stay.*(one|a) (night|day) earlier|(one|a) (night|day) earlier|arrive.*(earlier|early).*(on|the|\d)|check.?in.*(one|a) (night|day) (early|earlier)|come in (one|a) (night|day) early|additional (evening|night)|open to (this|an earlier|arriving earlier))/i;
+    /(extend.*(stay|booking|reservation|night|day)|one more (day|night)|extra (day|night)|stay (one|an) (extra|more) (day|night)|checkout on the \d|check out on the \d|check-out on the \d|arriv(e|ing|al).*(one|a) (day|night) (early|earlier)|come (one|a) (day|night) (early|earlier)|change (my )?(checkout|check.out|departure|check out|check.?in|arrival) (date|to)|move checkout|push checkout|leave on the \d|through the \d|until the \d|begin (our |the |my )?stay.*(one|a) (night|day) earlier|start (our |the |my )?stay.*(one|a) (night|day) earlier|(one|a) (night|day) earlier|arriv(e|ing).*(one|a) (night|day) early|check.?in (one|a) (night|day) (early|earlier)|come in (one|a) (night|day) early|additional (evening|night).*(earlier|early|before check)|open to (an earlier (arrival|check.?in|stay)|arriving (one|a) (day|night) earlier)|begin (our |the |my )?stay earlier|start (our |the |my )?stay earlier|one night early\b)/i;
 
   static HOUR_ONLY_LATE_CHECKOUT_RE =
     /(late checkout|check out later|checkout later|a bit later|few hours|12\s*pm|1\s*pm|11\s*am|stay until (noon|1|12|midday)|leave at (12|1|noon))/i;
@@ -264,9 +267,9 @@ export class StayExtensionTool extends BaseTool {
       }
     }
 
-    // Strong earlier signals win even if "pay for additional evening" also matches later-ish words.
+    // Strong earlier *date* signals (not hour-based "early check-in" / "opportunity for an early check in").
     const strongEarlier =
-      /begin (our |the |my )?stay|start (our |the |my )?stay|(one|a) (night|day) earlier|arriv(e|ing).*(early|earlier)|check.?in.*(early|earlier)/i.test(lower);
+      /begin (our |the |my )?stay.*(earlier|early)|start (our |the |my )?stay.*(earlier|early)|(one|a) (night|day) earlier|arriv(e|ing).*(one|a) (night|day) (early|earlier)|check.?in (one|a) (night|day) (early|earlier)|one night early\b|night before (our |the )?check.?in/i.test(lower);
 
     const wantsOneMore = /(one more|an extra|extra (day|night)|extend.*(by )?(one |a )?(day|night)|stay (one |an )?(extra|more)( night| day)?)/i.test(lower);
 

@@ -1257,6 +1257,12 @@ describe('Post-checkout thank-you safeguards (no LLM)', () => {
     assert.equal(applied.applied, false);
   });
 
+  it('does not treat hour-based early check-in as stay extension (Olivia)', () => {
+    const olivia =
+      "Hi Jerome - I'm flying into Portland tomorrow morning and landing around 9AM. Is there any opportunity for an early check in? If so, please let me know what time we'd be able to arrive. We're also planning to leave early on Sunday (by/before 9AM), so I will message you when we depart in case you want to start the cleaning process early.";
+    assert.equal(StayExtensionTool.looksLikeFullDayExtension(olivia), false);
+  });
+
   it('detects Anna-style earlier stay + 10/15 and requires alteration request when free', async () => {
     const annaMsg =
       "Hello! I'm wondering if it might be possible to begin our stay one night earlier — on Thursday, 10/15? We are looking into flights to Portland instead of a car. Are you open to this? Obviously we would pay for the additional evening.";
