@@ -6,6 +6,7 @@ import { GuestMessagingAgent } from '../src/agent.js';
 import { setHostContactsForTests, TEST_HOST_CONTACTS, clearHostContactsCache } from '../src/config/hostContacts.js';
 import { EventRequestTool } from '../src/tools/event/EventRequestTool.js';
 import { ThermostatTool } from '../src/tools/hvac/ThermostatTool.js';
+import { StayExtensionTool } from '../src/tools/stay-extension/StayExtensionTool.js';
 import {
   getTimeBasedGreeting,
   resolveNowForGreeting,
@@ -1254,6 +1255,145 @@ describe('Post-checkout thank-you safeguards (no LLM)', () => {
       msg
     );
     assert.equal(applied.applied, false);
+  });
+
+  it('detects Anna-style earlier stay + 10/15 and requires alteration request when free', async () => {
+    const annaMsg =
+      "Hello! I'm wondering if it might be possible to begin our stay one night earlier — on Thursday, 10/15? We are looking into flights to Portland instead of a car. Are you open to this? Obviously we would pay for the additional evening.";
+    assert.equal(StayExtensionTool.looksLikeFullDayExtension(annaMsg), true);
+
+    const mockClient = {
+      async getPropertyCalendar(_id, _start, _end) {
+        return [
+          { date: '2026-10-14', available: true },
+          { date: '2026-10-15', available: true },
+          { date: '2026-10-16', available: false },
+          { date: '2026-10-17', available: false },
+        ];
+      },
+    };
+    const tool = new StayExtensionTool({ hospitableClient: mockClient });
+    const result = await tool.execute(annaMsg, {
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      checkIn: '2026-10-16',
+      checkOut: '2026-10-18',
+      propertyName: '53 Pine St #2 · 1875 West End Victorian | EV Charging + Parking',
+    });
+    assert.equal(result.detected, true);
+    assert.equal(result.extensionType, 'earlier_checkin');
+    assert.equal(result.proposedCheckIn, '2026-10-15');
+    assert.deepEqual(result.extraNights, ['2026-10-15']);
+    assert.equal(result.calendarChecked, true);
+    assert.equal(result.allAvailable, true);
+    assert.match(result.suggestedResponseSnippet, /alteration request/i);
+    assert.match(result.suggestedResponseSnippet, /53 Pine St #2/i);
+
+    const blockedClient = {
+      async getPropertyCalendar() {
+        return [{ date: '2026-10-15', available: false }];
+      },
+    };
+    const blocked = await new StayExtensionTool({ hospitableClient: blockedClient }).execute(annaMsg, {
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      checkIn: '2026-10-16',
+      checkOut: '2026-10-18',
+      propertyName: '53 Pine St #2 · 1875 West End Victorian | EV Charging + Parking',
+    });
+    assert.equal(blocked.allAvailable, false);
+    assert.ok(blocked.unavailableDates.includes('2026-10-15'));
+    assert.match(blocked.suggestedResponseSnippet, /not available/i);
+    assert.doesNotMatch(blocked.suggestedResponseSnippet, /alteration request/i);
+
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    assert.equal(agent._looksLikeStayExtensionRequest(annaMsg, {
+      checkIn: '2026-10-16',
+      checkOut: '2026-10-18',
+    }), true);
+  });
+
+  it('StayExtensionTool still handles Lilly later-checkout unavailable', async () => {
+    const msg = "Hello, I'm wondering if I could extend our stay by one day -- instead of checking out on 28th, we'd check out on the 29th. Let me know, thanks!";
+    const tool = new StayExtensionTool({
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [{ date: '2026-09-29', available: false }];
+        },
+      },
+    });
+    const result = await tool.execute(msg, {
+      listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+      checkIn: '2026-09-26',
+      checkOut: '2026-09-29',
+      propertyName: '53 Pine St #3 · 1875 West End Victorian',
+    });
+    assert.equal(result.detected, true);
+    assert.equal(result.extensionType, 'later_checkout');
+    assert.deepEqual(result.extraNights, ['2026-09-29']);
+    assert.equal(result.allAvailable, false);
+  });
+
+  it('StayExtensionTool reads Hospitable status.available nested day objects', async () => {
+    const annaMsg =
+      "Hello! I'm wondering if it might be possible to begin our stay one night earlier — on Thursday, 10/15?";
+    const tool = new StayExtensionTool({
+      hospitableClient: {
+        async getPropertyCalendar() {
+          // Live Hospitable shape after client unwraps data.days
+          return [
+            {
+              date: '2026-10-15',
+              status: { reason: 'RESERVED', available: false },
+            },
+          ];
+        },
+      },
+    });
+    const result = await tool.execute(annaMsg, {
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      checkIn: '2026-10-16',
+      checkOut: '2026-10-18',
+      propertyName: '53 Pine St #2',
+    });
+    assert.equal(result.calendarChecked, true);
+    assert.equal(result.allAvailable, false);
+    assert.deepEqual(result.unavailableDates, ['2026-10-15']);
+  });
+
+  it('stay extension policy rewrites fabricated available when calendar says blocked', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyStayExtensionPolicy(
+      {
+        typeOfMessageReceived: 'EARLY_CHECKIN',
+        proposedResponse:
+          'Good afternoon, Anna, I checked the calendar for 53 Pine St #2 and the night of 10/15 looks available. Please submit an alteration request.',
+      },
+      {
+        guestName: 'Anna',
+        guestDisplayName: 'Anna',
+        stayExtensionInfo: {
+          detected: true,
+          extensionType: 'earlier_checkin',
+          calendarChecked: true,
+          allAvailable: false,
+          unavailableDates: ['2026-10-15'],
+          propertyName: '53 Pine St #2 · 1875 West End Victorian',
+          suggestedResponseSnippet:
+            'I checked the calendar for 53 Pine St #2 and unfortunately 2026-10-15 is not available — we already have another booking overlapping.',
+        },
+      },
+      "begin our stay one night earlier on Thursday, 10/15?"
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'STAY_EXTENSION');
+    assert.match(applied.proposedResponse, /not available/i);
+    assert.doesNotMatch(applied.proposedResponse, /looks available/i);
+    assert.doesNotMatch(applied.proposedResponse, /alteration request/i);
   });
 
   it('deterministic judge guard REVISEs judge REJECT on misclassified checkout thank-you', () => {

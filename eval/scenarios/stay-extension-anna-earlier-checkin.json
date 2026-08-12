@@ -1,0 +1,55 @@
+{
+  "id": "stay-extension-anna-earlier-checkin",
+  "description": "Guest Anna asks to begin stay one night earlier on Thursday 10/15 (booking Oct 16–18 at 53 Pine St #2). Must classify STAY_EXTENSION (not EARLY_CHECKIN hour policy), use seeded stayExtensionInfo calendar result, and when free invite Airbnb alteration request. Production miss used vague 'I'll check the calendar' instead of live calendar + alteration ask.",
+  "guestMessage": "Hello! I'm wondering if it might be possible to begin our stay one night earlier — on Thursday, 10/15? We are looking into flights to Portland instead of a car. Are you open to this? Obviously we would pay for the additional evening.",
+  "guestName": "Anna",
+  "checkIn": "2026-10-16",
+  "checkOut": "2026-10-18",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "53 Pine St #2 · 1875 West End Victorian | EV Charging + Parking",
+  "bookingTimestamp": "2026-08-01T14:00:00Z",
+  "context": {
+    "guestName": "Anna",
+    "guestDisplayName": "Anna",
+    "checkIn": "2026-10-16",
+    "checkOut": "2026-10-18",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "53 Pine St #2 · 1875 West End Victorian | EV Charging + Parking",
+    "stayExtensionInfo": {
+      "detected": true,
+      "extensionType": "earlier_checkin",
+      "currentCheckIn": "2026-10-16",
+      "currentCheckOut": "2026-10-18",
+      "proposedCheckIn": "2026-10-15",
+      "extraNights": ["2026-10-15"],
+      "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+      "propertyName": "53 Pine St #2 · 1875 West End Victorian | EV Charging + Parking",
+      "calendarChecked": true,
+      "allAvailable": true,
+      "availableDates": ["2026-10-15"],
+      "unavailableDates": [],
+      "calendarWindow": {"start": "2026-10-13", "end": "2026-10-18"},
+      "suggestedResponseSnippet": "I checked the calendar for 53 Pine St #2 and the night of 10/15 (2026-10-15) looks available. Please submit an alteration request in Airbnb for the updated check-in date so we can review and confirm — happy to accommodate if the request comes through.",
+      "guestActionWhenAvailable": "submit_alteration_request"
+    },
+    "conversationHistory": [],
+    "requireLiveConversationHistory": false
+  },
+  "rubric": {
+    "expectedCategory": ["STAY_EXTENSION", "STAY_EXTENSION_REQUEST", "DATE_EXTENSION", "STAY_DATE_CHANGE"],
+    "shouldReply": true,
+    "forbiddenPhrases": [
+      "strictly at 10AM",
+      "cleaning team needs to prepare the unit for the next guests",
+      "I'll check the calendar for the 15th and get back to you shortly",
+      "I'll check the calendar for those dates and get back to you shortly"
+    ],
+    "requiredPhrases": [
+      "checked",
+      "calendar",
+      "53 Pine St #2",
+      "alteration"
+    ]
+  },
+  "notes": "Anna production miss: vague 'I'll check the calendar' instead of live Hospitable check for night of 10/15 on Apt 2 + invite alteration request when free. Seeded allAvailable:true so requiredPhrases include alteration. Pair with unit tests on StayExtensionTool detection for 'begin our stay one night earlier' + 10/15 parse."
+}

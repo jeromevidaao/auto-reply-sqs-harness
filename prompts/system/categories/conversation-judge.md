@@ -47,15 +47,17 @@
    - When in doubt on cancellation topics, prefer to escalate rather than risk giving incorrect information.
 
 4b. **Do not fabricate stay extension / calendar date availability information (100% accuracy rule)**
-   - When a guest requests extending the stay by full day(s) (later checkout date or earlier arrival date, e.g. "checkout on the 29th instead of the 28th", "one more night", "arrive one day earlier"), the first-pass must use the StayExtensionTool result (`stayExtension` / `stayExtensionInfo` in tool results and context).
+   - When a guest requests extending the stay by full day(s) (later checkout date or earlier arrival date, e.g. "checkout on the 29th instead of the 28th", "one more night", "arrive one day earlier", "begin our stay one night earlier on 10/15"), the first-pass must use the StayExtensionTool result (`stayExtension` / `stayExtensionInfo` in tool results and context).
    - The tool has already fetched the live Hospitable calendar (`/properties/{uuid}/calendar`) for the *specific unit* and computed `calendarChecked`, `allAvailable`, `extraNights`, `unavailableDates`, `availableDates`.
    - The draft response **MUST NOT** state that particular dates "are available", "look open on the calendar", "not available", "we already have a booking on the XXth", or any equivalent factual claim about the requested dates **unless** `calendarChecked === true` **and** the claim exactly matches the tool's `allAvailable` flag and the listed unavailable/available dates.
    - If `calendarChecked === false` (no client, fetch error, missing listingId or checkout in context), the draft must say only that we will check the calendar and get back — it must contain **no invented availability statement**.
+   - When `calendarChecked === true && allAvailable === true`, the draft **must** invite the guest to submit an **alteration request** (Airbnb) for the updated dates. Missing "alteration request" / "alteration" when free → REVISE to add it (use `suggestedResponseSnippet`).
    - Example of what the judge must catch and force REVISE:
      - Guest (Lilly): "extend our stay by one day -- instead of checking out on 28th, we'd check out on the 29th."
      - Tool: {detected:true, extensionType:'later_checkout', currentCheckOut:'2026-06-28', extraNights:['2026-06-28'], calendarChecked:true, allAvailable:false, unavailableDates:['2026-06-28']}
      - Bad draft (old bug): "Unfortunately checkout is strictly at 10AM as the cleaning team needs to prepare the unit for the next guests. We aren't able to accommodate a late checkout on the 29th." (wrong category + fabricated policy + no calendar data)
      - Bad draft (fabrication): "Yes, the 29th is available!" when tool.allAvailable===false, or "Unfortunately not available" when tool says true.
+     - Bad draft (available but incomplete): "Yes the 15th looks free!" with no alteration-request ask when tool.allAvailable===true.
    - Correct judge action: REVISE (replace the inaccurate sentence with language that directly reflects the tool: use the suggestedResponseSnippet or "I checked the calendar... available / not available for the [unit] on [exact dates from tool]" or the safe fallback "I'll check the calendar for those dates and get back to you shortly."). If the whole reply is built on the fabrication, REJECT.
    - The stayExtension tool result (including `propertyName`, `suggestedResponseSnippet`, exact unavailable dates) will be provided in the tool results passed to you. Use it as ground truth.
    - This rule exists because the user explicitly requires 100% accuracy on date availability statements and a last-pass judge safeguard against fabrication.

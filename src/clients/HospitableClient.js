@@ -509,9 +509,15 @@ export class HospitableClient {
         timeout: 10000
       });
 
-      // Return the entries array (support both {data: [...]} and direct array shapes)
+      // Normalize to a flat day-entry array. Live Hospitable v2 shape is:
+      //   { data: { listing_id, start_date, end_date, days: [ { date, status: { available }, ... } ] } }
+      // Older / alternate shapes may be { data: [...] } or a bare array.
       const payload = response.data;
-      return Array.isArray(payload) ? payload : (payload?.data || payload || []);
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload?.data?.days)) return payload.data.days;
+      if (Array.isArray(payload?.days)) return payload.days;
+      if (Array.isArray(payload?.data)) return payload.data;
+      return [];
     });
   }
 }
