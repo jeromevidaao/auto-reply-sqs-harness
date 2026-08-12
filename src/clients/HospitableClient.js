@@ -482,6 +482,50 @@ export class HospitableClient {
   }
 
   /**
+   * List reservations for a property over a date window (check-in query window).
+   * Caller should expand the window and filter client-side for night overlap —
+   * the API date filter is check-in based by default and can miss long stays.
+   *
+   * Endpoint: GET /reservations?properties[]=...&start_date=...&end_date=...
+   */
+  async getPropertyReservations(propertyId, startDate, endDate, { perPage = 100 } = {}) {
+    if (!propertyId) throw new Error('propertyId is required for getPropertyReservations');
+    if (!startDate || !endDate) throw new Error('startDate and endDate are required for getPropertyReservations');
+
+    return this._withRetry('getPropertyReservations', async () => {
+      const token = await this.getToken();
+      const all = [];
+      let page = 1;
+      let lastPage = 1;
+
+      do {
+        const response = await axios.get(`${this.baseUrl}/reservations`, {
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          params: {
+            'properties[]': propertyId,
+            start_date: startDate,
+            end_date: endDate,
+            include: 'guest',
+            per_page: perPage,
+            page,
+          },
+          timeout: 15000,
+        });
+        const batch = response.data?.data || [];
+        all.push(...batch);
+        lastPage = response.data?.meta?.last_page || 1;
+        page += 1;
+      } while (page <= lastPage && page <= 10);
+
+      return all;
+    });
+  }
+
+  /**
    * Fetch the calendar (availability + pricing) for a specific property/listing.
    * Used to accurately answer stay extension requests (full day date changes)
    * without fabricating availability information.

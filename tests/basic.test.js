@@ -1307,7 +1307,7 @@ describe('Post-checkout thank-you safeguards (no LLM)', () => {
     });
     assert.equal(blocked.allAvailable, false);
     assert.ok(blocked.unavailableDates.includes('2026-10-15'));
-    assert.match(blocked.suggestedResponseSnippet, /not available/i);
+    assert.match(blocked.suggestedResponseSnippet, /already booked|not available/i);
     assert.doesNotMatch(blocked.suggestedResponseSnippet, /alteration request/i);
 
     const agent = new GuestMessagingAgent({
@@ -1355,17 +1355,99 @@ describe('Post-checkout thank-you safeguards (no LLM)', () => {
             },
           ];
         },
+        async getPropertyReservations() {
+          return [
+            {
+              id: 'james-1night',
+              check_in: '2026-10-15T16:00:00-04:00',
+              check_out: '2026-10-16T10:00:00-04:00',
+              reservation_status: { current: { category: 'accepted' } },
+              guest: { first_name: 'James' },
+            },
+          ];
+        },
       },
     });
     const result = await tool.execute(annaMsg, {
       listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
-      checkIn: '2026-10-16',
-      checkOut: '2026-10-18',
+      checkIn: '2026-10-16T16:00:00-04:00',
+      checkOut: '2026-10-18T10:00:00-04:00',
+      reservationId: 'anna-res',
       propertyName: '53 Pine St #2',
     });
     assert.equal(result.calendarChecked, true);
+    assert.equal(result.reservationsChecked, true);
     assert.equal(result.allAvailable, false);
     assert.deepEqual(result.unavailableDates, ['2026-10-15']);
+    assert.ok(result.blockingReservations?.some((b) => b.id === 'james-1night'));
+  });
+
+  it('StayExtensionTool dual-source free when calendar open and no conflicting reservation', async () => {
+    const msg = 'Could we begin our stay one night earlier on 10/6?';
+    const tool = new StayExtensionTool({
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [{ date: '2026-10-06', status: { reason: 'AVAILABLE', available: true } }];
+        },
+        async getPropertyReservations() {
+          return [
+            {
+              id: 'self',
+              check_in: '2026-10-07',
+              check_out: '2026-10-09',
+              reservation_status: { current: { category: 'accepted' } },
+            },
+          ];
+        },
+      },
+    });
+    const result = await tool.execute(msg, {
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      checkIn: '2026-10-07',
+      checkOut: '2026-10-09',
+      reservationId: 'self',
+      propertyName: '53 Pine St #2',
+    });
+    assert.equal(result.allAvailable, true);
+    assert.match(result.suggestedResponseSnippet, /alteration request/i);
+  });
+
+  it('StayExtensionTool blocks when calendar free but reservation occupies night', async () => {
+    const msg = 'Can we begin our stay one night earlier on Thursday, 10/15?';
+    const tool = new StayExtensionTool({
+      hospitableClient: {
+        async getPropertyCalendar() {
+          // Stale/wrong calendar saying free
+          return [{ date: '2026-10-15', status: { reason: 'AVAILABLE', available: true } }];
+        },
+        async getPropertyReservations() {
+          return [
+            {
+              id: 'blocker',
+              check_in: '2026-10-15',
+              check_out: '2026-10-16',
+              reservation_status: { current: { category: 'accepted' } },
+            },
+            {
+              id: 'self',
+              check_in: '2026-10-16',
+              check_out: '2026-10-18',
+              reservation_status: { current: { category: 'accepted' } },
+            },
+          ];
+        },
+      },
+    });
+    const result = await tool.execute(msg, {
+      listingId: 'x',
+      checkIn: '2026-10-16',
+      checkOut: '2026-10-18',
+      reservationId: 'self',
+      propertyName: '53 Pine St #2',
+    });
+    assert.equal(result.allAvailable, false);
+    assert.deepEqual(result.unavailableDates, ['2026-10-15']);
+    assert.doesNotMatch(result.suggestedResponseSnippet, /alteration request/i);
   });
 
   it('stay extension policy rewrites fabricated available when calendar says blocked', () => {
@@ -1397,9 +1479,38 @@ describe('Post-checkout thank-you safeguards (no LLM)', () => {
     );
     assert.equal(applied.applied, true);
     assert.equal(applied.typeOfMessageReceived, 'STAY_EXTENSION');
-    assert.match(applied.proposedResponse, /not available/i);
+    assert.match(applied.proposedResponse, /not available|already booked/i);
     assert.doesNotMatch(applied.proposedResponse, /looks available/i);
     assert.doesNotMatch(applied.proposedResponse, /alteration request/i);
+  });
+
+  it('first-host welcome policy must NOT wipe stay-extension date-change drafts (Anna)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const annaMsg =
+      "Hello! I'm wondering if it might be possible to begin our stay one night earlier — on Thursday, 10/15?";
+    const applied = agent._applyFirstHostNewBookingWelcomePolicy(
+      {
+        typeOfMessageReceived: 'STAY_EXTENSION',
+        proposedResponse:
+          "Good afternoon, Anna, I checked the calendar for 53 Pine St #2 and unfortunately 10/15 is already booked, so we can't move the stay to cover that night.",
+        shouldReply: true,
+      },
+      {
+        reservationId: '6fc1f3fe-d33a-49d2-b380-b4a0e09f5065',
+        guestName: 'Anna',
+        stayExtensionInfo: {
+          detected: true,
+          calendarChecked: true,
+          allAvailable: false,
+        },
+        conversationHistory: [],
+      },
+      annaMsg
+    );
+    assert.equal(applied.applied, false);
   });
 
   it('deterministic judge guard REVISEs judge REJECT on misclassified checkout thank-you', () => {

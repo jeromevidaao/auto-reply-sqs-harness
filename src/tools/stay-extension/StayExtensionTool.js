@@ -64,9 +64,11 @@ export class StayExtensionTool extends BaseTool {
     }
 
     const listingId = context.listingId || context.propertyId || null;
-    const currentCheckIn = context.checkIn || null;
-    const currentCheckOut = context.checkOut || null;
+    // Normalize ISO timestamps from Hospitable (check_in: 2026-10-16T16:00:00-04:00) to YYYY-MM-DD.
+    const currentCheckIn = this._dateOnly(context.checkIn || context.check_in || context.arrival_date);
+    const currentCheckOut = this._dateOnly(context.checkOut || context.check_out || context.departure_date);
     const propertyName = context.propertyName || context.listingName || 'the unit';
+    const reservationId = context.reservationId || context.reservation_id || null;
 
     if (!listingId || !currentCheckOut) {
       // Still detected the intent, but cannot check calendar accurately without identifiers.
@@ -80,6 +82,7 @@ export class StayExtensionTool extends BaseTool {
         listingId,
         propertyName,
         calendarChecked: false,
+        reservationsChecked: false,
         allAvailable: null,
         unavailableDates: [],
         reason: 'Missing listingId or current checkout date in context — cannot fetch calendar',
@@ -108,6 +111,10 @@ export class StayExtensionTool extends BaseTool {
       extension.type = 'earlier_checkin';
     }
 
+    // Normalize proposed dates too
+    if (extension.proposedCheckIn) extension.proposedCheckIn = this._dateOnly(extension.proposedCheckIn);
+    if (extension.proposedCheckOut) extension.proposedCheckOut = this._dateOnly(extension.proposedCheckOut);
+
     const extraNights = this._computeExtraNights(currentCheckIn, currentCheckOut, extension);
 
     if (extraNights.length === 0) {
@@ -123,6 +130,7 @@ export class StayExtensionTool extends BaseTool {
         listingId,
         propertyName,
         calendarChecked: false,
+        reservationsChecked: false,
         allAvailable: null,
         unavailableDates: [],
         reason: 'Could not parse specific extra night(s) from the guest message',
@@ -135,37 +143,82 @@ export class StayExtensionTool extends BaseTool {
     const windowStart = this._addDays(Math.min(...extraNights.map(d => this._dateStrToComparable(d))), -2);
     const windowEnd = this._addDays(Math.max(...extraNights.map(d => this._dateStrToComparable(d))), +3);
 
+    // Dual-source availability (must agree for "free"):
+    // 1) Hospitable property calendar day status
+    // 2) Accepted reservations that occupy those nights (exclude this guest's own reservation)
     let calendarEntries = [];
     let calendarChecked = false;
-    let fetchError = null;
+    let calendarError = null;
+    let reservations = [];
+    let reservationsChecked = false;
+    let reservationsError = null;
 
     if (this.hospitableClient && typeof this.hospitableClient.getPropertyCalendar === 'function') {
       try {
         calendarEntries = await this.hospitableClient.getPropertyCalendar(listingId, windowStart, windowEnd);
-        calendarChecked = true;
-        console.log(`[StayExtensionTool] Fetched calendar for ${listingId} ${windowStart}→${windowEnd}: ${calendarEntries.length} entries`);
+        calendarChecked = Array.isArray(calendarEntries) && calendarEntries.length > 0;
+        console.log(`[StayExtensionTool] Calendar for ${listingId} ${windowStart}→${windowEnd}: ${calendarEntries.length} days`);
       } catch (err) {
-        fetchError = err.message || String(err);
-        console.warn('[StayExtensionTool] Calendar fetch failed (non-fatal, will not fabricate):', fetchError);
-        calendarChecked = false;
+        calendarError = err.message || String(err);
+        console.warn('[StayExtensionTool] Calendar fetch failed:', calendarError);
       }
-    } else {
-      console.warn('[StayExtensionTool] No Hospitable client with getPropertyCalendar — cannot verify availability live.');
     }
 
-    const availability = this._analyzeAvailability(calendarEntries, extraNights);
+    if (this.hospitableClient && typeof this.hospitableClient.getPropertyReservations === 'function') {
+      try {
+        // Widen check-in query window so long stays that cover extra nights still appear
+        const resStart = this._addDaysStr(windowStart, -14);
+        const resEnd = this._addDaysStr(windowEnd, 14);
+        reservations = await this.hospitableClient.getPropertyReservations(listingId, resStart, resEnd);
+        reservationsChecked = true;
+        console.log(`[StayExtensionTool] Reservations for ${listingId}: ${reservations.length} rows`);
+      } catch (err) {
+        reservationsError = err.message || String(err);
+        console.warn('[StayExtensionTool] Reservations fetch failed:', reservationsError);
+      }
+    } else if (this.hospitableClient && typeof this.hospitableClient.getReservations === 'function') {
+      try {
+        const resStart = this._addDaysStr(windowStart, -14);
+        const resEnd = this._addDaysStr(windowEnd, 14);
+        reservations = await this.hospitableClient.getReservations({
+          properties: listingId,
+          start_date: resStart,
+          end_date: resEnd,
+          per_page: 100,
+        });
+        reservationsChecked = true;
+      } catch (err) {
+        reservationsError = err.message || String(err);
+      }
+    }
 
-    const allAvailable = calendarChecked ? availability.allAvailable : null;
-    const unavailableDates = calendarChecked ? availability.unavailable : [];
+    const calendarAvail = this._analyzeCalendarAvailability(calendarEntries, extraNights);
+    const reservationAvail = this._analyzeReservationOccupancy(reservations, extraNights, {
+      excludeReservationId: reservationId,
+      excludeCheckIn: currentCheckIn,
+      excludeCheckOut: currentCheckOut,
+    });
+
+    const merged = this._mergeAvailabilitySources({
+      extraNights,
+      calendarChecked,
+      calendarAvail,
+      reservationsChecked,
+      reservationAvail,
+    });
+
+    const allAvailable = merged.checked ? merged.allAvailable : null;
+    const unavailableDates = merged.checked ? merged.unavailable : [];
+    const availableDates = merged.checked ? merged.available : [];
 
     const shortUnit = this._shortUnitName(propertyName);
     const nightLabel = this._formatNightLabel(extraNights, extension);
 
     let suggestedResponseSnippet;
-    if (!calendarChecked) {
+    if (!merged.checked) {
       suggestedResponseSnippet = "I'll check our calendar for those dates and get back to you shortly.";
     } else if (allAvailable) {
-      // Host policy: when free, confirm and ask guest to submit an alteration request (do not claim we already changed the booking).
+      // Free on both sources → invite Airbnb alteration request (do not claim booking already updated).
       if (extension.type === 'earlier_checkin' && extension.proposedCheckIn) {
         suggestedResponseSnippet =
           `I checked the calendar for ${shortUnit} and ${nightLabel} looks available. ` +
@@ -178,7 +231,8 @@ export class StayExtensionTool extends BaseTool {
     } else {
       const bad = unavailableDates.map((d) => this._friendlyDate(d)).join(' / ');
       suggestedResponseSnippet =
-        `I checked the calendar for ${shortUnit} and unfortunately ${bad} is not available — we already have another booking overlapping.`;
+        `I checked the calendar for ${shortUnit} and unfortunately ${bad} is already booked, so we can't move the stay to cover that night. ` +
+        `Your current reservation is unchanged — happy to help with anything else.`;
     }
 
     return {
@@ -191,15 +245,33 @@ export class StayExtensionTool extends BaseTool {
       extraNights,
       listingId,
       propertyName,
-      calendarChecked,
+      reservationId,
+      // calendarChecked historically = "we have ground-truth availability" (now calendar and/or reservations).
+      calendarChecked: merged.checked,
+      calendarFetched: calendarChecked,
+      reservationsChecked,
+      availabilityChecked: merged.checked,
       allAvailable,
       unavailableDates,
-      availableDates: availability.available,
+      availableDates,
+      calendarAvailableDates: calendarAvail.available,
+      calendarUnavailableDates: calendarAvail.unavailable,
+      reservationBlockedDates: reservationAvail.unavailable,
+      blockingReservations: reservationAvail.blockers,
+      availabilitySources: merged.sources,
       calendarWindow: { start: windowStart, end: windowEnd },
-      fetchError: fetchError || null,
+      fetchError: calendarError || reservationsError || null,
       suggestedResponseSnippet,
       guestActionWhenAvailable: 'submit_alteration_request',
     };
+  }
+
+  _dateOnly(value) {
+    if (!value) return null;
+    const s = String(value).trim();
+    // YYYY-MM-DD or ISO datetime
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : null;
   }
 
   _shortUnitName(propertyName) {
@@ -509,36 +581,52 @@ export class StayExtensionTool extends BaseTool {
     return Array.from(new Set(extra)).sort();
   }
 
-  _analyzeAvailability(calendarEntries, extraNights) {
+  /**
+   * Calendar day availability (Hospitable property calendar).
+   * A night is free only when status.available === true (or top-level available true).
+   * Missing day entries → unavailable (do not invent free).
+   */
+  _analyzeCalendarAvailability(calendarEntries, extraNights) {
     if (!Array.isArray(calendarEntries) || calendarEntries.length === 0) {
-      return { allAvailable: false, available: [], unavailable: extraNights.slice() };
+      return { allAvailable: false, available: [], unavailable: extraNights.slice(), byNight: {} };
     }
 
-    // Build lookup by date string YYYY-MM-DD
     const byDate = {};
     for (const e of calendarEntries) {
-      const d = (e && (e.date || e.day || e.cal_date)) ? String(e.date || e.day || e.cal_date).slice(0, 10) : null;
-      if (d) byDate[d] = e;
+      const d = e && (e.date || e.cal_date) ? String(e.date || e.cal_date).slice(0, 10) : null;
+      // Skip if "day" is weekday name only
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) byDate[d] = e;
     }
 
     const available = [];
     const unavailable = [];
+    const byNight = {};
 
     for (const night of extraNights) {
       const entry = byDate[night];
-      // Common shapes: {available: true}, {status: 'available'}, {blocked: false}, or absence means unknown
       let isAvail = false;
+      let reason = 'missing';
       if (entry) {
-        if (entry.available === true || entry.available === 'true') isAvail = true;
-        else if (entry.status === 'available' || entry.status === 'open') isAvail = true;
-        else if (entry.blocked === false || entry.is_blocked === false) isAvail = true;
-        else if (entry.available === false || entry.blocked === true) isAvail = false;
-        // Hospitable day objects often use status.available boolean
-        else if (entry.status && typeof entry.status === 'object') {
-          if (entry.status.available === true) isAvail = true;
-          else if (entry.status.available === false || entry.status.blocked === true) isAvail = false;
+        if (entry.status && typeof entry.status === 'object') {
+          if (entry.status.available === true) {
+            isAvail = true;
+            reason = entry.status.reason || 'AVAILABLE';
+          } else {
+            isAvail = false;
+            reason = entry.status.reason || 'RESERVED';
+          }
+        } else if (entry.available === true || entry.available === 'true') {
+          isAvail = true;
+          reason = 'AVAILABLE';
+        } else if (entry.available === false || entry.blocked === true) {
+          isAvail = false;
+          reason = 'BLOCKED';
+        } else if (entry.status === 'available' || entry.status === 'open') {
+          isAvail = true;
+          reason = String(entry.status);
         }
       }
+      byNight[night] = { available: isAvail, reason };
       if (isAvail) available.push(night);
       else unavailable.push(night);
     }
@@ -546,8 +634,122 @@ export class StayExtensionTool extends BaseTool {
     return {
       allAvailable: unavailable.length === 0 && available.length === extraNights.length,
       available,
-      unavailable
+      unavailable,
+      byNight,
     };
+  }
+
+  /**
+   * Night occupancy from accepted reservations.
+   * A night N is occupied if any non-cancelled reservation has checkIn <= N < checkOut.
+   * Excludes the requesting guest's own reservation (by id or exact check-in/out match).
+   */
+  _analyzeReservationOccupancy(reservations, extraNights, {
+    excludeReservationId = null,
+    excludeCheckIn = null,
+    excludeCheckOut = null,
+  } = {}) {
+    const available = [];
+    const unavailable = [];
+    const blockers = [];
+    const byNight = {};
+
+    const active = (Array.isArray(reservations) ? reservations : []).filter((r) => {
+      const cat = (r.reservation_status?.current?.category || r.status || '').toString().toLowerCase();
+      if (cat === 'cancelled' || cat === 'not accepted' || cat === 'denied' || cat === 'expired') return false;
+      if (excludeReservationId && r.id === excludeReservationId) return false;
+      const ci = this._dateOnly(r.check_in || r.arrival_date || r.checkIn);
+      const co = this._dateOnly(r.check_out || r.departure_date || r.checkOut);
+      // Exclude own stay by matching dates when id missing
+      if (excludeCheckIn && excludeCheckOut && ci === excludeCheckIn && co === excludeCheckOut) return false;
+      return !!(ci && co);
+    });
+
+    for (const night of extraNights) {
+      const conflicts = active.filter((r) => {
+        const ci = this._dateOnly(r.check_in || r.arrival_date || r.checkIn);
+        const co = this._dateOnly(r.check_out || r.departure_date || r.checkOut);
+        return ci <= night && night < co;
+      });
+      if (conflicts.length === 0) {
+        available.push(night);
+        byNight[night] = { available: true, blockers: [] };
+      } else {
+        unavailable.push(night);
+        const brief = conflicts.map((r) => ({
+          id: r.id,
+          checkIn: this._dateOnly(r.check_in || r.arrival_date),
+          checkOut: this._dateOnly(r.check_out || r.departure_date),
+          // Internal only — never put guest names in guest-facing messages
+          guestFirstName: r.guest?.first_name || null,
+        }));
+        byNight[night] = { available: false, blockers: brief };
+        for (const b of brief) {
+          if (!blockers.some((x) => x.id === b.id && x.night === night)) {
+            blockers.push({ night, ...b });
+          }
+        }
+      }
+    }
+
+    return {
+      allAvailable: unavailable.length === 0 && available.length === extraNights.length,
+      available,
+      unavailable,
+      blockers,
+      byNight,
+    };
+  }
+
+  /**
+   * Merge calendar + reservation sources.
+   * A night is FREE only if every checked source says free.
+   * A night is BLOCKED if any source says blocked.
+   * We need at least one source to claim "checked".
+   */
+  _mergeAvailabilitySources({
+    extraNights,
+    calendarChecked,
+    calendarAvail,
+    reservationsChecked,
+    reservationAvail,
+  }) {
+    const sources = [];
+    if (calendarChecked) sources.push('calendar');
+    if (reservationsChecked) sources.push('reservations');
+
+    if (sources.length === 0) {
+      return { checked: false, allAvailable: null, available: [], unavailable: [], sources };
+    }
+
+    const available = [];
+    const unavailable = [];
+
+    for (const night of extraNights) {
+      const calOk = !calendarChecked ? null : calendarAvail.byNight?.[night]?.available === true;
+      const resOk = !reservationsChecked ? null : reservationAvail.byNight?.[night]?.available === true;
+
+      // Free only if every available source says free
+      let free = true;
+      if (calendarChecked) free = free && calOk === true;
+      if (reservationsChecked) free = free && resOk === true;
+
+      if (free) available.push(night);
+      else unavailable.push(night);
+    }
+
+    return {
+      checked: true,
+      allAvailable: unavailable.length === 0 && available.length === extraNights.length,
+      available,
+      unavailable,
+      sources,
+    };
+  }
+
+  /** @deprecated use _analyzeCalendarAvailability — kept for any external callers */
+  _analyzeAvailability(calendarEntries, extraNights) {
+    return this._analyzeCalendarAvailability(calendarEntries, extraNights);
   }
 
   _dateStrToComparable(dateStr) {

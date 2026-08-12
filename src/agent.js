@@ -979,11 +979,15 @@ export class GuestMessagingAgent {
       }
     } else if (info.calendarChecked === true && info.allAvailable === false) {
       const bad = (info.unavailableDates && info.unavailableDates.length)
-        ? info.unavailableDates.join(' / ')
+        ? info.unavailableDates.map((d) => {
+            const s = String(d);
+            const m = s.match(/^\d{4}-(\d{2})-(\d{2})/);
+            return m ? `${Number(m[1])}/${Number(m[2])}` : s;
+          }).join(' / ')
         : 'those dates';
       body =
         snippet ||
-        `I checked the calendar for ${unit} and unfortunately ${bad} is not available — we already have another booking overlapping.`;
+        `I checked the calendar for ${unit} and unfortunately ${bad} is already booked, so we can't move the stay to cover that night. Your current reservation is unchanged.`;
       // Strip accidental alteration asks when blocked
       body = body.replace(/\s*Please submit an alteration request[\s\S]*$/i, '').trim();
     } else {
@@ -995,7 +999,7 @@ export class GuestMessagingAgent {
     // Prefer tool body when draft is missing, contradicts availability, or omits required grounding.
     const draftLower = draft.toLowerCase();
     const claimsAvailable = /looks available|is available|are available|open on (our |the )?calendar/.test(draftLower);
-    const claimsUnavailable = /not available|already have another booking|overlapping/.test(draftLower);
+    const claimsUnavailable = /not available|already booked|already have another booking|overlapping|can't move the stay/.test(draftLower);
     const saysWillCheck = /i('ll| will) check (the |our )?calendar/.test(draftLower);
     const hasChecked = /checked/.test(draftLower) && /calendar/.test(draftLower);
     const hasAlteration = /alteration/.test(draftLower);
@@ -1771,16 +1775,34 @@ export class GuestMessagingAgent {
     if (this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
       return { applied: false };
     }
+    // Anna incident: full-day stay extension / earlier arrival must NEVER be rewritten into a
+    // NEW_RESERVATION_WELCOME (the welcome draft has no calendar truth + wipes "already booked").
+    if (
+      context.stayExtensionInfo?.detected ||
+      context.earlyStayExtensionInfo?.detected ||
+      StayExtensionTool.looksLikeFullDayExtension(guestMessage || '')
+    ) {
+      return { applied: false };
+    }
 
     const categories = Array.isArray(parsed.typeOfMessageReceived)
       ? parsed.typeOfMessageReceived
       : [parsed.typeOfMessageReceived];
+    const stayExtCategories = [
+      'STAY_EXTENSION',
+      'STAY_EXTENSION_REQUEST',
+      'DATE_EXTENSION',
+      'STAY_DATE_CHANGE',
+    ];
+    if (categories.some((c) => stayExtCategories.includes(c))) {
+      return { applied: false };
+    }
     const draft = (parsed.proposedResponse || '').trim();
     const hasSendable =
       draft &&
       draft !== 'none' &&
       draft.length >= 40 &&
-      /4\s*pm|self-?check|parking|check-?in/i.test(draft);
+      /4\s*pm|self-?check|parking|check-?in|calendar|alteration|already booked|not available/i.test(draft);
     const shortAck = this._isShortNewBookingAck(guestMessage);
     const noOrWeakDraft =
       !draft ||

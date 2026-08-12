@@ -15,8 +15,9 @@
 - You **MUST** use the `stayExtensionInfo` result from the StayExtensionTool (visible in context / traces / prompt). This tool has already:
   - Detected the full-day intent (later checkout **or** earlier arrival, including "begin our stay one night earlier on 10/15").
   - Parsed the proposed new checkout/check-in (supports "the 29th", "October 15", and "10/15").
-  - Fetched the live calendar for the exact listingId/unit via Hospitable `/properties/{uuid}/calendar`.
-  - Reported `calendarChecked`, `allAvailable`, `extraNights`, `unavailableDates`, etc.
+  - Dual-checked availability for the exact unit: Hospitable `/properties/{uuid}/calendar` **and** accepted reservations that occupy those nights (excluding the guest's own reservation).
+  - Reported `calendarChecked`, `allAvailable`, `extraNights`, `unavailableDates`, `blockingReservations` (internal), etc.
+  - A night is free only when **both** sources agree it is free.
 - If `calendarChecked === true && allAvailable === true`:
   - Warmly confirm the specific dates look available on our calendar for *that unit*.
   - **Required next step**: ask the guest to **submit an alteration request** in Airbnb for the updated dates so we can review and confirm. Prefer language close to the tool's `suggestedResponseSnippet`.
