@@ -1,6 +1,10 @@
 /**
  * Shared HTTP retry helpers for Hospitable (and similar) API calls.
  *
+ * Two-layer retry (Julie 2026-08-13 + follow-up):
+ *   1) In-Lambda: 4 POSTs over ~3 min (20s timeout, exp backoff 30/30/40s).
+ *   2) SQS grok_message: 4 receives, 12 min visibility → ~36–40 min, then DLQ.
+ *
  * Production incident 2026-08-13 (Julie / Apt 2 welcome):
  *   POST /reservations/{id}/messages timed out at 15s, then in-Lambda retries
  *   at 5s/10s/20s hit Hospitable's **2 POSTs per minute per reservation** cap
@@ -9,17 +13,22 @@
  * Rules:
  *   - Only retry transient failures (timeouts, 429, 5xx, network).
  *   - Honor Retry-After on 429; default 60s for message POSTs.
- *   - Message POSTs must stay under 2/min (min spacing 35s).
+ *   - Message POSTs must stay under 2/min (min spacing 30s).
  *   - After a send timeout, callers should GET the thread before POSTing again
  *     (timeout ≠ not delivered).
+ *   - Do not sit in the Lambda for 10+ minutes — leave long waits to SQS.
  */
 
-export const HOSPITABLE_SEND_TIMEOUT_MS = 30000;
+export const HOSPITABLE_SEND_TIMEOUT_MS = 20000;
 export const HOSPITABLE_READ_TIMEOUT_MS = 12000;
-export const HOSPITABLE_SEND_MIN_INTERVAL_MS = 35000;
-export const HOSPITABLE_SEND_MAX_ATTEMPTS = 5;
-export const HOSPITABLE_READ_MAX_ATTEMPTS = 5;
+export const HOSPITABLE_SEND_MIN_INTERVAL_MS = 30000;
+export const HOSPITABLE_SEND_MAX_ATTEMPTS = 4;
+export const HOSPITABLE_READ_MAX_ATTEMPTS = 4;
 export const HOSPITABLE_429_DEFAULT_MS = 60000;
+
+/** SQS grok_message: 4 receives × 12 min visibility ≈ 36–40 min then DLQ. */
+export const GROK_MESSAGE_VISIBILITY_TIMEOUT_SEC = 720;
+export const GROK_MESSAGE_MAX_RECEIVE_COUNT = 4;
 
 const TRANSIENT_CODES = new Set([
   'ECONNRESET',
@@ -90,11 +99,12 @@ export function computeRetryDelay(err, opts = {}) {
   if (status === 429) {
     delay = parseRetryAfterMs(err) ?? HOSPITABLE_429_DEFAULT_MS;
   } else if (kind === 'send') {
-    // 8s, 16s, 32s, 48s — then clamped to the 2/min floor below
-    const sendBackoff = [8000, 16000, 32000, 48000, 60000];
+    // After fail 1/2/3: 20s, 30s, 40s — then clamped to the 2/min floor (30s).
+    // Worst case with 20s timeouts: ~3 min in-Lambda, then SQS waits ~12 min.
+    const sendBackoff = [20000, 30000, 40000];
     delay = sendBackoff[Math.min(attempt - 1, sendBackoff.length - 1)];
   } else {
-    const readBackoff = [2000, 4000, 8000, 16000, 20000];
+    const readBackoff = [2000, 4000, 8000, 16000];
     delay = readBackoff[Math.min(attempt - 1, readBackoff.length - 1)];
   }
 

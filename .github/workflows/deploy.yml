@@ -123,7 +123,23 @@ jobs:
             echo "Runtime already $RUNTIME"
           fi
 
-          echo "Deployment of $FUNCTION_NAME completed (runtime: $RUNTIME)."
+          # Keep the function timeout just above the in-Lambda send budget (~3 min)
+          # so a hung invoke cannot overlap the next SQS receive (visibility 12 min).
+          aws lambda update-function-configuration \
+            --function-name $FUNCTION_NAME \
+            --timeout 360 \
+            --region us-east-1
+          aws lambda wait function-updated \
+            --function-name $FUNCTION_NAME \
+            --region us-east-1
+
+          # Two-layer retry: 4 SQS receives, 12 min visibility → ~36–40 min then DLQ.
+          aws sqs set-queue-attributes \
+            --queue-url https://sqs.us-east-1.amazonaws.com/834917996497/grok_message \
+            --attributes '{"VisibilityTimeout":"720","RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:834917996497:grok_message_dl\",\"maxReceiveCount\":4}"}' \
+            --region us-east-1
+
+          echo "Deployment of $FUNCTION_NAME completed (runtime: $RUNTIME, timeout 360s, grok_message visibility 720s / maxReceive 4)."
 
       - name: Deployment summary
         run: |

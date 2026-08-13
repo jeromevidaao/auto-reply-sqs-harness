@@ -2,7 +2,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { HospitableClient } from '../src/clients/HospitableClient.js';
 import {
+  GROK_MESSAGE_MAX_RECEIVE_COUNT,
+  GROK_MESSAGE_VISIBILITY_TIMEOUT_SEC,
   HOSPITABLE_429_DEFAULT_MS,
+  HOSPITABLE_SEND_MAX_ATTEMPTS,
   HOSPITABLE_SEND_MIN_INTERVAL_MS,
   computeRetryDelay,
   hostAlreadySentEquivalent,
@@ -44,9 +47,26 @@ describe('isTransientHttpError', () => {
 });
 
 describe('computeRetryDelay / Retry-After', () => {
-  it('spaces send retries at least 35s (Hospitable 2 POSTs/min/reservation)', () => {
+  it('spaces send retries at least 30s (Hospitable 2 POSTs/min/reservation)', () => {
     const delay = computeRetryDelay(timeoutErr(), { attempt: 1, kind: 'send', jitter: false });
     assert.ok(delay >= HOSPITABLE_SEND_MIN_INTERVAL_MS, `got ${delay}`);
+    assert.equal(delay, 30000);
+  });
+
+  it('uses 4 in-Lambda send attempts and 4 SQS receives / 12 min visibility', () => {
+    assert.equal(HOSPITABLE_SEND_MAX_ATTEMPTS, 4);
+    assert.equal(GROK_MESSAGE_MAX_RECEIVE_COUNT, 4);
+    assert.equal(GROK_MESSAGE_VISIBILITY_TIMEOUT_SEC, 720);
+  });
+
+  it('send backoff stays inside a ~3 min in-Lambda window (4x20s + 30+30+40)', () => {
+    const waits = [1, 2, 3].map((attempt) =>
+      computeRetryDelay(timeoutErr(20000), { attempt, kind: 'send', jitter: false })
+    );
+    assert.deepEqual(waits, [30000, 30000, 40000]);
+    const worstCaseMs = 4 * 20000 + waits.reduce((a, b) => a + b, 0);
+    assert.ok(worstCaseMs <= 3.5 * 60 * 1000, `worst-case ${worstCaseMs}ms`);
+    assert.ok(worstCaseMs >= 2 * 60 * 1000, `worst-case ${worstCaseMs}ms`);
   });
 
   it('uses 60s default on 429 when Retry-After is absent', () => {
