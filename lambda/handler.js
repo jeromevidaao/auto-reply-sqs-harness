@@ -31,6 +31,7 @@ import {
   isReservationLifecyclePayload,
   shouldProcessAcceptWelcome,
 } from '../src/utils/reservationAccept.js';
+import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 const sns = new SNSClient({ region: 'us-east-1' });
@@ -960,11 +961,13 @@ export const handler = async (event, context) => {
               (isBareWelcomeAck(proposedLower) && isBareWelcomeAck(r)) ||
               (proposedLower.length < 40 && r === proposedLower)
             );
+            const alreadyDelivered =
+              hostAlreadySentEquivalent(recentForGuard, result.proposedResponse) ||
+              looksLikeExistingWelcome(recentForGuard, result.proposedResponse);
 
-            if (isDuplicateShortReply) {
-              console.log(`[Handler] ⛔ PRE-SEND GUARD: Skipping send — identical or "You're welcome" style reply already sent very recently to this conversation.`);
+            if (isDuplicateShortReply || alreadyDelivered) {
+              console.log(`[Handler] ⛔ PRE-SEND GUARD: Skipping send — reply already on the thread (duplicate or prior timeout that actually landed).`);
               console.log('   Recent host replies:', veryRecentHostReplies);
-              // Treat as success (no escalation needed)
               return {
                 statusCode: 200,
                 body: JSON.stringify({ success: true, skipped: true, reason: 'Pre-send duplicate guard' })
@@ -1044,6 +1047,49 @@ export const handler = async (event, context) => {
           }
 
         } catch (sendError) {
+          // Timeout/429 can mean Hospitable accepted the POST but the client
+          // never saw 200. Confirm against the live thread before hard-failing
+          // (otherwise SQS retries amplify 429s — Julie 2026-08-13).
+          try {
+            let recentAfterFail = null;
+            if (reservationId && !msgContext.isInquiry) {
+              recentAfterFail = await hospitableClient.getThreadMessages({ reservationId }, 8);
+            } else {
+              const verifyConvId = convId || (reservationId ? await hospitableClient.getConversationIdForReservation(reservationId).catch(() => null) : null);
+              if (verifyConvId) {
+                recentAfterFail = await hospitableClient.getThreadMessages({ conversationId: verifyConvId }, 8);
+              }
+            }
+            if (
+              recentAfterFail &&
+              (hostAlreadySentEquivalent(recentAfterFail, result.proposedResponse) ||
+                looksLikeExistingWelcome(recentAfterFail, result.proposedResponse))
+            ) {
+              console.warn(
+                '[Handler] Send threw but the draft (or an equivalent welcome) is already on the thread — treating as delivered'
+              );
+              const duration = Date.now() - startTime;
+              console.log('\n⏱️  Total handler duration:', duration, 'ms (send error recovered via thread confirm)');
+              console.log('═══════════════════════════════════════════════════════════════\n');
+              return {
+                statusCode: 200,
+                body: JSON.stringify({
+                  success: true,
+                  requestId,
+                  recoveredAfterSendError: true,
+                  decision: {
+                    typeOfMessageReceived: result.typeOfMessageReceived,
+                    proposedResponse: result.proposedResponse,
+                    shouldReply: true,
+                    escalated: false,
+                  },
+                }),
+              };
+            }
+          } catch (confirmErr) {
+            console.warn('[Handler] Post-send-error thread confirm failed (will hard-fail send):', confirmErr.message);
+          }
+
           // Only actual send failures are hard failures
           console.error('❌ HARD FAILURE: Failed to send reply to guest:', sendError.message);
 

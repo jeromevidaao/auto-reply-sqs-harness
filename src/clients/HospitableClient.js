@@ -1,5 +1,13 @@
 import axios from 'axios';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import {
+  HOSPITABLE_READ_MAX_ATTEMPTS,
+  HOSPITABLE_READ_TIMEOUT_MS,
+  HOSPITABLE_SEND_MAX_ATTEMPTS,
+  HOSPITABLE_SEND_TIMEOUT_MS,
+  hostAlreadySentEquivalent,
+  withExponentialBackoff,
+} from '../utils/httpRetry.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 
@@ -58,51 +66,58 @@ export class HospitableClient {
   }
 
   /**
-   * Retry wrapper for critical Hospitable API calls.
-   * - Up to 5 attempts
-   * - Exponential backoff: 5s, 10s, 20s, 40s, 45s (total ~2 min window)
-   * - 429 responses use the same exponential backoff
-   * - Only retries transient errors (5xx, 429, network/timeout)
-   * - On final failure: throws a clear error that will cause hard Lambda failure
+   * Retry wrapper for Hospitable reads / non-send calls.
+   * Exponential backoff; only transient errors (5xx, 429, network/timeout).
    */
-  async _withRetry(operation, fn) {
-    const maxAttempts = 5;
-    const delays = [5000, 10000, 20000, 40000, 45000]; // 5s, 10s, 20s, 40s, 45s (~2 min total)
+  async _withRetry(operation, fn, extras = {}) {
+    return withExponentialBackoff(fn, {
+      operation,
+      kind: extras.kind || 'read',
+      maxAttempts: extras.maxAttempts || HOSPITABLE_READ_MAX_ATTEMPTS,
+      recover: extras.recover,
+    });
+  }
 
-    let lastError;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  /**
+   * POST a guest message with rate-limit-aware backoff.
+   * After timeout/5xx, GET the thread — Hospitable may have accepted the POST
+   * even when the client timed out (Julie 2026-08-13 incident).
+   */
+  async _sendWithConfirm(operation, body, postFn, fetchRecentFn) {
+    const recover = async (err) => {
+      if (typeof fetchRecentFn !== 'function') return false;
       try {
-        return await fn();
-      } catch (err) {
-        lastError = err;
-
-        const status = err.response?.status;
-        const isTransient =
-          !status ||
-          status >= 500 ||
-          status === 429 ||
-          err.code === 'ECONNRESET' ||
-          err.code === 'ETIMEDOUT' ||
-          err.code === 'ECONNABORTED';
-
-        if (!isTransient || attempt === maxAttempts) {
-          const message = `CRITICAL HOSPITABLE API FAILURE: ${operation} failed after ${attempt} attempt(s). ` +
-            `Last error: ${err.message}${err.response ? ` (status ${err.response.status})` : ''}`;
-          const criticalError = new Error(message);
-          criticalError.name = 'CriticalHospitableError';
-          criticalError.operation = operation;
-          criticalError.attempts = attempt;
-          criticalError.originalError = err;
-          criticalError.isTransient = isTransient;
-          throw criticalError;
+        const recent = await fetchRecentFn();
+        if (hostAlreadySentEquivalent(recent, body)) {
+          console.warn(
+            `[HospitableClient] ${operation} failed (${err.message}) but the draft is already on the thread — treating as delivered`
+          );
+          return { alreadyDelivered: true, recoveredFrom: err.message, data: recent };
         }
-
-        const delay = delays[attempt - 1] || 15000;
-        console.warn(`[HospitableClient] Transient error on ${operation} (attempt ${attempt}/${maxAttempts}). Retrying in ${delay}ms... Error: ${err.message}`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+      } catch (fetchErr) {
+        console.warn(
+          `[HospitableClient] post-failure thread check failed for ${operation}:`,
+          fetchErr?.message || fetchErr
+        );
       }
-    }
+      return false;
+    };
+
+    return withExponentialBackoff(postFn, {
+      operation,
+      kind: 'send',
+      maxAttempts: HOSPITABLE_SEND_MAX_ATTEMPTS,
+      recover,
+    });
+  }
+
+  async _authHeaders() {
+    const token = await this.getToken();
+    return {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
   }
 
   /**
@@ -110,27 +125,21 @@ export class HospitableClient {
    * Returns true if there was at least one reservation that overlapped with that date.
    */
   async hasGuestsOnDate(listingId, date) {
-    const token = await this.getToken();
+    return this._withRetry('hasGuestsOnDate', async () => {
+      const response = await axios.get(`${this.baseUrl}/reservations`, {
+        headers: await this._authHeaders(),
+        params: {
+          'properties[]': listingId,
+          'arrival_date[lte]': date,
+          'departure_date[gt]': date,
+          limit: 5
+        },
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
+      });
 
-    // Check for reservations that were active on that date
-    // A reservation overlaps if arrival_date <= date AND departure_date > date
-    const response = await axios.get(`${this.baseUrl}/reservations`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      params: {
-        'properties[]': listingId,
-        'arrival_date[lte]': date,
-        'departure_date[gt]': date,
-        limit: 5
-      },
-      timeout: 8000
+      const reservations = response.data?.data || [];
+      return reservations.length > 0;
     });
-
-    const reservations = response.data?.data || [];
-    return reservations.length > 0;
   }
 
   /**
@@ -138,24 +147,20 @@ export class HospitableClient {
    * Useful for more advanced logic.
    */
   async getReservationsForDateRange(listingId, startDate, endDate) {
-    const token = await this.getToken();
+    return this._withRetry('getReservationsForDateRange', async () => {
+      const response = await axios.get(`${this.baseUrl}/reservations`, {
+        headers: await this._authHeaders(),
+        params: {
+          'properties[]': listingId,
+          'arrival_date[gte]': startDate,
+          'departure_date[lte]': endDate,
+          limit: 20
+        },
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
+      });
 
-    const response = await axios.get(`${this.baseUrl}/reservations`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      params: {
-        'properties[]': listingId,
-        'arrival_date[gte]': startDate,
-        'departure_date[lte]': endDate,
-        limit: 20
-      },
-      timeout: 8000
+      return response.data?.data || [];
     });
-
-    return response.data?.data || [];
   }
 
   /**
@@ -206,7 +211,7 @@ export class HospitableClient {
           Authorization: `Bearer ${token}`
         },
         params,
-        timeout: 10000
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
       });
 
       return response.data?.data || [];
@@ -227,7 +232,7 @@ export class HospitableClient {
           Accept: 'application/json',
           Authorization: `Bearer ${token}`
         },
-        timeout: 8000
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
       });
 
       const res = response.data?.data;
@@ -254,7 +259,7 @@ export class HospitableClient {
         params: {
           include: 'properties,guest'
         },
-        timeout: 8000
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
       });
 
       return response.data?.data || response.data;
@@ -269,24 +274,27 @@ export class HospitableClient {
     if (!reservationId) throw new Error('reservationId is required to send a message');
     if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
 
-    return this._withRetry('sendMessageToReservation', async () => {
-      const token = await this.getToken();
-
-      const response = await axios.post(
-        `${this.baseUrl}/reservations/${reservationId}/messages`,
-        { body },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          timeout: 15000
-        }
-      );
-
-      return response.data?.data || response.data;
-    });
+    return this._sendWithConfirm(
+      'sendMessageToReservation',
+      body,
+      async () => {
+        const token = await this.getToken();
+        const response = await axios.post(
+          `${this.baseUrl}/reservations/${reservationId}/messages`,
+          { body },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            timeout: HOSPITABLE_SEND_TIMEOUT_MS
+          }
+        );
+        return response.data?.data || response.data;
+      },
+      () => this.getReservationMessages(reservationId, 8)
+    );
   }
 
   /**
@@ -298,24 +306,27 @@ export class HospitableClient {
     if (!conversationId) throw new Error('conversationId is required to send a message');
     if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
 
-    return this._withRetry('sendMessage', async () => {
-      const token = await this.getToken();
-
-      const response = await axios.post(
-        `${this.baseUrl}/conversations/${conversationId}/messages`,
-        { body },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          timeout: 15000
-        }
-      );
-
-      return response.data?.data || response.data;
-    });
+    return this._sendWithConfirm(
+      'sendMessage',
+      body,
+      async () => {
+        const token = await this.getToken();
+        const response = await axios.post(
+          `${this.baseUrl}/conversations/${conversationId}/messages`,
+          { body },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            timeout: HOSPITABLE_SEND_TIMEOUT_MS
+          }
+        );
+        return response.data?.data || response.data;
+      },
+      () => this.getConversationMessages(conversationId, 8)
+    );
   }
 
   /**
@@ -330,24 +341,27 @@ export class HospitableClient {
     if (!inquiryId) throw new Error('inquiryId is required to send a message');
     if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
 
-    return this._withRetry('sendMessageToInquiry', async () => {
-      const token = await this.getToken();
-
-      const response = await axios.post(
-        `${this.baseUrl}/inquiries/${inquiryId}/messages`,
-        { body },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          timeout: 15000
-        }
-      );
-
-      return response.data?.data || response.data;
-    });
+    return this._sendWithConfirm(
+      'sendMessageToInquiry',
+      body,
+      async () => {
+        const token = await this.getToken();
+        const response = await axios.post(
+          `${this.baseUrl}/inquiries/${inquiryId}/messages`,
+          { body },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            timeout: HOSPITABLE_SEND_TIMEOUT_MS
+          }
+        );
+        return response.data?.data || response.data;
+      },
+      () => this.getInquiryMessages(inquiryId, 8)
+    );
   }
 
   /**
@@ -369,7 +383,7 @@ export class HospitableClient {
           // This helps when the webhook is minimal for pre-booking inquiries.
           include: 'properties,guest'
         },
-        timeout: 8000
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
       });
 
       return response.data?.data || null;
@@ -401,7 +415,7 @@ export class HospitableClient {
         params: {
           limit
         },
-        timeout: 8000
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
       });
 
       return response.data?.data || [];
@@ -430,7 +444,7 @@ export class HospitableClient {
         params: {
           include: 'messages'
         },
-        timeout: 8000
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
       });
 
       const messages = response.data?.data?.messages || [];
@@ -456,7 +470,7 @@ export class HospitableClient {
         params: {
           limit
         },
-        timeout: 8000
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
       });
 
       return response.data?.data || [];
@@ -513,7 +527,7 @@ export class HospitableClient {
             per_page: perPage,
             page,
           },
-          timeout: 15000,
+          timeout: HOSPITABLE_READ_TIMEOUT_MS,
         });
         const batch = response.data?.data || [];
         all.push(...batch);
@@ -550,7 +564,7 @@ export class HospitableClient {
           start_date: startDate,
           end_date: endDate
         },
-        timeout: 10000
+        timeout: HOSPITABLE_READ_TIMEOUT_MS
       });
 
       // Normalize to a flat day-entry array. Live Hospitable v2 shape is:
