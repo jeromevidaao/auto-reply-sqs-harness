@@ -7,7 +7,7 @@ This is the canonical instruction file for any AI/agent working in this repo (Gr
 ## Core Product
 Local-first evaluation harness + core agent logic for the Grok-powered guest messaging / auto-reply system (originally the `auto-reply-sqs` Lambda).
 
-- Hospitable **message POST** is rate-limited (**2/min per reservation**, 50/5 min global). Two-layer retry: in-Lambda **4 attempts / ~3 min** (20s timeout, exp backoff, min 30s between POSTs, GET-confirm after timeout); then SQS `grok_message` **4 receives / 12 min visibility (~36–40 min)** then `grok_message_dl`. Constants in `src/utils/httpRetry.js`. Deploy keeps queue attrs in sync.
+- Hospitable **message POST** is rate-limited (**2/min per reservation**, 50/5 min global). Two-layer retry: in-Lambda **4 attempts / ~3 min** (20s timeout, exp backoff, min 30s between POSTs, GET-confirm after timeout); then SQS `grok_message` **4 receives / 12 min visibility (~36–40 min)** then `grok_message_dl`. Constants in `src/utils/httpRetry.js`. Queue attrs + Lambda timeout 360s are out-of-band (deploy role cannot `UpdateFunctionConfiguration`).
 - The "brain" (prompts + agent multipass pipeline + tools + evals) lives here.
 - Real guest conversations (from Hospitable/Airbnb) are first-class test data.
 - Changes are iterated locally with `npm test`, `npm run simulate`, `npm run eval`.
