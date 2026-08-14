@@ -15,7 +15,8 @@
  *   1) Parse asked dates from the guest text (year = next future occurrence).
  *   2) Confirm Hospitable calendar + accepted reservations for those nights.
  *   3) Draft: acknowledge fee if they agreed + say whether the new dates are open.
- *   4) Never send — draft only until a human reviews.
+ *   4) Send via the HomeExchange API (never Hospitable) when the calendar
+ *      was checked and a client is provided. Generic follow-ups still no-op.
  */
 
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
@@ -609,12 +610,12 @@ export function buildHomeExchangeDraft({
   };
 }
 
-export function shouldSendHomeExchangeDraft(draft, isFirst) {
-  if (!isFirst) return false;
+export function shouldSendHomeExchangeDraft(draft, _isFirst) {
   if (!draft?.shouldReply) return false;
   if (!draft?.proposedResponse || draft.proposedResponse === 'none') return false;
   // Incomplete calendar check: keep as draft only.
   if (draft.reason === 'calendar_not_checked') return false;
+  if (draft.reason === 'homeexchange_followup_calendar_not_checked') return false;
   return true;
 }
 

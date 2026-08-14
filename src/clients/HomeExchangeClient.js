@@ -31,12 +31,18 @@ export function alreadySentEquivalent(messages, proposedResponse) {
   if (!proposed) return false;
   const preview = proposed.slice(0, 80);
   const list = Array.isArray(messages) ? messages : [];
+  const proposedIsFeeAsk = /cleaning fee/.test(proposed) && /after your stay/.test(proposed);
   return list.some((m) => {
     const text = String(m.content || m.body || m.text || '').trim().toLowerCase();
     if (!text) return false;
     if (text === proposed) return true;
     if (text.includes(preview) || proposed.includes(text.slice(0, 80))) return true;
-    return /cleaning fee/.test(text) && /after your stay/.test(text);
+    // Only the first-message fee-after-stay ask is equivalent to another fee ask.
+    // A later "fee is fine + extra dates" reply must still send.
+    if (proposedIsFeeAsk && /cleaning fee/.test(text) && /after your stay/.test(text)) {
+      return true;
+    }
+    return false;
   });
 }
 
