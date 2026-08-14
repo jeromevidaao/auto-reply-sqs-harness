@@ -139,7 +139,7 @@ export const handler = async (event, context) => {
   // Isolated HomeExchange guest-chat path. Must run before the Airbnb agent so
   // HE traffic cannot classify as NEW_RESERVATION_WELCOME / send via Hospitable.
   if (isHomeExchangePayload(event) || act === 'homeexchange_message') {
-    console.log('[Handler] HomeExchange use case — first-message send via HomeExchange API');
+    console.log('[Handler] HomeExchange use case — isolated path (first-message may send; follow-up is draft-only)');
     const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
     const hospitableClient = new HospitableClient();
     const homeExchangeClient = new HomeExchangeClient();

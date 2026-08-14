@@ -12,6 +12,8 @@ import {
   buildHomeExchangeDraft,
   handleHomeExchangeMessage,
   shouldSendHomeExchangeDraft,
+  extractAskedStayDates,
+  guestAcceptedCleaningFee,
   HOMEEXCHANGE_ACT,
   HOMEEXCHANGE_PLATFORM,
   APT3_AIRBNB_LISTING_ID,
@@ -199,7 +201,7 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.ok(result.unavailable.includes('2027-05-17'));
   });
 
-  it('does not draft a sendable follow-up (send stays disabled)', () => {
+  it('does not draft a generic follow-up with no fee/date ask', () => {
     const draft = buildHomeExchangeDraft({
       guestName: 'Caroline',
       isFirst: false,
@@ -207,6 +209,26 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(draft.typeOfMessageReceived, 'HOMEEXCHANGE_FOLLOWUP');
     assert.equal(draft.shouldReply, false);
     assert.equal(draft.proposedResponse, null);
+    assert.equal(shouldSendHomeExchangeDraft(draft, false), false);
+  });
+
+  it('parses Caroline Sep 30–Oct 3 as 2026 from mid-August 2026', () => {
+    const carolineFollowup =
+      'Hi Ruby, the cleaning fee is fine. Just out of curiosity, we are also planning to visit our grandkids September 30- October 3, and is your place available?';
+    assert.equal(guestAcceptedCleaningFee(carolineFollowup), true);
+    const dates = extractAskedStayDates(carolineFollowup, {
+      now: new Date('2026-08-14T12:00:00Z'),
+    });
+    assert.deepEqual(dates, {
+      checkIn: '2026-09-30',
+      checkOut: '2026-10-03',
+      yearSource: 'inferred',
+    });
+    const later = extractAskedStayDates('September 30- October 3', {
+      now: new Date('2026-10-04T12:00:00Z'),
+    });
+    assert.equal(later.checkIn, '2027-09-30');
+    assert.equal(later.checkOut, '2027-10-03');
   });
 
   it('runs Caroline first-message SQS shape and sends via HomeExchange (not Hospitable)', async () => {
@@ -349,6 +371,127 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(result.sent, false);
     assert.equal(sent, 0);
     assert.equal(shouldSendHomeExchangeDraft(result, false), false);
+  });
+
+  it('drafts Caroline fee-accepted + Sep 30–Oct 3 date check and never sends', async () => {
+    const carolineFollowup =
+      'Hi Ruby, the cleaning fee is fine. Just out of curiosity, we are also planning to visit our grandkids September 30- October 3, and is your place available?';
+    let calendarRange = null;
+    let sent = 0;
+    const result = await handleHomeExchangeMessage({
+      event: {
+        Records: [
+          {
+            body: JSON.stringify({
+              queryStringParameters: { act: HOMEEXCHANGE_ACT },
+              body: JSON.stringify({
+                data: {
+                  body: carolineFollowup,
+                  conversation_id: '95101669',
+                  platform: HOMEEXCHANGE_PLATFORM,
+                  source: HOMEEXCHANGE_PLATFORM,
+                  sender_type: 'guest',
+                  sender: { type: 'guest', first_name: 'Caroline' },
+                  guestName: 'Caroline',
+                  checkIn: '2027-05-13',
+                  checkOut: '2027-05-19',
+                  isFirstMessage: false,
+                  messageCount: 2,
+                  airbnbListingId: APT3_AIRBNB_LISTING_ID,
+                },
+              }),
+            }),
+          },
+        ],
+      },
+      hospitableClient: {
+        async getPropertyCalendar(_id, start, end) {
+          calendarRange = { start, end };
+          return ['2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03'].map((date) => ({
+            date,
+            status: { available: true },
+          }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 24259977, name: 'Pine Apt #3', price: 125 } };
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage() {
+          sent += 1;
+        },
+      },
+      now: new Date('2026-08-14T12:00:00Z'),
+    });
+    assert.equal(result.isFirstMessage, false);
+    assert.equal(result.feeAccepted, true);
+    assert.equal(result.askedDates.checkIn, '2026-09-30');
+    assert.equal(result.askedDates.checkOut, '2026-10-03');
+    assert.equal(result.checkIn, '2026-09-30');
+    assert.equal(result.checkOut, '2026-10-03');
+    assert.equal(result.originalCheckIn, '2027-05-13');
+    assert.equal(result.calendar.open, true);
+    assert.deepEqual(calendarRange, { start: '2026-09-30', end: '2026-10-03' });
+    assert.equal(result.shouldReply, true);
+    assert.equal(result.sendDisabled, true);
+    assert.equal(result.sent, false);
+    assert.equal(sent, 0);
+    assert.equal(shouldSendHomeExchangeDraft(result, false), false);
+    assert.match(result.proposedResponse, /cleaning fee is fine/i);
+    assert.match(result.proposedResponse, /May 13–19, 2027/);
+    assert.match(result.proposedResponse, /September 30 – October 3, 2026/);
+    assert.match(result.proposedResponse, /also open/i);
+    assert.match(result.proposedResponse, /\$125/);
+  });
+
+  it('drafts not-open for a follow-up date ask without sending', async () => {
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message:
+          'Hi Ruby, the cleaning fee is fine. Just out of curiosity, we are also planning to visit our grandkids September 30- October 3, and is your place available?',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+          checkIn: '2027-05-13',
+          checkOut: '2027-05-19',
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [
+            { date: '2026-09-30', status: { available: false } },
+            { date: '2026-10-01', status: { available: true } },
+            { date: '2026-10-02', status: { available: true } },
+          ];
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 24259977, price: 125 } };
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage() {
+          throw new Error('must not send');
+        },
+      },
+      now: new Date('2026-08-14T12:00:00Z'),
+    });
+    assert.equal(result.sendDisabled, true);
+    assert.equal(result.sent, false);
+    assert.equal(result.calendar.open, false);
+    assert.match(result.proposedResponse, /not open/i);
+    assert.match(result.proposedResponse, /cleaning fee is fine/i);
   });
 
   it('skips send when the fee ask is already on the HE thread', async () => {

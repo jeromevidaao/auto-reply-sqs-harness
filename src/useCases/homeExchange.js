@@ -10,6 +10,12 @@
  *   2) Load the unit cleaning fee from DynamoDB `listing`.
  *   3) Draft a reply asking if they will pay that fee after the stay.
  *   4) Send via the HomeExchange API (never Hospitable) when a client is provided.
+ *
+ * Follow-up (e.g. fee accepted + extra dates like Caroline Sep 30–Oct 3):
+ *   1) Parse asked dates from the guest text (year = next future occurrence).
+ *   2) Confirm Hospitable calendar + accepted reservations for those nights.
+ *   3) Draft: acknowledge fee if they agreed + say whether the new dates are open.
+ *   4) Never send — draft only until a human reviews.
  */
 
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
@@ -128,6 +134,123 @@ export function stayNights(checkIn, checkOut) {
     cursor = addDaysYmd(cursor, 1);
   }
   return nights;
+}
+
+const MONTH_NAME_TO_NUM = {
+  january: 1,
+  jan: 1,
+  february: 2,
+  feb: 2,
+  march: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  july: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sept: 9,
+  sep: 9,
+  october: 10,
+  oct: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12,
+};
+
+const MONTH_NAME_ALT = Object.keys(MONTH_NAME_TO_NUM).join('|');
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+export function ymd(year, month, day) {
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+export function utcTodayYmd(now = new Date()) {
+  return ymd(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate());
+}
+
+/** Next future occurrence of month/day from `now` (today counts as future). */
+export function inferYearForMonthDay(month, day, now = new Date()) {
+  const year = now.getUTCFullYear();
+  const candidate = ymd(year, month, day);
+  return candidate >= utcTodayYmd(now) ? year : year + 1;
+}
+
+function buildAskedRange(month1, day1, month2, day2, explicitYear, now) {
+  if (!month1 || !day1 || !month2 || !day2) return null;
+  const startYear = explicitYear || inferYearForMonthDay(month1, day1, now);
+  let endYear = explicitYear || startYear;
+  let checkIn = ymd(startYear, month1, day1);
+  let checkOut = ymd(endYear, month2, day2);
+  if (checkOut <= checkIn) {
+    endYear = startYear + 1;
+    checkOut = ymd(endYear, month2, day2);
+  }
+  if (checkOut <= checkIn) return null;
+  return {
+    checkIn,
+    checkOut,
+    yearSource: explicitYear ? 'explicit' : 'inferred',
+  };
+}
+
+/**
+ * Pull a check-in/out range from follow-up text.
+ * "September 30- October 3" on 2026-08-14 → 2026-09-30 / 2026-10-03.
+ */
+export function extractAskedStayDates(text, { now = new Date() } = {}) {
+  const raw = String(text || '');
+  if (!raw.trim()) return null;
+
+  const named = raw.match(
+    new RegExp(
+      `\\b(${MONTH_NAME_ALT})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|–|—|to|through|thru)\\s*(?:(${MONTH_NAME_ALT})\\s+)?(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*,?\\s*(\\d{4}))?`,
+      'i'
+    )
+  );
+  if (named) {
+    return buildAskedRange(
+      MONTH_NAME_TO_NUM[named[1].toLowerCase()],
+      Number(named[2]),
+      named[3] ? MONTH_NAME_TO_NUM[named[3].toLowerCase()] : MONTH_NAME_TO_NUM[named[1].toLowerCase()],
+      Number(named[4]),
+      named[5] ? Number(named[5]) : null,
+      now
+    );
+  }
+
+  const numeric = raw.match(
+    /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s*(?:-|–|—|to|through|thru)\s*(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/
+  );
+  if (numeric) {
+    const month1 = Number(numeric[1]);
+    const day1 = Number(numeric[2]);
+    const year1 = numeric[3]
+      ? Number(numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3])
+      : null;
+    const month2 = Number(numeric[4]);
+    const day2 = Number(numeric[5]);
+    const year2 = numeric[6]
+      ? Number(numeric[6].length === 2 ? `20${numeric[6]}` : numeric[6])
+      : year1;
+    return buildAskedRange(month1, day1, month2, day2, year2 || year1, now);
+  }
+
+  return null;
+}
+
+export function guestAcceptedCleaningFee(text) {
+  return /cleaning fee is fine|fee is fine|happy to pay (the )?(cleaning )?fee|ok(?:ay)? (with |paying )?the (cleaning )?fee|fee works/i.test(
+    String(text || '')
+  );
 }
 
 export function formatStayRange(checkIn, checkOut) {
@@ -330,25 +453,121 @@ export async function loadCleaningFeeFromDdb(ddbClient, airbnbListingId = APT3_A
   return { amount: fallback, source: 'default_missing_row', listingId };
 }
 
-export function buildHomeExchangeDraft({
+function feeAmountText(cleaningFee) {
+  const fee = cleaningFee?.amount;
+  if (fee != null && !Number.isNaN(Number(fee))) return `$${Number(fee)}`;
+  return 'our standard cleaning fee';
+}
+
+export function buildHomeExchangeFollowupDraft({
   guestName,
   checkIn,
   checkOut,
+  originalCheckIn,
+  originalCheckOut,
   calendar,
   cleaningFee,
-  isFirst,
+  feeAccepted,
+  askedDates,
 } = {}) {
   const name = (guestName || 'there').split(/\s+/)[0];
-  const range = formatStayRange(checkIn, checkOut);
-  const fee = cleaningFee?.amount;
+  const askedRange = askedDates ? formatStayRange(askedDates.checkIn, askedDates.checkOut) : formatStayRange(checkIn, checkOut);
+  const originalRange = formatStayRange(originalCheckIn, originalCheckOut);
+  const feeText = feeAmountText(cleaningFee);
+  const feeThanks = feeAccepted
+    ? `thanks for confirming the ${feeText} cleaning fee is fine` +
+      (originalRange ? ` for ${originalRange}` : '')
+    : null;
 
-  if (!isFirst) {
+  if (!askedDates && !feeAccepted) {
     return {
       typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
       shouldReply: false,
       proposedResponse: null,
-      reason: 'homeexchange_followup_send_disabled',
+      reason: 'homeexchange_followup_no_dates',
     };
+  }
+
+  if (!askedDates && feeAccepted) {
+    return {
+      typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+      shouldReply: true,
+      proposedResponse:
+        `Hi ${name} — ${feeThanks}.` +
+        (originalRange ? ` We can accept that request.` : ''),
+      reason: 'homeexchange_followup_fee_accepted',
+    };
+  }
+
+  if (!calendar?.checked) {
+    return {
+      typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+      shouldReply: true,
+      proposedResponse:
+        `Hi ${name}` +
+        (feeThanks ? ` — ${feeThanks}.` : ',') +
+        `\n\nI'm checking` +
+        (askedRange ? ` ${askedRange}` : ' those dates') +
+        ` and will follow up shortly on whether that window is open.`,
+      reason: 'homeexchange_followup_calendar_not_checked',
+    };
+  }
+
+  if (!calendar.open) {
+    return {
+      typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+      shouldReply: true,
+      proposedResponse:
+        `Hi ${name}` +
+        (feeThanks ? ` — ${feeThanks}.` : ',') +
+        (feeAccepted && originalRange ? ` We can accept that request.` : '') +
+        `\n\nI checked` +
+        (askedRange ? ` ${askedRange}` : '') +
+        ` and those dates are not open on our calendar.`,
+      reason: 'homeexchange_followup_calendar_not_open',
+    };
+  }
+
+  return {
+    typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+    shouldReply: true,
+    proposedResponse:
+      `Hi ${name}` +
+      (feeThanks ? ` — ${feeThanks}.` : ',') +
+      `\n\nI checked` +
+      (askedRange ? ` ${askedRange}` : '') +
+      `: those dates are also open. The same ${feeText} cleaning fee after you leave would apply to that stay as well. Would you like us to hold that one too?`,
+    reason: 'homeexchange_followup_calendar_open',
+  };
+}
+
+export function buildHomeExchangeDraft({
+  guestName,
+  checkIn,
+  checkOut,
+  originalCheckIn,
+  originalCheckOut,
+  calendar,
+  cleaningFee,
+  isFirst,
+  feeAccepted,
+  askedDates,
+} = {}) {
+  const name = (guestName || 'there').split(/\s+/)[0];
+  const range = formatStayRange(checkIn, checkOut);
+
+  if (!isFirst) {
+    return buildHomeExchangeFollowupDraft({
+      guestName,
+      checkIn,
+      checkOut,
+      originalCheckIn,
+      originalCheckOut,
+      calendar,
+      cleaningFee,
+      feeAccepted,
+      askedDates,
+    });
   }
 
   if (!calendar?.checked) {
@@ -375,10 +594,7 @@ export function buildHomeExchangeDraft({
     };
   }
 
-  const feeText =
-    fee != null && !Number.isNaN(Number(fee))
-      ? `$${Number(fee)}`
-      : 'our standard cleaning fee';
+  const feeText = feeAmountText(cleaningFee);
 
   return {
     typeOfMessageReceived: 'HOMEEXCHANGE_FIRST_MESSAGE',
@@ -407,13 +623,18 @@ export async function handleHomeExchangeMessage({
   hospitableClient = null,
   ddbClient = null,
   homeExchangeClient = null,
+  now = new Date(),
 } = {}) {
   const extracted = extractHomeExchangeMessage(event);
   const message = extracted.message;
   const context = extracted.context || {};
-  const checkIn = dateOnly(context.checkIn || context.check_in);
-  const checkOut = dateOnly(context.checkOut || context.check_out);
+  const originalCheckIn = dateOnly(context.checkIn || context.check_in);
+  const originalCheckOut = dateOnly(context.checkOut || context.check_out);
+  const askedDates = extractAskedStayDates(message, { now });
+  const feeAccepted = guestAcceptedCleaningFee(message);
   const isFirst = isFirstHomeExchangeMessage(context, context.conversationHistory);
+  const checkIn = !isFirst && askedDates?.checkIn ? askedDates.checkIn : originalCheckIn;
+  const checkOut = !isFirst && askedDates?.checkOut ? askedDates.checkOut : originalCheckOut;
   const propertyId = context.listingId || APT3_HOSPITABLE_PROPERTY_ID;
   const airbnbListingId = context.airbnbListingId || APT3_AIRBNB_LISTING_ID;
   const guestName = context.guestName || context.sender?.first_name || null;
@@ -423,7 +644,8 @@ export async function handleHomeExchangeMessage({
   let calendarError = null;
   let reservationsError = null;
 
-  if (isFirst && checkIn && checkOut && hospitableClient) {
+  const shouldCheckCalendar = !!(checkIn && checkOut && hospitableClient && (isFirst || askedDates));
+  if (shouldCheckCalendar) {
     try {
       if (typeof hospitableClient.getPropertyCalendar === 'function') {
         calendarDays = await hospitableClient.getPropertyCalendar(propertyId, checkIn, checkOut);
@@ -461,7 +683,7 @@ export async function handleHomeExchangeMessage({
     source: 'default',
     listingId: airbnbListingId,
   };
-  if (isFirst && calendar.open) {
+  if ((isFirst && calendar.open) || (!isFirst && (feeAccepted || calendar.open || askedDates))) {
     cleaningFee = await loadCleaningFeeFromDdb(ddbClient, airbnbListingId);
   }
 
@@ -469,9 +691,13 @@ export async function handleHomeExchangeMessage({
     guestName,
     checkIn,
     checkOut,
+    originalCheckIn,
+    originalCheckOut,
     calendar,
     cleaningFee,
     isFirst,
+    feeAccepted,
+    askedDates,
   });
 
   const conversationId = context.conversation_id || context.conversationId || null;
@@ -517,6 +743,10 @@ export async function handleHomeExchangeMessage({
     guestName,
     checkIn,
     checkOut,
+    originalCheckIn,
+    originalCheckOut,
+    askedDates,
+    feeAccepted,
     propertyId,
     airbnbListingId,
     calendar,
