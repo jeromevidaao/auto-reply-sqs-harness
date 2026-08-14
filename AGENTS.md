@@ -48,6 +48,20 @@ When a guest message was **not** auto-replied but should have been (Cassidy chec
 
 Runtime hardening (`src/utils/replyPolicy.js`): high confidence (≥0.9) + sendable draft forces `shouldReply`; operational multi-intent asks also force reply at ≥0.75 conf.
 
+## HomeExchange first-message use case (send DISABLED)
+
+New guest messages from HomeExchange are enqueued onto the same `grok_message` SQS queue (`act=homeexchange_message`, `platform=homeexchange`) by `cleaningbutton-api` `hePollNewMessages`.
+
+**Isolation:** the Lambda handler branches on `isHomeExchangePayload` *before* `GuestMessagingAgent` / Hospitable send. Airbnb `act=message` / `platform=airbnb` traffic is unchanged. Calendar-sync `act=new_reservation_home_exchange` is also unchanged.
+
+**First HE guest message (e.g. Caroline 2026-08-14, May 13–19 2027, Apt 3):**
+1. Check Hospitable calendar + accepted reservations for the requested nights (Apt 3 property `60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd`). Open = request can be accepted.
+2. If open, load the unit cleaning fee from DynamoDB `listing` (`listingId=24259977`, typically $125).
+3. Draft: dates are open + ask if they will pay that fee after the stay.
+4. **Do not send.** `sendDisabled: true` until explicitly enabled.
+
+Follow-up HE messages are ingested but produce no draft/send (`HOMEEXCHANGE_FOLLOWUP`). Implementation: `src/useCases/homeExchange.js`. Tests: `tests/homeExchange.test.js`.
+
 ## Recent Key Behaviors (as of June 2026)
 - **Just-accepted inquiry welcome (request-to-book → host Accept)**: `grok_reservation` lifecycle webhooks (`reservation.created` / `reservation.changed`) are processed when `reservation_status.history` shows prior pending/request then `accepted` within ~5 minutes. Welcome is NEW_RESERVATION_WELCOME opening with **"I just accepted your inquiry"** then normal logistics. **Instant book** (accepted-only history, no prior pending) is skipped on this path — guest `message.created` still handles that welcome without the accept opener. Util: `src/utils/reservationAccept.js`. Eval: `just-accepted-inquiry-welcome`.
 - **Already-cancelled reservation (Julia medical early-departure)**: When Hospitable `reservation_status.current.category` (or legacy `status`) is `cancelled`, never send Airbnb help/article/475 or "cancellation options" language. Handler enriches `reservationStatus` from `getReservation`; agent also fetches status on cancel-talk if missing; `CancellationTool` sets `alreadyCancelled`; deterministic `_applyAlreadyCancelledPolicy` rewrites bad drafts. Eval: `cancellation-already-cancelled-julia`.

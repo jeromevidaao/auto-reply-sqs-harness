@@ -6,6 +6,9 @@
  * - Real SQS traffic from grok_message (the shapes the old monolithic system actually sends):
  *     { body: "<json-string>" }                 → often contains nested { data: { body, conversation_id, ... } }
  *     { data: { body, reservation_id, conversation_id, ... } }
+ * - HomeExchange guest chat (act=homeexchange_message / platform=homeexchange):
+ *     Isolated first-message path (Hospitable calendar open? + DDB cleaning fee).
+ *     Draft only — never sends. Existing Airbnb paths are unchanged.
  * - Real SQS traffic from grok_reservation (reservation.created / reservation.changed):
  *     API Gateway envelope with act=reservation and Hospitable reservation payload.
  *     Pending→just-accepted (request-to-book) triggers a welcome that opens with
@@ -32,6 +35,7 @@ import {
   shouldProcessAcceptWelcome,
 } from '../src/utils/reservationAccept.js';
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
+import { isHomeExchangePayload, handleHomeExchangeMessage } from '../src/useCases/homeExchange.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 const sns = new SNSClient({ region: 'us-east-1' });
@@ -128,6 +132,48 @@ export const handler = async (event, context) => {
     return {
       statusCode: 200,
       body: JSON.stringify({ success: true, act, queueName, queueUrl: QueueUrl }),
+    };
+  }
+
+  // Isolated HomeExchange guest-chat path. Must run before the Airbnb agent so
+  // HE traffic cannot classify as NEW_RESERVATION_WELCOME / send via Hospitable.
+  // Send is intentionally disabled until Jerome turns it on.
+  if (isHomeExchangePayload(event) || act === 'homeexchange_message') {
+    console.log('[Handler] HomeExchange use case — draft only, SEND DISABLED');
+    const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
+    const hospitableClient = new HospitableClient();
+    const heResult = await handleHomeExchangeMessage({
+      event,
+      hospitableClient,
+      ddbClient,
+    });
+    const duration = Date.now() - startTime;
+    console.log('[Handler] HomeExchange draft (not sent):', {
+      typeOfMessageReceived: heResult.typeOfMessageReceived,
+      shouldReply: heResult.shouldReply,
+      sendDisabled: true,
+      calendarOpen: heResult.calendar?.open ?? null,
+      cleaningFee: heResult.cleaningFee?.amount ?? null,
+      reason: heResult.reason,
+    });
+    console.log('Proposed Response:\n' + (heResult.proposedResponse || '(none)'));
+    console.log('\n⏱️  Total handler duration:', duration, 'ms (homeexchange, no send)');
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        success: true,
+        requestId,
+        homeExchange: true,
+        sendDisabled: true,
+        sent: false,
+        decision: {
+          typeOfMessageReceived: heResult.typeOfMessageReceived,
+          proposedResponse: heResult.proposedResponse,
+          shouldReply: heResult.shouldReply,
+          escalated: false,
+        },
+        homeExchangeResult: heResult,
+      }),
     };
   }
 
