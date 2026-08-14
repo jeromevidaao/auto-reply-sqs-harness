@@ -8,7 +8,7 @@
  *     { data: { body, reservation_id, conversation_id, ... } }
  * - HomeExchange guest chat (act=homeexchange_message / platform=homeexchange):
  *     Isolated first-message path (Hospitable calendar open? + DDB cleaning fee).
- *     Draft only — never sends. Existing Airbnb paths are unchanged.
+ *     Sends via HomeExchange API only — never Hospitable. Airbnb paths unchanged.
  * - Real SQS traffic from grok_reservation (reservation.created / reservation.changed):
  *     API Gateway envelope with act=reservation and Hospitable reservation payload.
  *     Pending→just-accepted (request-to-book) triggers a welcome that opens with
@@ -22,6 +22,7 @@ import { GuestMessagingAgent } from '../src/agent.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { HospitableClient } from '../src/clients/HospitableClient.js';
+import { HomeExchangeClient } from '../src/clients/HomeExchangeClient.js';
 import { KumoCloudClient } from '../src/clients/KumoCloudClient.js';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { SQSClient, CreateQueueCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
@@ -137,35 +138,43 @@ export const handler = async (event, context) => {
 
   // Isolated HomeExchange guest-chat path. Must run before the Airbnb agent so
   // HE traffic cannot classify as NEW_RESERVATION_WELCOME / send via Hospitable.
-  // Send is intentionally disabled until Jerome turns it on.
   if (isHomeExchangePayload(event) || act === 'homeexchange_message') {
-    console.log('[Handler] HomeExchange use case — draft only, SEND DISABLED');
+    console.log('[Handler] HomeExchange use case — first-message send via HomeExchange API');
     const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
     const hospitableClient = new HospitableClient();
+    const homeExchangeClient = new HomeExchangeClient();
     const heResult = await handleHomeExchangeMessage({
       event,
       hospitableClient,
       ddbClient,
+      homeExchangeClient,
     });
     const duration = Date.now() - startTime;
-    console.log('[Handler] HomeExchange draft (not sent):', {
+    console.log('[Handler] HomeExchange result:', {
       typeOfMessageReceived: heResult.typeOfMessageReceived,
       shouldReply: heResult.shouldReply,
-      sendDisabled: true,
+      sendDisabled: heResult.sendDisabled,
+      sent: heResult.sent,
+      sendSkipReason: heResult.sendSkipReason || null,
+      sendError: heResult.sendError || null,
       calendarOpen: heResult.calendar?.open ?? null,
       cleaningFee: heResult.cleaningFee?.amount ?? null,
       reason: heResult.reason,
     });
     console.log('Proposed Response:\n' + (heResult.proposedResponse || '(none)'));
-    console.log('\n⏱️  Total handler duration:', duration, 'ms (homeexchange, no send)');
+    if (heResult.sendError) {
+      console.error('[Handler] HomeExchange send failed:', heResult.sendError);
+      throw new Error(`Failed to deliver HomeExchange reply: ${heResult.sendError}`);
+    }
+    console.log('\n⏱️  Total handler duration:', duration, 'ms (homeexchange)');
     return {
       statusCode: 200,
       body: JSON.stringify({
         success: true,
         requestId,
         homeExchange: true,
-        sendDisabled: true,
-        sent: false,
+        sendDisabled: heResult.sendDisabled,
+        sent: heResult.sent,
         decision: {
           typeOfMessageReceived: heResult.typeOfMessageReceived,
           proposedResponse: heResult.proposedResponse,

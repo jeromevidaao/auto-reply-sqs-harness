@@ -9,11 +9,11 @@
  *      (request can be accepted).
  *   2) Load the unit cleaning fee from DynamoDB `listing`.
  *   3) Draft a reply asking if they will pay that fee after the stay.
- *
- * Send is ALWAYS disabled for this use case (draft only).
+ *   4) Send via the HomeExchange API (never Hospitable) when a client is provided.
  */
 
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
+import { alreadySentEquivalent } from '../clients/HomeExchangeClient.js';
 
 export const HOMEEXCHANGE_PLATFORM = 'homeexchange';
 export const HOMEEXCHANGE_ACT = 'homeexchange_message';
@@ -393,10 +393,20 @@ export function buildHomeExchangeDraft({
   };
 }
 
+export function shouldSendHomeExchangeDraft(draft, isFirst) {
+  if (!isFirst) return false;
+  if (!draft?.shouldReply) return false;
+  if (!draft?.proposedResponse || draft.proposedResponse === 'none') return false;
+  // Incomplete calendar check: keep as draft only.
+  if (draft.reason === 'calendar_not_checked') return false;
+  return true;
+}
+
 export async function handleHomeExchangeMessage({
   event,
   hospitableClient = null,
   ddbClient = null,
+  homeExchangeClient = null,
 } = {}) {
   const extracted = extractHomeExchangeMessage(event);
   const message = extracted.message;
@@ -464,10 +474,44 @@ export async function handleHomeExchangeMessage({
     isFirst,
   });
 
+  const conversationId = context.conversation_id || context.conversationId || null;
+  const sendEnabled = shouldSendHomeExchangeDraft(draft, isFirst);
+  let sent = false;
+  let sendError = null;
+  let sendSkipReason = null;
+
+  if (sendEnabled && homeExchangeClient && typeof homeExchangeClient.sendMessage === 'function') {
+    if (!conversationId) {
+      sendError = 'missing_conversation_id';
+    } else {
+      try {
+        if (typeof homeExchangeClient.listMessages === 'function') {
+          const existing = await homeExchangeClient.listMessages(conversationId);
+          if (alreadySentEquivalent(existing, draft.proposedResponse)) {
+            sendSkipReason = 'already_sent';
+          }
+        }
+        if (!sendSkipReason) {
+          await homeExchangeClient.sendMessage(conversationId, draft.proposedResponse);
+          sent = true;
+        }
+      } catch (err) {
+        sendError = err?.message || String(err);
+      }
+    }
+  } else if (sendEnabled && !homeExchangeClient) {
+    sendSkipReason = 'no_homeexchange_client';
+  } else if (!sendEnabled) {
+    sendSkipReason = draft.reason || 'send_not_enabled';
+  }
+
   return {
     platform: HOMEEXCHANGE_PLATFORM,
-    sendDisabled: true,
-    sent: false,
+    sendDisabled: !sendEnabled,
+    sent,
+    sendError,
+    sendSkipReason,
+    conversationId,
     isFirstMessage: isFirst,
     guestMessage: message,
     guestName,

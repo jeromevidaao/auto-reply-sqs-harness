@@ -48,7 +48,7 @@ When a guest message was **not** auto-replied but should have been (Cassidy chec
 
 Runtime hardening (`src/utils/replyPolicy.js`): high confidence (≥0.9) + sendable draft forces `shouldReply`; operational multi-intent asks also force reply at ≥0.75 conf.
 
-## HomeExchange first-message use case (send DISABLED)
+## HomeExchange first-message use case
 
 New guest messages from HomeExchange are enqueued onto the same `grok_message` SQS queue (`act=homeexchange_message`, `platform=homeexchange`) by `cleaningbutton-api` `hePollNewMessages`.
 
@@ -58,7 +58,7 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 1. Check Hospitable calendar + accepted reservations for the requested nights (Apt 3 property `60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd`). Open = request can be accepted.
 2. If open, load the unit cleaning fee from DynamoDB `listing` (`listingId=24259977`, typically $125).
 3. Draft: dates are open + ask if they will pay that fee after the stay.
-4. **Do not send.** `sendDisabled: true` until explicitly enabled.
+4. **Send via HomeExchange** `POST /v1/messages` (`src/clients/HomeExchangeClient.js`). Never Hospitable. Dedup if the fee-after-stay ask is already on the thread.
 
 Follow-up HE messages are ingested but produce no draft/send (`HOMEEXCHANGE_FOLLOWUP`). Implementation: `src/useCases/homeExchange.js`. Tests: `tests/homeExchange.test.js`.
 

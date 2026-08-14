@@ -11,10 +11,12 @@ import {
   analyzeCalendarOpen,
   buildHomeExchangeDraft,
   handleHomeExchangeMessage,
+  shouldSendHomeExchangeDraft,
   HOMEEXCHANGE_ACT,
   HOMEEXCHANGE_PLATFORM,
   APT3_AIRBNB_LISTING_ID,
 } from '../src/useCases/homeExchange.js';
+import { alreadySentEquivalent } from '../src/clients/HomeExchangeClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const valentinaPath = path.resolve(__dirname, '../test-payloads/valentina-okay-perfect-sqs.json');
@@ -207,7 +209,7 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(draft.proposedResponse, null);
   });
 
-  it('runs Caroline first-message SQS shape end-to-end without sending', async () => {
+  it('runs Caroline first-message SQS shape and sends via HomeExchange (not Hospitable)', async () => {
     const event = {
       Records: [
         {
@@ -261,10 +263,28 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
         return { Item: { listingId: 24259977, name: 'Pine Apt #3', price: 125 } };
       },
     };
+    const sentBodies = [];
+    const homeExchangeClient = {
+      async listMessages() {
+        return [{ content: caroline, author: { first_name: 'Caroline' } }];
+      },
+      async sendMessage(conversationId, content) {
+        sentBodies.push({ conversationId, content });
+        return { ok: true };
+      },
+    };
 
-    const result = await handleHomeExchangeMessage({ event, hospitableClient, ddbClient });
-    assert.equal(result.sendDisabled, true);
-    assert.equal(result.sent, false);
+    const result = await handleHomeExchangeMessage({
+      event,
+      hospitableClient,
+      ddbClient,
+      homeExchangeClient,
+    });
+    assert.equal(result.sendDisabled, false);
+    assert.equal(result.sent, true);
+    assert.equal(sentBodies.length, 1);
+    assert.equal(String(sentBodies[0].conversationId), '95101669');
+    assert.match(sentBodies[0].content, /\$125/);
     assert.equal(result.isFirstMessage, true);
     assert.equal(result.shouldReply, true);
     assert.equal(result.cleaningFee.amount, 125);
@@ -305,5 +325,91 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
       ddbClient: { async send() { return {}; } },
     });
     assert.equal(sendCalled, false);
+  });
+
+  it('does not send a follow-up even when an HE client is present', async () => {
+    let sent = 0;
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Thanks!',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage() {
+          sent += 1;
+        },
+      },
+    });
+    assert.equal(result.sendDisabled, true);
+    assert.equal(result.sent, false);
+    assert.equal(sent, 0);
+    assert.equal(shouldSendHomeExchangeDraft(result, false), false);
+  });
+
+  it('skips send when the fee ask is already on the HE thread', async () => {
+    let sent = 0;
+    const draftText =
+      'Hi Caroline, thanks for your message — May 13–19, 2027 is open on our calendar, so we can accept the request.\n\nOne thing we ask for Home Exchange stays: the cleaning fee after you leave is $125. Would you be okay paying that after your stay?';
+    const result = await handleHomeExchangeMessage({
+      event: {
+        Records: [
+          {
+            body: JSON.stringify({
+              queryStringParameters: { act: HOMEEXCHANGE_ACT },
+              body: JSON.stringify({
+                data: {
+                  body: caroline,
+                  conversation_id: '95101669',
+                  platform: HOMEEXCHANGE_PLATFORM,
+                  source: HOMEEXCHANGE_PLATFORM,
+                  guestName: 'Caroline',
+                  checkIn: '2027-05-13',
+                  checkOut: '2027-05-19',
+                  isFirstMessage: true,
+                  airbnbListingId: APT3_AIRBNB_LISTING_ID,
+                },
+              }),
+            }),
+          },
+        ],
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [
+            '2027-05-13',
+            '2027-05-14',
+            '2027-05-15',
+            '2027-05-16',
+            '2027-05-17',
+            '2027-05-18',
+          ].map((date) => ({ date, status: { available: true } }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 24259977, price: 125 } };
+        },
+      },
+      homeExchangeClient: {
+        async listMessages() {
+          return [{ content: draftText }];
+        },
+        async sendMessage() {
+          sent += 1;
+        },
+      },
+    });
+    assert.equal(result.sent, false);
+    assert.equal(result.sendSkipReason, 'already_sent');
+    assert.equal(sent, 0);
+    assert.equal(alreadySentEquivalent([{ content: draftText }], draftText), true);
   });
 });
