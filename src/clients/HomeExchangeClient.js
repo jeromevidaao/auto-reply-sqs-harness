@@ -100,4 +100,50 @@ export class HomeExchangeClient {
     );
     return response.data || { ok: true };
   }
+
+  async getConversation(conversationId) {
+    if (!conversationId) throw new Error('conversationId is required');
+    const token = await this.getToken();
+    const response = await axios.get(
+      `${HE_API_BASE}/v3/conversations/me/${encodeURIComponent(conversationId)}`,
+      { headers: this._headers(token), timeout: 20000 }
+    );
+    const data = response.data?.data || response.data || {};
+    return data.conversation || data;
+  }
+
+  /**
+   * Home calendar as [start_on, end_on) ranges.
+   * Live types: NON_RECIPROCAL (open for GP stays), RESERVED (blocked / booked).
+   * Nights not covered by any range are closed (owner long-block).
+   */
+  async getHomeCalendar(homeId) {
+    if (!homeId) throw new Error('homeId is required');
+    const token = await this.getToken();
+    const response = await axios.get(
+      `${HE_API_BASE}/v1/homes/${encodeURIComponent(homeId)}/calendar`,
+      { headers: this._headers(token), timeout: 20000 }
+    );
+    const payload = response.data;
+    if (Array.isArray(payload?.data)) return payload.data;
+    if (Array.isArray(payload)) return payload;
+    return [];
+  }
+
+  /**
+   * Host pre-approve. Live route: PATCH /v1/exchanges/{id}/approve
+   * Sets approved_at; guest then has ~4 days to finalize.
+   */
+  async approveExchange(exchangeId, { stateToken } = {}) {
+    if (!exchangeId) throw new Error('exchangeId is required');
+    const token = await this.getToken();
+    const body = {};
+    if (stateToken) body.state_token = stateToken;
+    const response = await axios.patch(
+      `${HE_API_BASE}/v1/exchanges/${encodeURIComponent(exchangeId)}/approve`,
+      body,
+      { headers: this._headers(token), timeout: 20000 }
+    );
+    return response.data || { ok: true };
+  }
 }

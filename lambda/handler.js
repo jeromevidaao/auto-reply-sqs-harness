@@ -37,6 +37,8 @@ import {
 } from '../src/utils/reservationAccept.js';
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
 import { isHomeExchangePayload, handleHomeExchangeMessage } from '../src/useCases/homeExchange.js';
+import { expireHomeExchangeBlocks } from '../src/useCases/homeExchangeExpire.js';
+import { createDdbBlockStore } from '../src/useCases/homeExchangeBlocks.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 const sns = new SNSClient({ region: 'us-east-1' });
@@ -116,7 +118,22 @@ export const handler = async (event, context) => {
   if (event?.Records?.[0]?.body) {
     try { actPayload = JSON.parse(event.Records[0].body); } catch { /* ignore */ }
   }
-  const act = actPayload?.queryStringParameters?.act || event?.queryStringParameters?.act;
+  const act = actPayload?.queryStringParameters?.act || event?.queryStringParameters?.act || event?.act;
+
+  if (act === 'homeexchange_expire_blocks') {
+    console.log('[Handler] HomeExchange expire-unblock job');
+    const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
+    const expireResult = await expireHomeExchangeBlocks({
+      homeExchangeClient: new HomeExchangeClient(),
+      hospitableClient: new HospitableClient(),
+      blockStore: createDdbBlockStore(ddbClient),
+      notifyOwner: notifyOwnerAndroid,
+    });
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ success: true, requestId, expireResult }),
+    };
+  }
 
   if (act === 'new_reservation_home_exchange') {
     const sqs = new SQSClient({ region: 'us-east-1' });
@@ -139,7 +156,7 @@ export const handler = async (event, context) => {
   // Isolated HomeExchange guest-chat path. Must run before the Airbnb agent so
   // HE traffic cannot classify as NEW_RESERVATION_WELCOME / send via Hospitable.
   if (isHomeExchangePayload(event) || act === 'homeexchange_message') {
-    console.log('[Handler] HomeExchange use case — isolated path (first-message may send; follow-up is draft-only)');
+    console.log('[Handler] HomeExchange use case — isolated path (first-message may send; confirmation does not)');
     const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
     const hospitableClient = new HospitableClient();
     const homeExchangeClient = new HomeExchangeClient();
@@ -148,6 +165,8 @@ export const handler = async (event, context) => {
       hospitableClient,
       ddbClient,
       homeExchangeClient,
+      notifyOwner: notifyOwnerAndroid,
+      blockStore: createDdbBlockStore(ddbClient),
     });
     const duration = Date.now() - startTime;
     console.log('[Handler] HomeExchange result:', {

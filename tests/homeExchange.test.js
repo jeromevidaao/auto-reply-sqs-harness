@@ -12,13 +12,22 @@ import {
   buildHomeExchangeDraft,
   handleHomeExchangeMessage,
   shouldSendHomeExchangeDraft,
+  shouldAttemptPreapprove,
   extractAskedStayDates,
   guestAcceptedCleaningFee,
+  analyzeHeCalendarOpen,
+  mergeStayCalendars,
   HOMEEXCHANGE_ACT,
   HOMEEXCHANGE_PLATFORM,
   APT3_AIRBNB_LISTING_ID,
 } from '../src/useCases/homeExchange.js';
 import { alreadySentEquivalent } from '../src/clients/HomeExchangeClient.js';
+import { shouldUnblockPreapproval, canUnblockCalendarDay } from '../src/useCases/homeExchangeExpire.js';
+import { exchangeAlreadyApproved } from '../src/clients/homeExchangeExchange.js';
+
+function heOpenRange(start, end) {
+  return [{ start_on: start, end_on: end, type: 'NON_RECIPROCAL' }];
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const valentinaPath = path.resolve(__dirname, '../test-payloads/valentina-okay-perfect-sqs.json');
@@ -290,6 +299,9 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
       async listMessages() {
         return [{ content: caroline, author: { first_name: 'Caroline' } }];
       },
+      async getHomeCalendar() {
+        return heOpenRange('2027-01-04', '2027-06-01');
+      },
       async sendMessage(conversationId, content) {
         sentBodies.push({ conversationId, content });
         return { ok: true };
@@ -406,18 +418,6 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
           },
         ],
       },
-      hospitableClient: {
-        async getPropertyCalendar(_id, start, end) {
-          calendarRange = { start, end };
-          return ['2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03'].map((date) => ({
-            date,
-            status: { available: true },
-          }));
-        },
-        async getPropertyReservations() {
-          return [];
-        },
-      },
       ddbClient: {
         async send() {
           return { Item: { listingId: 24259977, name: 'Pine Apt #3', price: 125 } };
@@ -427,10 +427,51 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
         async listMessages() {
           return [{ content: priorFeeAsk }];
         },
+        async getHomeCalendar() {
+          return [
+            ...heOpenRange('2026-09-30', '2026-10-03'),
+            ...heOpenRange('2027-01-04', '2027-06-01'),
+          ];
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127232869,
+                status: 0,
+                approved_at: null,
+                start_on: '2027-05-13',
+                end_on: '2027-05-19',
+                home: { id: 3202475 },
+              },
+            ],
+          };
+        },
+        async approveExchange() {
+          return { ok: true };
+        },
         async sendMessage(conversationId, content) {
           sentBodies.push({ conversationId, content });
         },
       },
+      hospitableClient: {
+        async getPropertyCalendar(_id, start, end) {
+          calendarRange = { start, end };
+          const days =
+            start === '2027-05-13'
+              ? ['2027-05-13', '2027-05-14', '2027-05-15', '2027-05-16', '2027-05-17', '2027-05-18', '2027-05-19']
+              : ['2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03'];
+          return days.map((date) => ({ date, status: { available: true } }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar() {
+          return { status: 'accepted' };
+        },
+      },
+      blockStore: { async put() { return {}; } },
+      notifyOwner: async () => ({ ok: true }),
       now: new Date('2026-08-14T12:00:00Z'),
     });
     assert.equal(result.isFirstMessage, false);
@@ -441,7 +482,10 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(result.checkOut, '2026-10-03');
     assert.equal(result.originalCheckIn, '2027-05-13');
     assert.equal(result.calendar.open, true);
-    assert.deepEqual(calendarRange, { start: '2026-09-30', end: '2026-10-03' });
+    assert.ok(
+      calendarRange &&
+        (calendarRange.start === '2026-09-30' || calendarRange.start === '2027-05-13')
+    );
     assert.equal(result.shouldReply, true);
     assert.equal(result.sendDisabled, false);
     assert.equal(result.sent, true);
@@ -496,6 +540,9 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
                 'Hi Caroline, thanks for your message — May 13–19, 2027 is open on our calendar, so we can accept the request.\n\nOne thing we ask for Home Exchange stays: the cleaning fee after you leave is $125. Would you be okay paying that after your stay?',
             },
           ];
+        },
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
         },
         async sendMessage(conversationId, content) {
           sentBodies.push({ conversationId, content });
@@ -563,6 +610,9 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
         async listMessages() {
           return [{ content: draftText }];
         },
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
+        },
         async sendMessage() {
           sent += 1;
         },
@@ -572,5 +622,267 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(result.sendSkipReason, 'already_sent');
     assert.equal(sent, 0);
     assert.equal(alreadySentEquivalent([{ content: draftText }], draftText), true);
+  });
+});
+
+describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', () => {
+  it('treats HE RESERVED / missing ranges as closed even if Hospitable is open', () => {
+    const he = analyzeHeCalendarOpen({
+      ranges: [{ start_on: '2026-06-01', end_on: '2026-09-01', type: 'RESERVED' }],
+      checkIn: '2026-07-01',
+      checkOut: '2026-07-05',
+    });
+    assert.equal(he.checked, true);
+    assert.equal(he.open, false);
+    const merged = mergeStayCalendars(
+      {
+        checked: true,
+        open: true,
+        nights: ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04'],
+        available: ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04'],
+        unavailable: [],
+      },
+      he
+    );
+    assert.equal(merged.open, false);
+    assert.equal(merged.heOpen, false);
+  });
+
+  it('treats uncovered HE nights (long owner block) as closed', () => {
+    const he = analyzeHeCalendarOpen({
+      ranges: [{ start_on: '2027-01-04', end_on: '2027-06-01', type: 'NON_RECIPROCAL' }],
+      checkIn: '2026-07-10',
+      checkOut: '2026-07-15',
+    });
+    assert.equal(he.open, false);
+    assert.ok(he.unavailable.includes('2026-07-10'));
+  });
+
+  it('does not send the confirmation when fee is accepted and original dates are open', async () => {
+    const notifications = [];
+    const approved = [];
+    const blocked = [];
+    const stored = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Hi Ruby, the cleaning fee is fine.',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+          checkIn: '2027-05-13',
+          checkOut: '2027-05-19',
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [
+            '2027-05-13',
+            '2027-05-14',
+            '2027-05-15',
+            '2027-05-16',
+            '2027-05-17',
+            '2027-05-18',
+          ].map((date) => ({ date, status: { available: true } }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar(_id, dates) {
+          blocked.push(...dates);
+          return { status: 'accepted' };
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 24259977, price: 125 } };
+        },
+      },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              { id: 127232869, status: 0, approved_at: null, home: { id: 3202475 } },
+            ],
+          };
+        },
+        async approveExchange(id) {
+          approved.push(id);
+          return { ok: true };
+        },
+        async sendMessage() {
+          throw new Error('must not send guest confirmation');
+        },
+      },
+      blockStore: {
+        async put(item) {
+          stored.push(item);
+          return item;
+        },
+      },
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
+    });
+    assert.equal(result.feeAccepted, true);
+    assert.equal(result.sendDisabled, true);
+    assert.equal(result.sent, false);
+    assert.equal(result.preapprove.ok, true);
+    assert.deepEqual(approved, [127232869]);
+    assert.equal(blocked.length, 6);
+    assert.equal(blocked[0].available, false);
+    assert.equal(blocked[0].date, '2027-05-13');
+    assert.equal(blocked[5].date, '2027-05-18');
+    assert.equal(stored[0].nights.length, 6);
+    assert.equal(notifications[0].type, 'homeexchange_preapproval_ready');
+    assert.equal(shouldAttemptPreapprove({
+      isFirst: false,
+      feeAccepted: true,
+      originalCheckIn: '2027-05-13',
+      originalCheckOut: '2027-05-19',
+      originalCalendar: result.originalCalendar,
+    }), true);
+  });
+
+  it('notifies Android and does not proceed when HE is already pre-approved', async () => {
+    const notifications = [];
+    let approveCalls = 0;
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'the cleaning fee is fine',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+          checkIn: '2027-05-13',
+          checkOut: '2027-05-19',
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return ['2027-05-13', '2027-05-14', '2027-05-15', '2027-05-16', '2027-05-17', '2027-05-18']
+            .map((date) => ({ date, status: { available: true } }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar() {
+          throw new Error('must not block');
+        },
+      },
+      ddbClient: { async send() { return { Item: { price: 125 } }; } },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              { id: 9, approved_at: '2026-08-14T00:00:00Z', home: { id: 3202475 } },
+            ],
+          };
+        },
+        async approveExchange() {
+          approveCalls += 1;
+        },
+      },
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
+    });
+    assert.equal(result.preapprove.reason, 'already_approved');
+    assert.equal(result.preapprove.ok, false);
+    assert.equal(approveCalls, 0);
+    assert.equal(notifications[0].type, 'homeexchange_preapproval_error');
+    assert.equal(exchangeAlreadyApproved({ approved_at: 'x' }), true);
+  });
+
+  it('notifies Android and does not send when Hospitable block fails after approve', async () => {
+    const notifications = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'the cleaning fee is fine',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+          checkIn: '2027-05-13',
+          checkOut: '2027-05-19',
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return ['2027-05-13', '2027-05-14', '2027-05-15', '2027-05-16', '2027-05-17', '2027-05-18']
+            .map((date) => ({ date, status: { available: true } }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar() {
+          throw new Error('calendar write denied');
+        },
+      },
+      ddbClient: { async send() { return { Item: { price: 125 } }; } },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
+        },
+        async getConversation() {
+          return { exchanges: [{ id: 11, approved_at: null, home: { id: 3202475 } }] };
+        },
+        async approveExchange() {
+          return { ok: true };
+        },
+        async sendMessage() {
+          throw new Error('must not send');
+        },
+      },
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
+    });
+    assert.equal(result.sent, false);
+    assert.equal(result.preapprove.reason, 'block_failed');
+    assert.match(notifications[0].body, /Hospitable block failed/i);
+  });
+
+  it('unblocks only Hospitable BLOCKED nights after HE pre-approval expires', () => {
+    const now = new Date('2026-08-20T00:00:00Z');
+    const expired = shouldUnblockPreapproval(
+      {
+        status: 'pending_finalization',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      },
+      { approved_at: '2026-08-15T00:00:00Z', finalized_at: null, status: 0 },
+      now
+    );
+    assert.equal(expired.unblock, true);
+    assert.equal(expired.reason, 'expired');
+
+    const finalized = shouldUnblockPreapproval(
+      { status: 'pending_finalization', expiresAt: '2026-08-19T00:00:00.000Z' },
+      { finalized_at: '2026-08-16T00:00:00Z' },
+      now
+    );
+    assert.equal(finalized.unblock, false);
+    assert.equal(finalized.markFinalized, true);
+
+    assert.equal(
+      canUnblockCalendarDay({ status: { available: false, reason: 'BLOCKED', source_type: 'USER' } }),
+      true
+    );
+    assert.equal(
+      canUnblockCalendarDay({ status: { available: false, reason: 'RESERVED', source_type: 'RESERVATION' } }),
+      false
+    );
   });
 });

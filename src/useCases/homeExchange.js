@@ -15,12 +15,26 @@
  *   1) Parse asked dates from the guest text (year = next future occurrence).
  *   2) Confirm Hospitable calendar + accepted reservations for those nights.
  *   3) Draft: acknowledge fee if they agreed + say whether the new dates are open.
- *   4) Send via the HomeExchange API (never Hospitable) when the calendar
- *      was checked and a client is provided. Generic follow-ups still no-op.
+ *   4) Extra-date replies may still send. The confirmation ("welcome to book")
+ *      is NOT sent yet — pre-approve + Hospitable block + Android notify instead.
+ *
+ * Confirmation (fee accepted + original exchange dates open on Hospitable AND
+ * the HomeExchange home calendar — summer/owner long-blocks count as closed):
+ *   1) PATCH HE /v1/exchanges/{id}/approve
+ *   2) PUT Hospitable calendar available:false for [checkIn, checkOut)
+ *   3) Persist the block for the 4-day expire-unblock job
+ *   4) Android notify. Do not send the guest confirmation message.
+ *   Errors (already approved, Hospitable PUT fail): notify Android, do not proceed.
  */
 
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
 import { alreadySentEquivalent } from '../clients/HomeExchangeClient.js';
+import {
+  pickExchangeFromConversation,
+  exchangeAlreadyApproved,
+} from '../clients/homeExchangeExchange.js';
+import { buildBlockRecord, createDdbBlockStore } from './homeExchangeBlocks.js';
+import { notifyHePreapproval } from './homeExchangeNotify.js';
 
 export const HOMEEXCHANGE_PLATFORM = 'homeexchange';
 export const HOMEEXCHANGE_ACT = 'homeexchange_message';
@@ -365,6 +379,97 @@ function reservationOccupiesNight(reservation, night) {
   return ci <= night && night < co;
 }
 
+const HE_CALENDAR_OPEN_TYPES = new Set([
+  'NON_RECIPROCAL',
+  'RECIPROCAL',
+  'AVAILABLE',
+  'OPEN',
+]);
+const HE_CALENDAR_CLOSED_TYPES = new Set([
+  'RESERVED',
+  'UNAVAILABLE',
+  'BLOCKED',
+  'CLOSED',
+]);
+
+export function heRangeCoversNight(range, night) {
+  const start = dateOnly(range?.start_on || range?.startOn || range?.start);
+  const end = dateOnly(range?.end_on || range?.endOn || range?.end);
+  if (!start || !end || !night) return false;
+  return start <= night && night < end;
+}
+
+export function heRangeIsOpen(range) {
+  const t = String(range?.type || '').toUpperCase();
+  if (HE_CALENDAR_CLOSED_TYPES.has(t)) return false;
+  if (HE_CALENDAR_OPEN_TYPES.has(t)) return true;
+  return false;
+}
+
+export function heNightOpen(ranges, night) {
+  const covering = (ranges || []).filter((r) => heRangeCoversNight(r, night));
+  if (!covering.length) return false;
+  if (covering.some((r) => !heRangeIsOpen(r))) return false;
+  return covering.some((r) => heRangeIsOpen(r));
+}
+
+/**
+ * HE home calendar: listed NON_RECIPROCAL/RECIPROCAL ranges are open;
+ * RESERVED or any night not listed (owner long-block / summer close) is closed.
+ */
+export function analyzeHeCalendarOpen({ ranges = [], checkIn, checkOut } = {}) {
+  const nights = stayNights(checkIn, checkOut);
+  if (!nights.length) {
+    return {
+      checked: false,
+      open: false,
+      nights,
+      available: [],
+      unavailable: nights,
+      reason: 'missing_dates',
+    };
+  }
+  const fetched = Array.isArray(ranges);
+  if (!fetched) {
+    return {
+      checked: false,
+      open: false,
+      nights,
+      available: [],
+      unavailable: nights,
+      reason: 'he_calendar_not_fetched',
+    };
+  }
+  const available = [];
+  const unavailable = [];
+  for (const night of nights) {
+    if (heNightOpen(ranges, night)) available.push(night);
+    else unavailable.push(night);
+  }
+  return {
+    checked: true,
+    open: unavailable.length === 0,
+    nights,
+    available,
+    unavailable,
+    reason: unavailable.length === 0 ? 'he_calendar_open' : 'he_calendar_not_open',
+  };
+}
+
+export function mergeStayCalendars(hospitable, heCalendar) {
+  const hosp = hospitable || { checked: false, open: false };
+  const he = heCalendar || { checked: false, open: false };
+  const bothChecked = !!(hosp.checked && he.checked);
+  return {
+    ...hosp,
+    heChecked: !!he.checked,
+    heOpen: !!he.open,
+    heUnavailable: he.unavailable || [],
+    checked: bothChecked,
+    open: bothChecked && !!hosp.open && !!he.open,
+  };
+}
+
 export function analyzeCalendarOpen({ calendarDays = [], reservations = [], checkIn, checkOut } = {}) {
   const nights = stayNights(checkIn, checkOut);
   if (!nights.length) {
@@ -610,13 +715,75 @@ export function buildHomeExchangeDraft({
   };
 }
 
+const HE_DRAFT_NO_SEND = new Set([
+  'calendar_not_checked',
+  'homeexchange_followup_calendar_not_checked',
+  // Confirmation path: pre-approve + block + Android notify. Guest message later.
+  'homeexchange_followup_fee_accepted',
+  'homeexchange_preapproved',
+  'homeexchange_preapprove_already_approved',
+  'homeexchange_preapprove_block_failed',
+  'homeexchange_preapprove_approve_failed',
+]);
+
 export function shouldSendHomeExchangeDraft(draft, _isFirst) {
   if (!draft?.shouldReply) return false;
   if (!draft?.proposedResponse || draft.proposedResponse === 'none') return false;
-  // Incomplete calendar check: keep as draft only.
-  if (draft.reason === 'calendar_not_checked') return false;
-  if (draft.reason === 'homeexchange_followup_calendar_not_checked') return false;
+  if (HE_DRAFT_NO_SEND.has(draft.reason)) return false;
   return true;
+}
+
+export function shouldAttemptPreapprove({ isFirst, feeAccepted, originalCheckIn, originalCheckOut, originalCalendar } = {}) {
+  if (isFirst) return false;
+  if (!feeAccepted) return false;
+  if (!originalCheckIn || !originalCheckOut) return false;
+  return !!(originalCalendar?.checked && originalCalendar?.open);
+}
+
+async function loadHospitableWindow(hospitableClient, propertyId, checkIn, checkOut) {
+  let calendarDays = [];
+  let reservations = [];
+  let calendarError = null;
+  let reservationsError = null;
+  if (!hospitableClient || !checkIn || !checkOut) {
+    return { calendarDays, reservations, calendarError, reservationsError };
+  }
+  try {
+    if (typeof hospitableClient.getPropertyCalendar === 'function') {
+      calendarDays = await hospitableClient.getPropertyCalendar(propertyId, checkIn, checkOut);
+    }
+  } catch (err) {
+    calendarError = err?.message || String(err);
+  }
+  try {
+    const resStart = addDaysYmd(checkIn, -14);
+    const resEnd = addDaysYmd(checkOut, 14);
+    if (typeof hospitableClient.getPropertyReservations === 'function') {
+      reservations = await hospitableClient.getPropertyReservations(propertyId, resStart, resEnd);
+    } else if (typeof hospitableClient.getReservations === 'function') {
+      reservations = await hospitableClient.getReservations({
+        properties: propertyId,
+        start_date: resStart,
+        end_date: resEnd,
+        per_page: 100,
+      });
+    }
+  } catch (err) {
+    reservationsError = err?.message || String(err);
+  }
+  return { calendarDays, reservations, calendarError, reservationsError };
+}
+
+async function loadHeCalendar(homeExchangeClient, homeId) {
+  if (!homeExchangeClient || typeof homeExchangeClient.getHomeCalendar !== 'function' || !homeId) {
+    return { ranges: null, error: null, fetched: false };
+  }
+  try {
+    const ranges = await homeExchangeClient.getHomeCalendar(homeId);
+    return { ranges: Array.isArray(ranges) ? ranges : [], error: null, fetched: true };
+  } catch (err) {
+    return { ranges: null, error: err?.message || String(err), fetched: false };
+  }
 }
 
 export async function handleHomeExchangeMessage({
@@ -624,6 +791,8 @@ export async function handleHomeExchangeMessage({
   hospitableClient = null,
   ddbClient = null,
   homeExchangeClient = null,
+  notifyOwner = null,
+  blockStore = null,
   now = new Date(),
 } = {}) {
   const extracted = extractHomeExchangeMessage(event);
@@ -639,45 +808,66 @@ export async function handleHomeExchangeMessage({
   const propertyId = context.listingId || APT3_HOSPITABLE_PROPERTY_ID;
   const airbnbListingId = context.airbnbListingId || APT3_AIRBNB_LISTING_ID;
   const guestName = context.guestName || context.sender?.first_name || null;
+  const homeId =
+    context.listing?.platform_id ||
+    context.homeId ||
+    HE_HOME_ID;
 
-  let calendarDays = [];
-  let reservations = [];
-  let calendarError = null;
-  let reservationsError = null;
+  const shouldCheckCalendar = !!(
+    checkIn &&
+    checkOut &&
+    hospitableClient &&
+    (isFirst || askedDates || feeAccepted)
+  );
+  const hospitableWindow = shouldCheckCalendar
+    ? await loadHospitableWindow(hospitableClient, propertyId, checkIn, checkOut)
+    : { calendarDays: [], reservations: [], calendarError: null, reservationsError: null };
 
-  const shouldCheckCalendar = !!(checkIn && checkOut && hospitableClient && (isFirst || askedDates));
-  if (shouldCheckCalendar) {
-    try {
-      if (typeof hospitableClient.getPropertyCalendar === 'function') {
-        calendarDays = await hospitableClient.getPropertyCalendar(propertyId, checkIn, checkOut);
-      }
-    } catch (err) {
-      calendarError = err?.message || String(err);
-    }
-    try {
-      const resStart = addDaysYmd(checkIn, -14);
-      const resEnd = addDaysYmd(checkOut, 14);
-      if (typeof hospitableClient.getPropertyReservations === 'function') {
-        reservations = await hospitableClient.getPropertyReservations(propertyId, resStart, resEnd);
-      } else if (typeof hospitableClient.getReservations === 'function') {
-        reservations = await hospitableClient.getReservations({
-          properties: propertyId,
-          start_date: resStart,
-          end_date: resEnd,
-          per_page: 100,
-        });
-      }
-    } catch (err) {
-      reservationsError = err?.message || String(err);
-    }
-  }
+  const heCalRaw = (isFirst || askedDates || feeAccepted)
+    ? await loadHeCalendar(homeExchangeClient, homeId)
+    : { ranges: null, error: null, fetched: false };
 
-  const calendar = analyzeCalendarOpen({
-    calendarDays,
-    reservations,
+  const hospitable = analyzeCalendarOpen({
+    calendarDays: hospitableWindow.calendarDays,
+    reservations: hospitableWindow.reservations,
     checkIn,
     checkOut,
   });
+  const heForDraft = heCalRaw.fetched
+    ? analyzeHeCalendarOpen({ ranges: heCalRaw.ranges, checkIn, checkOut })
+    : { checked: false, open: false, unavailable: [], reason: 'he_calendar_not_fetched' };
+  const calendar = shouldCheckCalendar
+    ? mergeStayCalendars(hospitable, heForDraft)
+    : hospitable;
+
+  let originalHospitable = hospitable;
+  let originalHe = heForDraft;
+  let originalCalendar = calendar;
+  const originalDiffers =
+    !!(originalCheckIn && originalCheckOut) &&
+    (originalCheckIn !== checkIn || originalCheckOut !== checkOut);
+  if (feeAccepted && originalDiffers && hospitableClient) {
+    const origWin = await loadHospitableWindow(
+      hospitableClient,
+      propertyId,
+      originalCheckIn,
+      originalCheckOut
+    );
+    originalHospitable = analyzeCalendarOpen({
+      calendarDays: origWin.calendarDays,
+      reservations: origWin.reservations,
+      checkIn: originalCheckIn,
+      checkOut: originalCheckOut,
+    });
+    originalHe = heCalRaw.fetched
+      ? analyzeHeCalendarOpen({
+          ranges: heCalRaw.ranges,
+          checkIn: originalCheckIn,
+          checkOut: originalCheckOut,
+        })
+      : { checked: false, open: false, unavailable: [], reason: 'he_calendar_not_fetched' };
+    originalCalendar = mergeStayCalendars(originalHospitable, originalHe);
+  }
 
   let cleaningFee = {
     amount: DEFAULT_CLEANING_FEES[airbnbListingId] ?? 125,
@@ -702,6 +892,39 @@ export async function handleHomeExchangeMessage({
   });
 
   const conversationId = context.conversation_id || context.conversationId || null;
+  const store = blockStore || createDdbBlockStore(ddbClient);
+  let preapprove = {
+    attempted: false,
+    ok: false,
+    reason: null,
+    exchangeId: null,
+    nights: stayNights(originalCheckIn, originalCheckOut),
+  };
+
+  if (
+    shouldAttemptPreapprove({
+      isFirst,
+      feeAccepted,
+      originalCheckIn,
+      originalCheckOut,
+      originalCalendar,
+    })
+  ) {
+    preapprove = await runHomeExchangePreapprove({
+      homeExchangeClient,
+      hospitableClient,
+      store,
+      notifyOwner,
+      conversationId,
+      homeId,
+      propertyId,
+      guestName,
+      checkIn: originalCheckIn,
+      checkOut: originalCheckOut,
+      now,
+    });
+  }
+
   const sendEnabled = shouldSendHomeExchangeDraft(draft, isFirst);
   let sent = false;
   let sendError = null;
@@ -750,14 +973,180 @@ export async function handleHomeExchangeMessage({
     feeAccepted,
     propertyId,
     airbnbListingId,
+    homeId,
     calendar,
+    originalCalendar,
+    heCalendarError: heCalRaw.error,
     cleaningFee,
-    calendarError,
-    reservationsError,
+    calendarError: hospitableWindow.calendarError,
+    reservationsError: hospitableWindow.reservationsError,
+    preapprove,
     typeOfMessageReceived: draft.typeOfMessageReceived,
     shouldReply: draft.shouldReply,
     proposedResponse: draft.proposedResponse,
     reason: draft.reason,
     escalated: false,
   };
+}
+
+export async function runHomeExchangePreapprove({
+  homeExchangeClient,
+  hospitableClient,
+  store,
+  notifyOwner,
+  conversationId,
+  homeId,
+  propertyId,
+  guestName,
+  checkIn,
+  checkOut,
+  now = new Date(),
+} = {}) {
+  const nights = stayNights(checkIn, checkOut);
+  const base = {
+    attempted: true,
+    ok: false,
+    reason: null,
+    exchangeId: null,
+    nights,
+  };
+
+  if (!conversationId || !homeExchangeClient?.getConversation || !homeExchangeClient?.approveExchange) {
+    base.reason = 'missing_he_client_or_conversation';
+    await notifyHePreapproval(notifyOwner, {
+      kind: 'error',
+      guestName,
+      checkIn,
+      checkOut,
+      conversationId,
+      error: 'Missing HomeExchange client or conversation id — did not pre-approve.',
+    });
+    return base;
+  }
+
+  let exchange;
+  try {
+    const conv = await homeExchangeClient.getConversation(conversationId);
+    exchange = pickExchangeFromConversation(conv, homeId);
+  } catch (err) {
+    base.reason = 'he_conversation_failed';
+    await notifyHePreapproval(notifyOwner, {
+      kind: 'error',
+      guestName,
+      checkIn,
+      checkOut,
+      conversationId,
+      error: `Could not load HE conversation: ${err?.message || err}`,
+    });
+    return base;
+  }
+
+  if (!exchange?.id) {
+    base.reason = 'missing_exchange';
+    await notifyHePreapproval(notifyOwner, {
+      kind: 'error',
+      guestName,
+      checkIn,
+      checkOut,
+      conversationId,
+      error: 'No HE exchange on the conversation — did not pre-approve.',
+    });
+    return base;
+  }
+  base.exchangeId = exchange.id;
+
+  if (exchangeAlreadyApproved(exchange)) {
+    base.reason = 'already_approved';
+    await notifyHePreapproval(notifyOwner, {
+      kind: 'error',
+      guestName,
+      checkIn,
+      checkOut,
+      conversationId,
+      exchangeId: exchange.id,
+      error: 'HE exchange already pre-approved or finalized — did not proceed.',
+    });
+    return base;
+  }
+
+  try {
+    await homeExchangeClient.approveExchange(exchange.id, {
+      stateToken: exchange.state_token || null,
+    });
+  } catch (err) {
+    base.reason = 'approve_failed';
+    await notifyHePreapproval(notifyOwner, {
+      kind: 'error',
+      guestName,
+      checkIn,
+      checkOut,
+      conversationId,
+      exchangeId: exchange.id,
+      error: `HE pre-approve failed: ${err?.message || err}`,
+    });
+    return base;
+  }
+
+  try {
+    if (!hospitableClient?.updatePropertyCalendar) {
+      throw new Error('Hospitable calendar write client missing');
+    }
+    await hospitableClient.updatePropertyCalendar(
+      propertyId,
+      nights.map((date) => ({ date, available: false }))
+    );
+  } catch (err) {
+    base.reason = 'block_failed';
+    await notifyHePreapproval(notifyOwner, {
+      kind: 'error',
+      guestName,
+      checkIn,
+      checkOut,
+      conversationId,
+      exchangeId: exchange.id,
+      error: `Hospitable block failed after HE pre-approve: ${err?.message || err}`,
+    });
+    return base;
+  }
+
+  if (store?.put) {
+    try {
+      await store.put(
+        buildBlockRecord({
+          exchangeId: exchange.id,
+          conversationId,
+          propertyId,
+          homeId,
+          guestName,
+          checkIn,
+          checkOut,
+          nights,
+          now,
+        })
+      );
+    } catch (err) {
+      base.reason = 'block_record_failed';
+      await notifyHePreapproval(notifyOwner, {
+        kind: 'error',
+        guestName,
+        checkIn,
+        checkOut,
+        conversationId,
+        exchangeId: exchange.id,
+        error: `Blocked nights but failed to persist expire record: ${err?.message || err}`,
+      });
+      return { ...base, ok: true };
+    }
+  }
+
+  await notifyHePreapproval(notifyOwner, {
+    kind: 'ready',
+    guestName,
+    checkIn,
+    checkOut,
+    conversationId,
+    exchangeId: exchange.id,
+    nights,
+  });
+  return { ...base, ok: true, reason: 'preapproved' };
 }

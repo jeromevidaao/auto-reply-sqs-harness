@@ -578,4 +578,36 @@ export class HospitableClient {
       return [];
     });
   }
+
+  /**
+   * PUT /properties/{uuid}/calendar — up to 60 date objects per call.
+   * available:false blocks the night (check-in day occupied; checkout day stays free).
+   */
+  async updatePropertyCalendar(propertyId, dates) {
+    if (!propertyId) throw new Error('propertyId is required for updatePropertyCalendar');
+    const list = Array.isArray(dates) ? dates.filter((d) => d && d.date) : [];
+    if (!list.length) return { status: 'noop' };
+
+    return this._withRetry('updatePropertyCalendar', async () => {
+      const token = await this.getToken();
+      let last = { status: 'accepted' };
+      for (let i = 0; i < list.length; i += 60) {
+        const chunk = list.slice(i, i + 60);
+        const response = await axios.put(
+          `${this.baseUrl}/properties/${propertyId}/calendar`,
+          { dates: chunk },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            timeout: HOSPITABLE_SEND_TIMEOUT_MS,
+          }
+        );
+        last = response.data || last;
+      }
+      return last;
+    });
+  }
 }
