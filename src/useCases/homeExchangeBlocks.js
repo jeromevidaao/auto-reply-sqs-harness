@@ -3,6 +3,7 @@
  * so a scheduled job can free them if the guest never finalizes (~4 days).
  */
 import { ScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { WRITE_MAX_ATTEMPTS, withExponentialBackoff } from '../utils/httpRetry.js';
 
 export const HE_PREAPPROVAL_BLOCKS_TABLE =
   process.env.HE_PREAPPROVAL_BLOCKS_TABLE || 'homeexchangePreapprovalBlocks';
@@ -16,15 +17,24 @@ export function preapprovalExpiresAt(approvedAt = new Date(), ttlMs = HE_PREAPPR
   return new Date(new Date(approvedAt).getTime() + ttlMs).toISOString();
 }
 
+async function sendDdb(ddbClient, command, operation) {
+  return withExponentialBackoff(
+    () => ddbClient.send(command),
+    { operation, kind: 'write', maxAttempts: WRITE_MAX_ATTEMPTS }
+  );
+}
+
 export function createDdbBlockStore(ddbClient, tableName = HE_PREAPPROVAL_BLOCKS_TABLE) {
   if (!ddbClient || typeof ddbClient.send !== 'function') return null;
   return {
     async put(item) {
-      await ddbClient.send(
+      await sendDdb(
+        ddbClient,
         new PutCommand({
           TableName: tableName,
           Item: item,
-        })
+        }),
+        'heBlocksPut'
       );
       return item;
     },
@@ -32,14 +42,16 @@ export function createDdbBlockStore(ddbClient, tableName = HE_PREAPPROVAL_BLOCKS
       const out = [];
       let ExclusiveStartKey;
       do {
-        const page = await ddbClient.send(
+        const page = await sendDdb(
+          ddbClient,
           new ScanCommand({
             TableName: tableName,
             ExclusiveStartKey,
             FilterExpression: '#s = :pending',
             ExpressionAttributeNames: { '#s': 'status' },
             ExpressionAttributeValues: { ':pending': STATUS_PENDING },
-          })
+          }),
+          'heBlocksScanPending'
         );
         out.push(...(page.Items || []));
         ExclusiveStartKey = page.LastEvaluatedKey;
@@ -55,14 +67,16 @@ export function createDdbBlockStore(ddbClient, tableName = HE_PREAPPROVAL_BLOCKS
         values[`:${k}`] = v;
         sets.push(`#${k} = :${k}`);
       }
-      await ddbClient.send(
+      await sendDdb(
+        ddbClient,
         new UpdateCommand({
           TableName: tableName,
           Key: { exchangeId: String(exchangeId) },
           UpdateExpression: `SET ${sets.join(', ')}`,
           ExpressionAttributeNames: names,
           ExpressionAttributeValues: values,
-        })
+        }),
+        'heBlocksUpdateStatus'
       );
     },
   };

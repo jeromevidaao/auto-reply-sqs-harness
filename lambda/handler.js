@@ -123,16 +123,21 @@ export const handler = async (event, context) => {
   if (act === 'homeexchange_expire_blocks') {
     console.log('[Handler] HomeExchange expire-unblock job');
     const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
-    const expireResult = await expireHomeExchangeBlocks({
-      homeExchangeClient: new HomeExchangeClient(),
-      hospitableClient: new HospitableClient(),
-      blockStore: createDdbBlockStore(ddbClient),
-      notifyOwner: notifyOwnerAndroid,
-    });
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ success: true, requestId, expireResult }),
-    };
+    try {
+      const expireResult = await expireHomeExchangeBlocks({
+        homeExchangeClient: new HomeExchangeClient(),
+        hospitableClient: new HospitableClient(),
+        blockStore: createDdbBlockStore(ddbClient),
+        notifyOwner: notifyOwnerAndroid,
+      });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ success: true, requestId, expireResult }),
+      };
+    } catch (err) {
+      console.error('HE_EXPIRE_HARD_FAIL', err?.message || err, err?.failures || []);
+      throw err;
+    }
   }
 
   if (act === 'new_reservation_home_exchange') {

@@ -183,6 +183,14 @@ HomeExchange pre-approve / Hospitable-block: guest gets “I just sent you a pre
 
 EventBridge rule `he-preapproval-expire` (`rate(12 hours)`) invokes this Lambda with `act=homeexchange_expire_blocks`. Table: `homeexchangePreapprovalBlocks` (IAM `HomeExchangePreapprovalBlocks` on the same role).
 
+Expire-unblock failures after in-Lambda retries **fail the Lambda** (`HE_EXPIRE_HARD_FAIL`). Alarms (email `jerome.ans@gmail.com` + Android FCM via `guest-messaging-agent-harness-alerts`):
+
+- `he-preapproval-expire-unblock-failed` — log metric filter on `HE_EXPIRE_HARD_FAIL`
+- `guest-messaging-agent-harness-errors` — any Lambda error
+- `he-preapproval-expire-dlq-has-messages` — EventBridge DLQ `he-preapproval-expire-dl` after 4 retries / 1h
+
+Re-apply out of band (deploy OIDC cannot create alarms): `python3 scripts/ensure-he-expire-monitoring.py`.
+
 ## Host contacts (SSM only)
 
 Personal phone numbers, owner email, WiFi password, backup door code, and lockbox codes are **not** in this repository.

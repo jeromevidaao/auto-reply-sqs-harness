@@ -63,10 +63,18 @@ const TRANSIENT_CODES = new Set([
 export function isTransientHttpError(err) {
   if (!err || typeof err !== 'object') return false;
   if (err.permanent === true || err.noRetry === true) return false;
-  const status = err.response?.status ?? err.status;
+  const status = err.response?.status ?? err.status ?? err.$metadata?.httpStatusCode;
   if (status === 429 || status === 408) return true;
   if (typeof status === 'number' && status >= 500) return true;
   if (status && status < 500) return false;
+
+  const awsName = String(err.name || '');
+  if (/Throttling|ProvisionedThroughputExceeded|TimeoutError|RequestTimeout|ServiceUnavailable|InternalServerError/i.test(awsName)) {
+    return true;
+  }
+  if (/ResourceNotFound|AccessDenied|ValidationException|ConditionalCheckFailed|UnrecognizedClient/i.test(awsName)) {
+    return false;
+  }
 
   const code = err.code || err.cause?.code;
   if (code && TRANSIENT_CODES.has(String(code))) return true;

@@ -75,6 +75,8 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 
 **Resilience:** every HE HTTP call (conversation, calendar, get-exchanges, approve, send) and Hospitable calendar PUT retries **4 times** with exp backoff **5s / 15s / 30s** (~1 min in-Lambda). Approve/send GET-confirm after timeout so a landed call is not repeated. Permanent 4xx (except 408/429) do not retry. FCM owner notify uses the same write retry. Airbnb Hospitable **message POST** stays on the 2/min-aware 4×/~3 min path. Then SQS `grok_message` 4 receives / 12 min visibility.
 
+**Expire unblock (hard fail):** after those same retries, a failed Hospitable free / HE fetch / empty calendar / missing store **throws**. Lambda errors. CloudWatch alarm `he-preapproval-expire-unblock-failed` (metric filter `HE_EXPIRE_HARD_FAIL`) + existing `guest-messaging-agent-harness-errors` email **jerome.ans@gmail.com** and FCM. EventBridge retries 4× / 1h then SQS `he-preapproval-expire-dl`. Successful records are marked `expired_unblocked` so retries only retry still-pending ones. Re-apply: `scripts/ensure-he-expire-monitoring.py`.
+
 Follow-up extra-date questions (Caroline Sep 30–Oct 3) still draft/send a date-check reply. Generic follow-ups with no fee/date ask still produce no draft. Implementation: `src/useCases/homeExchange.js` + `homeExchangeExpire.js`. Tests: `tests/homeExchange.test.js`.
 
 ## Recent Key Behaviors (as of June 2026)
