@@ -135,19 +135,23 @@ export class HomeExchangeClient {
   }
 
   /**
-   * Host pre-approve. Live route: PATCH /v1/exchanges/{id}/approve
-   * Sets approved_at; guest then has ~4 days to finalize.
+   * Host pre-approve. Live route: PATCH /v1/conversations/{id} { accepted: true }
+   * (PATCH /v1/exchanges/{id}/approve is a 400 PHP offset error.)
+   * Guest then has ~4 days to finalize.
    */
-  async approveExchange(exchangeId, { stateToken } = {}) {
-    if (!exchangeId) throw new Error('exchangeId is required');
+  async approveConversation(conversationId) {
+    if (!conversationId) throw new Error('conversationId is required');
     const token = await this.getToken();
-    const body = {};
-    if (stateToken) body.state_token = stateToken;
     const response = await axios.patch(
-      `${HE_API_BASE}/v1/exchanges/${encodeURIComponent(exchangeId)}/approve`,
-      body,
+      `${HE_API_BASE}/v1/conversations/${encodeURIComponent(conversationId)}`,
+      { accepted: true },
       { headers: this._headers(token), timeout: 20000 }
     );
     return response.data || { ok: true };
+  }
+
+  /** @deprecated use approveConversation */
+  async approveExchange(_exchangeId, { conversationId } = {}) {
+    return this.approveConversation(conversationId);
   }
 }

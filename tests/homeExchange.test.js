@@ -863,8 +863,9 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
         },
         async getConversation() {
           return {
+            accepted: 1,
             exchanges: [
-              { id: 9, approved_at: '2026-08-14T00:00:00Z', home: { id: 3202475 } },
+              { id: 9, finalized_at: '2026-08-14T00:00:00Z', home: { id: 3202475 } },
             ],
           };
         },

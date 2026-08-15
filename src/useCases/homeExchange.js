@@ -1095,8 +1095,10 @@ export async function runHomeExchangePreapprove({
     nights,
   };
 
-  if (!conversationId || !homeExchangeClient?.getConversation || !homeExchangeClient?.approveExchange) {
-    base.reason = 'missing_he_client_or_conversation';
+  const canApprove =
+    typeof homeExchangeClient?.approveConversation === 'function' ||
+    typeof homeExchangeClient?.approveExchange === 'function';
+  if (!conversationId || !homeExchangeClient?.getConversation || !canApprove) {
     await notifyHePreapproval(notifyOwner, {
       kind: 'error',
       guestName,
@@ -1109,8 +1111,9 @@ export async function runHomeExchangePreapprove({
   }
 
   let exchange;
+  let conv = null;
   try {
-    const conv = await homeExchangeClient.getConversation(conversationId);
+    conv = await homeExchangeClient.getConversation(conversationId);
     exchange = pickExchangeFromConversation(conv, homeId);
   } catch (err) {
     base.reason = 'he_conversation_failed';
@@ -1139,7 +1142,7 @@ export async function runHomeExchangePreapprove({
   }
   base.exchangeId = exchange.id;
 
-  if (exchangeAlreadyApproved(exchange)) {
+  if (exchange.finalized_at) {
     base.reason = 'already_approved';
     await notifyHePreapproval(notifyOwner, {
       kind: 'error',
@@ -1148,27 +1151,32 @@ export async function runHomeExchangePreapprove({
       checkOut,
       conversationId,
       exchangeId: exchange.id,
-      error: 'HE exchange already pre-approved or finalized — did not proceed.',
+      error: 'HE exchange already finalized — did not proceed.',
     });
     return base;
   }
 
-  try {
-    await homeExchangeClient.approveExchange(exchange.id, {
-      stateToken: exchange.state_token || null,
-    });
-  } catch (err) {
-    base.reason = 'approve_failed';
-    await notifyHePreapproval(notifyOwner, {
-      kind: 'error',
-      guestName,
-      checkIn,
-      checkOut,
-      conversationId,
-      exchangeId: exchange.id,
-      error: `HE pre-approve failed: ${err?.message || err}`,
-    });
-    return base;
+  if (!exchangeAlreadyApproved(exchange, conv)) {
+    try {
+      if (typeof homeExchangeClient.approveConversation === 'function') {
+        await homeExchangeClient.approveConversation(conversationId);
+      } else {
+        await homeExchangeClient.approveExchange(exchange.id, { conversationId });
+      }
+    } catch (err) {
+      console.error('[HomeExchange] pre-approve failed', err?.message || err);
+      base.reason = 'approve_failed';
+      await notifyHePreapproval(notifyOwner, {
+        kind: 'error',
+        guestName,
+        checkIn,
+        checkOut,
+        conversationId,
+        exchangeId: exchange.id,
+        error: `HE pre-approve failed: ${err?.message || err}`,
+      });
+      return base;
+    }
   }
 
   try {

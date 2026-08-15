@@ -25,9 +25,10 @@ export function pickExchangeFromConversation(conversation, homeId = '3202475') {
   return list[0] || null;
 }
 
-export function exchangeAlreadyApproved(exchange) {
-  if (!exchange) return false;
-  if (exchange.approved_at) return true;
-  if (exchange.finalized_at) return true;
+export function exchangeAlreadyApproved(exchange, conversation = null) {
+  if (exchange?.finalized_at) return true;
+  if (exchange?.approved_at) return true;
+  const acc = conversation?.accepted;
+  if (acc === true || acc === 1 || acc === '1') return true;
   return false;
 }

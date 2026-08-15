@@ -179,6 +179,7 @@ export const handler = async (event, context) => {
       calendarOpen: heResult.calendar?.open ?? null,
       cleaningFee: heResult.cleaningFee?.amount ?? null,
       reason: heResult.reason,
+      preapprove: heResult.preapprove || null,
     });
     console.log('Proposed Response:\n' + (heResult.proposedResponse || '(none)'));
     if (heResult.sendError) {
