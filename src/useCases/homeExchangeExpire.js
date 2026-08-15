@@ -1,5 +1,5 @@
 /**
- * Hourly job: if an HE pre-approval expired / was cancelled and the guest
+ * Every 12 hours: if an HE pre-approval expired / was cancelled and the guest
  * never finalized, open the Hospitable nights we blocked.
  */
 import { stayNights, dateOnly } from './homeExchange.js';

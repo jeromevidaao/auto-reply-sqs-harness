@@ -62,7 +62,7 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 **Isolation:** the Lambda handler branches on `isHomeExchangePayload` *before* `GuestMessagingAgent` / Hospitable send. Airbnb `act=message` / `platform=airbnb` traffic is unchanged. Calendar-sync `act=new_reservation_home_exchange` is also unchanged.
 
 **First HE guest message (e.g. Caroline 2026-08-14, May 13–19 2027, Apt 3):**
-1. Check **Hospitable** calendar + accepted reservations **and** the **HomeExchange home calendar** (`GET /v1/homes/{homeId}/calendar`). HE `RESERVED` or nights not listed (summer / owner long-blocks) are closed. Both must be open.
+1. Check **Hospitable** calendar + accepted reservations **and** that the same nights are available on the **HomeExchange home calendar** (`GET /v1/homes/{homeId}/calendar`). Both must be open.
 2. If open, load the unit cleaning fee from DynamoDB `listing` (`listingId=24259977`, typically $125).
 3. Draft: dates are open + ask if they will pay that fee after the stay.
 4. **Send via HomeExchange** `POST /v1/messages` (`src/clients/HomeExchangeClient.js`). Never Hospitable. Dedup if the fee-after-stay ask is already on the thread.
@@ -70,7 +70,7 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 **Fee accepted + original exchange dates open (Hospitable AND HE calendar):**
 1. `PATCH /v1/exchanges/{id}/approve` (do not re-approve if `approved_at` / `finalized_at` set — Android notify, stop).
 2. Hospitable `PUT …/calendar` `available:false` for `[checkIn, checkOut)` (checkout day stays free). Block failure → Android notify, no guest message.
-3. Persist nights in DynamoDB `homeexchangePreapprovalBlocks`. Hourly EventBridge `act=homeexchange_expire_blocks` unblocks those nights if the guest does not finalize within 4 days (skip `RESERVATION` nights).
+3. Persist nights in DynamoDB `homeexchangePreapprovalBlocks`. EventBridge every **12 hours** (`act=homeexchange_expire_blocks`) unblocks those nights if the guest does not finalize within 4 days (skip `RESERVATION` nights).
 4. **Do not send** the guest “welcome to book / we sent pre-approval” message yet. Android `homeexchange_preapproval_ready` (or `_error`) instead.
 
 Follow-up extra-date questions (Caroline Sep 30–Oct 3) still draft/send a date-check reply. Generic follow-ups with no fee/date ask still produce no draft. Implementation: `src/useCases/homeExchange.js` + `homeExchangeExpire.js`. Tests: `tests/homeExchange.test.js`.

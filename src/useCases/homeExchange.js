@@ -18,8 +18,8 @@
  *   4) Extra-date replies may still send. The confirmation ("welcome to book")
  *      is NOT sent yet — pre-approve + Hospitable block + Android notify instead.
  *
- * Confirmation (fee accepted + original exchange dates open on Hospitable AND
- * the HomeExchange home calendar — summer/owner long-blocks count as closed):
+ * Confirmation (fee accepted + original exchange dates available on Hospitable
+ * AND on the HomeExchange home calendar):
  *   1) PATCH HE /v1/exchanges/{id}/approve
  *   2) PUT Hospitable calendar available:false for [checkIn, checkOut)
  *   3) Persist the block for the 4-day expire-unblock job
@@ -414,8 +414,8 @@ export function heNightOpen(ranges, night) {
 }
 
 /**
- * HE home calendar: listed NON_RECIPROCAL/RECIPROCAL ranges are open;
- * RESERVED or any night not listed (owner long-block / summer close) is closed.
+ * HE home calendar: a night is available if it falls in an open HE range
+ * (NON_RECIPROCAL / RECIPROCAL). RESERVED or uncovered nights are not available.
  */
 export function analyzeHeCalendarOpen({ ranges = [], checkIn, checkOut } = {}) {
   const nights = stayNights(checkIn, checkOut);

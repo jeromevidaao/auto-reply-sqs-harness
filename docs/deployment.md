@@ -181,7 +181,7 @@ Urgent access lockouts still use SNS SMS / `URGENT_ACCESS_*` (unchanged). Cleani
 
 HomeExchange pre-approve / Hospitable-block errors and “ready to validate” (guest confirmation **not** sent) use FCM types `homeexchange_preapproval_error` and `homeexchange_preapproval_ready`. Expired pre-approvals that we unblock use `homeexchange_preapproval_expired`.
 
-Hourly EventBridge rule `he-preapproval-expire` invokes this Lambda with `act=homeexchange_expire_blocks`. Table: `homeexchangePreapprovalBlocks` (IAM `HomeExchangePreapprovalBlocks` on the same role).
+EventBridge rule `he-preapproval-expire` (`rate(12 hours)`) invokes this Lambda with `act=homeexchange_expire_blocks`. Table: `homeexchangePreapprovalBlocks` (IAM `HomeExchangePreapprovalBlocks` on the same role).
 
 ## Host contacts (SSM only)
 
