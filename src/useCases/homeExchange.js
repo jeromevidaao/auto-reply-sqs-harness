@@ -27,6 +27,8 @@
  *   4) Send: "I just sent you a pre-approval and blocked those dates for you."
  *   Errors (already finalized, Hospitable PUT fail): notify Android, do not proceed.
  *   HE/Hospitable writes retry 4× with 5/15/30s backoff (~1 min) then SQS.
+ *   Every successful HE guest send (and send-fail after retries) FCM the owner
+ *   phone. Airbnb auto-replies are not notified this way.
  */
 
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
@@ -36,7 +38,7 @@ import {
   exchangeAlreadyApproved,
 } from '../clients/homeExchangeExchange.js';
 import { buildBlockRecord, createDdbBlockStore } from './homeExchangeBlocks.js';
-import { notifyHePreapproval } from './homeExchangeNotify.js';
+import { notifyHeAutoReply, notifyHePreapproval } from './homeExchangeNotify.js';
 
 export const HOMEEXCHANGE_PLATFORM = 'homeexchange';
 export const HOMEEXCHANGE_ACT = 'homeexchange_message';
@@ -1039,6 +1041,34 @@ export async function handleHomeExchangeMessage({
     sendSkipReason = 'no_homeexchange_client';
   } else if (!sendEnabled) {
     sendSkipReason = draft.reason || 'send_not_enabled';
+  }
+
+  const notifyPayload = {
+    guestName,
+    checkIn: originalCheckIn || checkIn,
+    checkOut: originalCheckOut || checkOut,
+    conversationId,
+    exchangeId: preapprove.exchangeId,
+    proposedResponse: draft.proposedResponse,
+    reason: draft.reason,
+    preapproved: !!preapprove.ok,
+  };
+  if (sent) {
+    try {
+      await notifyHeAutoReply(notifyOwner, { kind: 'sent', ...notifyPayload });
+    } catch (notifyErr) {
+      console.error('[HomeExchange] FCM sent notify failed', notifyErr?.message || notifyErr);
+    }
+  } else if (sendError) {
+    try {
+      await notifyHeAutoReply(notifyOwner, {
+        kind: 'send_failed',
+        ...notifyPayload,
+        error: sendError,
+      });
+    } catch (notifyErr) {
+      console.error('[HomeExchange] FCM send-fail notify failed', notifyErr?.message || notifyErr);
+    }
   }
 
   return {

@@ -72,6 +72,7 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 2. Hospitable `PUT …/calendar` `available:false` for `[checkIn, checkOut)` (checkout day stays free). Block failure → Android notify, no guest message.
 3. Persist nights in DynamoDB `homeexchangePreapprovalBlocks`. EventBridge every **12 hours** (`act=homeexchange_expire_blocks`) unblocks those nights if the guest does not finalize within 4 days (skip `RESERVATION` nights).
 4. Guest message: **I just sent you a pre-approval and blocked those dates for you.** Do **not** say they are booked. Errors still Android-only (no guest send).
+5. **Owner Android (HE only):** FCM on every successful HE auto-reply send (`homeexchange_auto_reply_sent`) and on send failure after retries (`homeexchange_auto_reply_failed`). Pre-approve still uses `homeexchange_preapproval_ready` / `_error`; expire unblock uses `_expired`. Airbnb auto-replies do **not** get this phone trail.
 
 **Resilience:** every HE HTTP call (conversation, calendar, get-exchanges, approve, send) and Hospitable calendar PUT retries **4 times** with exp backoff **5s / 15s / 30s** (~1 min in-Lambda). Approve/send GET-confirm after timeout so a landed call is not repeated. Permanent 4xx (except 408/429) do not retry. FCM owner notify uses the same write retry. Airbnb Hospitable **message POST** stays on the 2/min-aware 4×/~3 min path. Then SQS `grok_message` 4 receives / 12 min visibility.
 

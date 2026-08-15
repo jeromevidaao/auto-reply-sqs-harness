@@ -26,6 +26,13 @@ import {
 import { alreadySentEquivalent } from '../src/clients/HomeExchangeClient.js';
 import { shouldUnblockPreapproval, canUnblockCalendarDay } from '../src/useCases/homeExchangeExpire.js';
 import { exchangeAlreadyApproved } from '../src/clients/homeExchangeExchange.js';
+import {
+  buildHeAutoReplyNotify,
+  buildHePreapprovalNotify,
+  HE_NOTIFY_READY,
+  HE_NOTIFY_SENT,
+  HE_NOTIFY_SEND_FAILED,
+} from '../src/useCases/homeExchangeNotify.js';
 
 function heOpenRange(start, end) {
   return [{ start_on: start, end_on: end, type: 'NON_RECIPROCAL' }];
@@ -297,6 +304,7 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
       },
     };
     const sentBodies = [];
+    const notifications = [];
     const homeExchangeClient = {
       async listMessages() {
         return [{ content: caroline, author: { first_name: 'Caroline' } }];
@@ -315,6 +323,10 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
       hospitableClient,
       ddbClient,
       homeExchangeClient,
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
     });
     assert.equal(result.sendDisabled, false);
     assert.equal(result.sent, true);
@@ -328,6 +340,11 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(result.calendar.open, true);
     assert.match(result.proposedResponse, /\$125/);
     assert.match(result.proposedResponse, /after your stay/i);
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].type, HE_NOTIFY_SENT);
+    assert.match(notifications[0].title, /Caroline/);
+    assert.match(notifications[0].body, /\$125/);
+    assert.equal(notifications[0].data.conversationId, '95101669');
   });
 
   it('never calls Hospitable send APIs from the HE use case', async () => {
@@ -755,7 +772,12 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(blocked[0].date, '2027-05-13');
     assert.equal(blocked[5].date, '2027-05-18');
     assert.equal(stored[0].nights.length, 6);
-    assert.equal(notifications[0].type, 'homeexchange_preapproval_ready');
+    assert.equal(notifications.length, 2);
+    assert.equal(notifications[0].type, HE_NOTIFY_READY);
+    assert.match(notifications[0].body, /Pre-approved on Home Exchange/i);
+    assert.equal(/NOT sent/i.test(notifications[0].body), false);
+    assert.equal(notifications[1].type, HE_NOTIFY_SENT);
+    assert.match(notifications[1].body, /pre-approval/i);
     assert.equal(sentBodies.length, 1);
     assert.match(sentBodies[0], /pre-approval/i);
     assert.match(sentBodies[0], /blocked those dates for you/i);
@@ -944,6 +966,105 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(result.sent, false);
     assert.equal(result.preapprove.reason, 'block_failed');
     assert.match(notifications[0].body, /Hospitable block failed/i);
+    assert.equal(notifications.some((n) => n.type === HE_NOTIFY_SENT), false);
+  });
+
+  it('notifies Android when an HE auto-reply send fails after retries', async () => {
+    const notifications = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Hi we would like May 13-19',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: true,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+          checkIn: '2027-05-13',
+          checkOut: '2027-05-19',
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return ['2027-05-13', '2027-05-14', '2027-05-15', '2027-05-16', '2027-05-17', '2027-05-18']
+            .map((date) => ({ date, status: { available: true } }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      ddbClient: { async send() { return { Item: { price: 125 } }; } },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
+        },
+        async sendMessage() {
+          throw new Error('HE send 503 after retries');
+        },
+      },
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
+    });
+    assert.equal(result.sent, false);
+    assert.match(result.sendError, /HE send 503/);
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].type, HE_NOTIFY_SEND_FAILED);
+    assert.match(notifications[0].body, /not sent/i);
+  });
+
+  it('does not notify Android when HE auto-reply is skipped (no send)', async () => {
+    const notifications = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Thanks!',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+        },
+      },
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
+    });
+    assert.equal(result.sent, false);
+    assert.equal(notifications.length, 0);
+  });
+
+  it('builds HE owner FCM payloads for sent / failed auto-replies', () => {
+    const sent = buildHeAutoReplyNotify({
+      kind: 'sent',
+      guestName: 'Caroline',
+      checkIn: '2027-05-13',
+      checkOut: '2027-05-19',
+      conversationId: '95101669',
+      proposedResponse: 'I just sent you a pre-approval and blocked those dates for you.',
+      reason: 'homeexchange_preapproved',
+      preapproved: true,
+    });
+    assert.equal(sent.type, HE_NOTIFY_SENT);
+    assert.match(sent.title, /Caroline/);
+    assert.match(sent.body, /Pre-approval note sent/);
+    assert.equal(sent.data.peerName, 'Caroline');
+    const failed = buildHeAutoReplyNotify({
+      kind: 'send_failed',
+      guestName: 'Caroline',
+      checkIn: '2027-05-13',
+      checkOut: '2027-05-19',
+      conversationId: '95101669',
+      error: 'timeout',
+    });
+    assert.equal(failed.type, HE_NOTIFY_SEND_FAILED);
+    const ready = buildHePreapprovalNotify({
+      kind: 'ready',
+      guestName: 'Caroline',
+      checkIn: '2027-05-13',
+      checkOut: '2027-05-19',
+    });
+    assert.equal(/NOT sent/i.test(ready.body), false);
   });
 
   it('unblocks only Hospitable BLOCKED nights after HE pre-approval expires', () => {
