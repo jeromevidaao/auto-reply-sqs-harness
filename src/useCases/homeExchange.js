@@ -268,6 +268,32 @@ export function guestAcceptedCleaningFee(text) {
   );
 }
 
+export function guestAskedToPreapprove(text) {
+  return /\bpre-?approv|\bfinalize\b/i.test(String(text || ''));
+}
+
+function messageText(m) {
+  return String(m?.content || m?.body || m?.text || '');
+}
+
+function isGuestHistoryMessage(m, guestName) {
+  const role = String(m?.sender_type || m?.sender?.type || m?.role || '').toLowerCase();
+  if (role === 'host') return false;
+  if (role === 'guest' || role === 'exchanger') return true;
+  const author = String(m?.author?.first_name || m?.sender?.first_name || '').toLowerCase();
+  const guestFirst = String(guestName || '').trim().split(/\s+/)[0].toLowerCase();
+  if (guestFirst && author && author === guestFirst) return true;
+  return false;
+}
+
+/** Fee accepted on this message or an earlier guest message in the thread. */
+export function guestAcceptedCleaningFeeInThread(text, conversationHistory = [], guestName = null) {
+  if (guestAcceptedCleaningFee(text)) return true;
+  return (conversationHistory || []).some(
+    (m) => isGuestHistoryMessage(m, guestName) && guestAcceptedCleaningFee(messageText(m))
+  );
+}
+
 export function formatStayRange(checkIn, checkOut) {
   const start = dateOnly(checkIn);
   const end = dateOnly(checkOut);
@@ -343,6 +369,7 @@ export function isFirstHomeExchangeMessage(context = {}, conversationHistory = [
   if (context.isFirstMessage === true) return true;
   if (context.isFirstMessage === false) return false;
   if (Number(context.messageCount) === 1) return true;
+  if (Number(context.messageCount) > 1) return false;
   const history = Array.isArray(conversationHistory)
     ? conversationHistory
     : Array.isArray(context.conversationHistory)
@@ -816,16 +843,32 @@ export async function handleHomeExchangeMessage({
   const extracted = extractHomeExchangeMessage(event);
   const message = extracted.message;
   const context = extracted.context || {};
+  const conversationId = context.conversation_id || context.conversationId || null;
+  let conversationHistory = Array.isArray(context.conversationHistory)
+    ? context.conversationHistory
+    : [];
+  if (
+    conversationHistory.length === 0 &&
+    conversationId &&
+    homeExchangeClient &&
+    typeof homeExchangeClient.listMessages === 'function'
+  ) {
+    try {
+      conversationHistory = await homeExchangeClient.listMessages(conversationId);
+    } catch {
+      conversationHistory = [];
+    }
+  }
   const originalCheckIn = dateOnly(context.checkIn || context.check_in);
   const originalCheckOut = dateOnly(context.checkOut || context.check_out);
   const askedDates = extractAskedStayDates(message, { now });
-  const feeAccepted = guestAcceptedCleaningFee(message);
-  const isFirst = isFirstHomeExchangeMessage(context, context.conversationHistory);
+  const isFirst = isFirstHomeExchangeMessage(context, conversationHistory);
   const checkIn = !isFirst && askedDates?.checkIn ? askedDates.checkIn : originalCheckIn;
   const checkOut = !isFirst && askedDates?.checkOut ? askedDates.checkOut : originalCheckOut;
   const propertyId = context.listingId || APT3_HOSPITABLE_PROPERTY_ID;
   const airbnbListingId = context.airbnbListingId || APT3_AIRBNB_LISTING_ID;
   const guestName = context.guestName || context.sender?.first_name || null;
+  const feeAccepted = guestAcceptedCleaningFeeInThread(message, conversationHistory, guestName);
   const homeId =
     context.listing?.platform_id ||
     context.homeId ||
@@ -909,7 +952,6 @@ export async function handleHomeExchangeMessage({
     askedDates,
   });
 
-  const conversationId = context.conversation_id || context.conversationId || null;
   const store = blockStore || createDdbBlockStore(ddbClient);
   let preapprove = {
     attempted: false,

@@ -15,6 +15,8 @@ import {
   shouldAttemptPreapprove,
   extractAskedStayDates,
   guestAcceptedCleaningFee,
+  guestAcceptedCleaningFeeInThread,
+  guestAskedToPreapprove,
   analyzeHeCalendarOpen,
   mergeStayCalendars,
   HOMEEXCHANGE_ACT,
@@ -758,6 +760,73 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
       originalCheckOut: '2027-05-19',
       originalCalendar: result.originalCalendar,
     }), true);
+  });
+
+  it('treats a later “pre approve then we finalize” as fee-accepted via thread history', async () => {
+    assert.equal(guestAskedToPreapprove('Wonderful. I guess u pre approve then we finalize?'), true);
+    assert.equal(guestAcceptedCleaningFee('Wonderful. I guess u pre approve then we finalize?'), false);
+    assert.equal(
+      guestAcceptedCleaningFeeInThread('Wonderful. I guess u pre approve then we finalize?', [
+        { sender_type: 'guest', content: 'Hi Ruby, the cleaning fee is fine. Sep dates?' },
+      ]),
+      true
+    );
+    const sentBodies = [];
+    const approved = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Wonderful. I guess u pre approve then we finalize?',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+          checkIn: '2027-05-13',
+          checkOut: '2027-05-19',
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return ['2027-05-13', '2027-05-14', '2027-05-15', '2027-05-16', '2027-05-17', '2027-05-18']
+            .map((date) => ({ date, status: { available: true } }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar() {
+          return { status: 'accepted' };
+        },
+      },
+      ddbClient: { async send() { return { Item: { price: 125 } }; } },
+      homeExchangeClient: {
+        async listMessages() {
+          return [
+            { content: 'Hi Ruby, the cleaning fee is fine. Just out of curiosity…', author: { first_name: 'Caroline' }, sender_type: 'guest' },
+          ];
+        },
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
+        },
+        async getConversation() {
+          return { exchanges: [{ id: 127232869, status: 0, approved_at: null, home: { id: 3202475 } }] };
+        },
+        async approveExchange(id) {
+          approved.push(id);
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      blockStore: { async put(item) { return item; } },
+      notifyOwner: async () => ({ ok: true }),
+    });
+    assert.equal(result.feeAccepted, true);
+    assert.equal(result.preapprove.ok, true);
+    assert.deepEqual(approved, [127232869]);
+    assert.equal(result.sent, true);
+    assert.match(sentBodies[0], /blocked those dates for you/i);
   });
 
   it('notifies Android and does not proceed when HE is already pre-approved', async () => {
