@@ -598,9 +598,11 @@ export function buildHomeExchangeFollowupDraft({
     return {
       typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
       shouldReply: true,
-      proposedResponse:
-        `Hi ${name} — ${feeThanks}.` +
-        (originalRange ? ` We can accept that request.` : ''),
+      proposedResponse: buildPreapproveGuestMessage({
+        guestName: name,
+        feeThanks,
+        originalRange,
+      }),
       reason: 'homeexchange_followup_fee_accepted',
     };
   }
@@ -626,7 +628,6 @@ export function buildHomeExchangeFollowupDraft({
       proposedResponse:
         `Hi ${name}` +
         (feeThanks ? ` — ${feeThanks}.` : ',') +
-        (feeAccepted && originalRange ? ` We can accept that request.` : '') +
         `\n\nI checked` +
         (askedRange ? ` ${askedRange}` : '') +
         ` and those dates are not open on our calendar.`,
@@ -715,12 +716,29 @@ export function buildHomeExchangeDraft({
   };
 }
 
+function buildPreapproveGuestMessage({
+  guestName,
+  feeThanks,
+  originalRange,
+  extraParagraph,
+} = {}) {
+  const name = (guestName || 'there').split(/\s+/)[0];
+  let text = `Hi ${name}`;
+  if (feeThanks) text += ` — ${feeThanks}.`;
+  else text += '.';
+  text +=
+    ` I just sent you a pre-approval` +
+    (originalRange ? ` for ${originalRange}` : '') +
+    ` and blocked those dates for you.`;
+  if (extraParagraph) text += `\n\n${extraParagraph}`;
+  return text;
+}
+
 const HE_DRAFT_NO_SEND = new Set([
   'calendar_not_checked',
   'homeexchange_followup_calendar_not_checked',
-  // Confirmation path: pre-approve + block + Android notify. Guest message later.
+  // Only send the pre-approval note after we actually pre-approved + blocked.
   'homeexchange_followup_fee_accepted',
-  'homeexchange_preapproved',
   'homeexchange_preapprove_already_approved',
   'homeexchange_preapprove_block_failed',
   'homeexchange_preapprove_approve_failed',
@@ -922,6 +940,30 @@ export async function handleHomeExchangeMessage({
       checkIn: originalCheckIn,
       checkOut: originalCheckOut,
       now,
+    });
+  }
+
+  if (preapprove.ok) {
+    const originalRange = formatStayRange(originalCheckIn, originalCheckOut);
+    const feeText = feeAmountText(cleaningFee);
+    const feeThanks = feeAccepted
+      ? `thanks for confirming the ${feeText} cleaning fee is fine` +
+        (originalRange ? ` for ${originalRange}` : '')
+      : null;
+    let extraParagraph = null;
+    if (askedDates && calendar?.checked) {
+      const askedRange = formatStayRange(askedDates.checkIn, askedDates.checkOut);
+      extraParagraph = calendar.open
+        ? `I checked ${askedRange}: those dates are also open. The same ${feeText} cleaning fee after you leave would apply to that stay as well. Would you like us to hold that one too?`
+        : `I checked ${askedRange} and those dates are not open on our calendar.`;
+    }
+    draft.shouldReply = true;
+    draft.reason = 'homeexchange_preapproved';
+    draft.proposedResponse = buildPreapproveGuestMessage({
+      guestName,
+      feeThanks,
+      originalRange,
+      extraParagraph,
     });
   }
 

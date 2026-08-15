@@ -71,7 +71,7 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 1. `PATCH /v1/exchanges/{id}/approve` (do not re-approve if `approved_at` / `finalized_at` set — Android notify, stop).
 2. Hospitable `PUT …/calendar` `available:false` for `[checkIn, checkOut)` (checkout day stays free). Block failure → Android notify, no guest message.
 3. Persist nights in DynamoDB `homeexchangePreapprovalBlocks`. EventBridge every **12 hours** (`act=homeexchange_expire_blocks`) unblocks those nights if the guest does not finalize within 4 days (skip `RESERVATION` nights).
-4. **Do not send** the guest “welcome to book / we sent pre-approval” message yet. Android `homeexchange_preapproval_ready` (or `_error`) instead.
+4. Guest message: **I just sent you a pre-approval and blocked those dates for you.** Do **not** say they are booked. Errors still Android-only (no guest send).
 
 Follow-up extra-date questions (Caroline Sep 30–Oct 3) still draft/send a date-check reply. Generic follow-ups with no fee/date ask still produce no draft. Implementation: `src/useCases/homeExchange.js` + `homeExchangeExpire.js`. Tests: `tests/homeExchange.test.js`.
 

@@ -42,6 +42,10 @@ export function alreadySentEquivalent(messages, proposedResponse) {
     if (proposedIsFeeAsk && /cleaning fee/.test(text) && /after your stay/.test(text)) {
       return true;
     }
+    if (/pre-approval/.test(proposed) && /blocked those dates/.test(proposed)
+      && /pre-approval/.test(text) && /blocked those dates/.test(text)) {
+      return true;
+    }
     return false;
   });
 }

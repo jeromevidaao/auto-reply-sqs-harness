@@ -179,7 +179,7 @@ Full agent diagnostics remain in **CloudWatch**. The legacy SNS email topic (`SN
 
 Urgent access lockouts still use SNS SMS / `URGENT_ACCESS_*` (unchanged). Cleaning-issue SNS emails are unchanged.
 
-HomeExchange pre-approve / Hospitable-block errors and “ready to validate” (guest confirmation **not** sent) use FCM types `homeexchange_preapproval_error` and `homeexchange_preapproval_ready`. Expired pre-approvals that we unblock use `homeexchange_preapproval_expired`.
+HomeExchange pre-approve / Hospitable-block: guest gets “I just sent you a pre-approval and blocked those dates for you” (never “you’re booked”). FCM `homeexchange_preapproval_ready` / `_error`. Expired pre-approvals that we unblock use `homeexchange_preapproval_expired`.
 
 EventBridge rule `he-preapproval-expire` (`rate(12 hours)`) invokes this Lambda with `act=homeexchange_expire_blocks`. Table: `homeexchangePreapprovalBlocks` (IAM `HomeExchangePreapprovalBlocks` on the same role).
 

@@ -495,9 +495,12 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(alreadySentEquivalent([{ content: priorFeeAsk }], result.proposedResponse), false);
     assert.match(result.proposedResponse, /cleaning fee is fine/i);
     assert.match(result.proposedResponse, /May 13–19, 2027/);
+    assert.match(result.proposedResponse, /pre-approval/i);
+    assert.match(result.proposedResponse, /blocked those dates for you/i);
     assert.match(result.proposedResponse, /September 30 – October 3, 2026/);
     assert.match(result.proposedResponse, /also open/i);
     assert.match(result.proposedResponse, /\$125/);
+    assert.equal(/you.?re booked/i.test(result.proposedResponse), false);
   });
 
   it('sends not-open follow-up date reply via HomeExchange', async () => {
@@ -658,11 +661,12 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.ok(he.unavailable.includes('2026-07-10'));
   });
 
-  it('does not send the confirmation when fee is accepted and original dates are open', async () => {
+  it('sends a pre-approval note (not “you’re booked”) after fee accept + both calendars open', async () => {
     const notifications = [];
     const approved = [];
     const blocked = [];
     const stored = [];
+    const sentBodies = [];
     const result = await handleHomeExchangeMessage({
       event: {
         message: 'Hi Ruby, the cleaning fee is fine.',
@@ -714,8 +718,9 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
           approved.push(id);
           return { ok: true };
         },
-        async sendMessage() {
-          throw new Error('must not send guest confirmation');
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
         },
       },
       blockStore: {
@@ -730,8 +735,8 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
       },
     });
     assert.equal(result.feeAccepted, true);
-    assert.equal(result.sendDisabled, true);
-    assert.equal(result.sent, false);
+    assert.equal(result.sendDisabled, false);
+    assert.equal(result.sent, true);
     assert.equal(result.preapprove.ok, true);
     assert.deepEqual(approved, [127232869]);
     assert.equal(blocked.length, 6);
@@ -740,6 +745,12 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(blocked[5].date, '2027-05-18');
     assert.equal(stored[0].nights.length, 6);
     assert.equal(notifications[0].type, 'homeexchange_preapproval_ready');
+    assert.equal(sentBodies.length, 1);
+    assert.match(sentBodies[0], /pre-approval/i);
+    assert.match(sentBodies[0], /blocked those dates for you/i);
+    assert.equal(/you.?re booked/i.test(sentBodies[0]), false);
+    assert.equal(/welcome to book/i.test(sentBodies[0]), false);
+    assert.match(result.proposedResponse, /May 13–19, 2027/);
     assert.equal(shouldAttemptPreapprove({
       isFirst: false,
       feeAccepted: true,
