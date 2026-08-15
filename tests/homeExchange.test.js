@@ -892,6 +892,7 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(approveCalls, 0);
     assert.equal(notifications[0].type, 'homeexchange_preapproval_error');
     assert.equal(exchangeAlreadyApproved({ approved_at: 'x' }), true);
+    assert.equal(exchangeAlreadyApproved({ status: 1, approved_at: null }), true);
   });
 
   it('notifies Android and does not send when Hospitable block fails after approve', async () => {

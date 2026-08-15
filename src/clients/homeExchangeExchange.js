@@ -25,9 +25,22 @@ export function pickExchangeFromConversation(conversation, homeId = '3202475') {
   return list[0] || null;
 }
 
+export function isApprovedExchange(exchange) {
+  if (!exchange || typeof exchange !== 'object') return false;
+  if (exchange.finalized_at) return true;
+  if (exchange.approved_at) return true;
+  const st = exchange.status;
+  if (st === 1 || st === '1') return true;
+  if (typeof st === 'string' && /^(pre-?approved|approved)$/i.test(st)) return true;
+  return false;
+}
+
+export function anyExchangeApproved(exchanges) {
+  return (Array.isArray(exchanges) ? exchanges : []).some(isApprovedExchange);
+}
+
 export function exchangeAlreadyApproved(exchange, conversation = null) {
-  if (exchange?.finalized_at) return true;
-  if (exchange?.approved_at) return true;
+  if (isApprovedExchange(exchange)) return true;
   const acc = conversation?.accepted;
   if (acc === true || acc === 1 || acc === '1') return true;
   return false;

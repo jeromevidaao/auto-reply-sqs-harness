@@ -5,6 +5,10 @@
  *   1) In-Lambda: 4 POSTs over ~3 min (20s timeout, exp backoff 30/30/40s).
  *   2) SQS grok_message: 4 receives, 12 min visibility → ~36–40 min, then DLQ.
  *
+ * HomeExchange + Hospitable calendar writes use kind='write':
+ *   4 attempts, 15s timeout, exp backoff 5/15/30s (~1 min). Approve/send
+ *   GET-confirm after timeout so a landed call is not repeated.
+ *
  * Production incident 2026-08-13 (Julie / Apt 2 welcome):
  *   POST /reservations/{id}/messages timed out at 15s, then in-Lambda retries
  *   at 5s/10s/20s hit Hospitable's **2 POSTs per minute per reservation** cap
@@ -25,6 +29,14 @@ export const HOSPITABLE_SEND_MIN_INTERVAL_MS = 30000;
 export const HOSPITABLE_SEND_MAX_ATTEMPTS = 4;
 export const HOSPITABLE_READ_MAX_ATTEMPTS = 4;
 export const HOSPITABLE_429_DEFAULT_MS = 60000;
+
+/** HE + calendar writes: 4 attempts, exp backoff 5/15/30s (~50s waits, ~1 min). */
+export const WRITE_MAX_ATTEMPTS = 4;
+export const WRITE_BACKOFF_MS = [5000, 15000, 30000];
+export const WRITE_429_DEFAULT_MS = 15000;
+export const WRITE_429_CAP_MS = 45000;
+export const HE_MAX_ATTEMPTS = WRITE_MAX_ATTEMPTS;
+export const HE_TIMEOUT_MS = 15000;
 
 /** SQS grok_message: 4 receives × 12 min visibility ≈ 36–40 min then DLQ. */
 export const GROK_MESSAGE_VISIBILITY_TIMEOUT_SEC = 720;
@@ -50,6 +62,7 @@ const TRANSIENT_CODES = new Set([
  */
 export function isTransientHttpError(err) {
   if (!err || typeof err !== 'object') return false;
+  if (err.permanent === true || err.noRetry === true) return false;
   const status = err.response?.status ?? err.status;
   if (status === 429 || status === 408) return true;
   if (typeof status === 'number' && status >= 500) return true;
@@ -97,12 +110,19 @@ export function computeRetryDelay(err, opts = {}) {
   const status = err?.response?.status ?? err?.status;
   let delay;
   if (status === 429) {
-    delay = parseRetryAfterMs(err) ?? HOSPITABLE_429_DEFAULT_MS;
+    const fallback = kind === 'write' ? WRITE_429_DEFAULT_MS : HOSPITABLE_429_DEFAULT_MS;
+    delay = parseRetryAfterMs(err) ?? fallback;
+    if (kind === 'write') {
+      delay = Math.min(delay, WRITE_429_CAP_MS);
+    }
   } else if (kind === 'send') {
     // After fail 1/2/3: 20s, 30s, 40s — then clamped to the 2/min floor (30s).
     // Worst case with 20s timeouts: ~3 min in-Lambda, then SQS waits ~12 min.
     const sendBackoff = [20000, 30000, 40000];
     delay = sendBackoff[Math.min(attempt - 1, sendBackoff.length - 1)];
+  } else if (kind === 'write') {
+    // HE approve/send + Hospitable calendar PUT: 4 tries over ~1 min.
+    delay = WRITE_BACKOFF_MS[Math.min(attempt - 1, WRITE_BACKOFF_MS.length - 1)];
   } else {
     const readBackoff = [2000, 4000, 8000, 16000];
     delay = readBackoff[Math.min(attempt - 1, readBackoff.length - 1)];

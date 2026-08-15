@@ -15,16 +15,18 @@
  *   1) Parse asked dates from the guest text (year = next future occurrence).
  *   2) Confirm Hospitable calendar + accepted reservations for those nights.
  *   3) Draft: acknowledge fee if they agreed + say whether the new dates are open.
- *   4) Extra-date replies may still send. The confirmation ("welcome to book")
- *      is NOT sent yet — pre-approve + Hospitable block + Android notify instead.
+ *   4) Extra-date replies may still send. Confirmation is pre-approve + block
+ *      + "I just sent you a pre-approval and blocked those dates" (never "you're booked").
  *
  * Confirmation (fee accepted + original exchange dates available on Hospitable
  * AND on the HomeExchange home calendar):
- *   1) PATCH HE /v1/exchanges/{id}/approve
+ *   1) GET /v1/exchanges/{conversationId}/get-exchanges then
+ *      PATCH /v1/exchanges/{conversationId}/approve with that array
  *   2) PUT Hospitable calendar available:false for [checkIn, checkOut)
  *   3) Persist the block for the 4-day expire-unblock job
- *   4) Android notify. Do not send the guest confirmation message.
- *   Errors (already approved, Hospitable PUT fail): notify Android, do not proceed.
+ *   4) Send: "I just sent you a pre-approval and blocked those dates for you."
+ *   Errors (already finalized, Hospitable PUT fail): notify Android, do not proceed.
+ *   HE/Hospitable writes retry 4× with 5/15/30s backoff (~1 min) then SQS.
  */
 
 import { GetCommand } from '@aws-sdk/lib-dynamodb';

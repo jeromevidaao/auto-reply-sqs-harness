@@ -5,7 +5,7 @@ This project uses GitHub Actions for continuous deployment.
 ## How Deployment Works
 
 - **Every push to `main`** automatically deploys the latest code to the AWS Lambda function `guest-messaging-agent-harness`.
-- Two-layer retry (in-Lambda 4 API attempts / ~3 min, then SQS 4 receives / 12 min visibility / ~36–40 min, then `grok_message_dl`). Lambda timeout **360s** and queue attrs are applied out of band — the deploy OIDC role can only `UpdateFunctionCode`.
+- Two-layer retry. Hospitable **message POST**: in-Lambda 4 attempts / ~3 min (2/min cap). HE + Hospitable calendar writes: 4 attempts / 5–15–30s backoff (~1 min), GET-confirm after approve/send timeout. Then SQS 4 receives / 12 min visibility / ~36–40 min, then `grok_message_dl`. Lambda timeout **360s** and queue attrs are applied out of band — the deploy OIDC role can only `UpdateFunctionCode`.
 - **Pull Requests** only run CI (tests + evaluation suite). Nothing is deployed.
 - You can still trigger a manual deployment via the "Actions" tab → "Deploy to AWS Lambda" → "Run workflow".
 

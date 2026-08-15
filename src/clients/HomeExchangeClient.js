@@ -6,6 +6,12 @@
  */
 import axios from 'axios';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { anyExchangeApproved } from './homeExchangeExchange.js';
+import {
+  HE_MAX_ATTEMPTS,
+  HE_TIMEOUT_MS,
+  withExponentialBackoff,
+} from '../utils/httpRetry.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 const HE_API_BASE = process.env.HE_API_BASE || 'https://api.homeexchange.com';
@@ -19,11 +25,33 @@ async function _loadToken() {
     return process.env.HOMEEXCHANGE_BEARER_TOKEN;
   }
   if (_tokenCache) return _tokenCache;
-  const response = await ssm.send(
-    new GetParameterCommand({ Name: HE_TOKEN_SSM, WithDecryption: true })
+  const delays = [2000, 4000, 8000];
+  const maxAttempts = 3;
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await ssm.send(
+        new GetParameterCommand({ Name: HE_TOKEN_SSM, WithDecryption: true })
+      );
+      _tokenCache = response.Parameter.Value;
+      return _tokenCache;
+    } catch (err) {
+      lastErr = err;
+      if (attempt === maxAttempts) break;
+      const delay = delays[attempt - 1];
+      console.warn(
+        `[HomeExchangeClient] SSM token fetch failed (attempt ${attempt}). Retrying in ${delay}ms...`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  const criticalErr = new Error(
+    `CRITICAL: Failed to fetch HomeExchange token from SSM after ${maxAttempts} attempts. ${lastErr?.message || lastErr}`
   );
-  _tokenCache = response.Parameter.Value;
-  return _tokenCache;
+  criticalErr.name = 'CriticalHttpError';
+  criticalErr.originalError = lastErr;
+  criticalErr.permanent = false;
+  throw criticalErr;
 }
 
 export function alreadySentEquivalent(messages, proposedResponse) {
@@ -55,13 +83,25 @@ export function alreadySentEquivalent(messages, proposedResponse) {
 }
 
 export class HomeExchangeClient {
-  constructor({ token } = {}) {
+  constructor({ token, http, sleeper } = {}) {
     this._injectedToken = token || null;
+    this._http = http || axios;
+    this._sleeper = sleeper;
   }
 
   async getToken() {
     if (this._injectedToken) return this._injectedToken;
     return _loadToken();
+  }
+
+  async _withRetry(operation, fn, extras = {}) {
+    return withExponentialBackoff(fn, {
+      operation,
+      kind: extras.kind || 'write',
+      maxAttempts: extras.maxAttempts || HE_MAX_ATTEMPTS,
+      recover: extras.recover,
+      sleeper: extras.sleeper || this._sleeper,
+    });
   }
 
   _headers(token) {
@@ -85,39 +125,66 @@ export class HomeExchangeClient {
   async listMessages(conversationId) {
     if (!conversationId) throw new Error('conversationId is required');
     const token = await this.getToken();
-    const response = await axios.get(`${HE_API_BASE}/v3/messages`, {
-      headers: this._headers(token),
-      params: { conversation_id: conversationId },
-      timeout: 20000,
+    return this._withRetry('heListMessages', async () => {
+      const response = await this._http.get(`${HE_API_BASE}/v3/messages`, {
+        headers: this._headers(token),
+        params: { conversation_id: conversationId },
+        timeout: HE_TIMEOUT_MS,
+      });
+      return (
+        response.data?.data?.messages ||
+        response.data?.messages ||
+        []
+      );
     });
-    return (
-      response.data?.data?.messages ||
-      response.data?.messages ||
-      []
-    );
   }
 
   async sendMessage(conversationId, content) {
     if (!conversationId) throw new Error('conversationId is required to send a HomeExchange message');
     if (!content || typeof content !== 'string') throw new Error('content must be a non-empty string');
     const token = await this.getToken();
-    const response = await axios.post(
-      `${HE_API_BASE}/v1/messages`,
-      { content, conversation: this._conversationField(conversationId) },
-      { headers: this._headers(token), timeout: 20000 }
+    const recover = async (err) => {
+      try {
+        const messages = await this.listMessages(conversationId);
+        if (alreadySentEquivalent(messages, content)) {
+          console.warn(
+            `[HomeExchangeClient] send failed (${err?.message || err}) but draft is already on the thread`
+          );
+          return { alreadyDelivered: true, recoveredFrom: err?.message };
+        }
+      } catch (fetchErr) {
+        console.warn(
+          '[HomeExchangeClient] post-failure thread check failed:',
+          fetchErr?.message || fetchErr
+        );
+      }
+      return false;
+    };
+    return this._withRetry(
+      'heSendMessage',
+      async () => {
+        const response = await this._http.post(
+          `${HE_API_BASE}/v1/messages`,
+          { content, conversation: this._conversationField(conversationId) },
+          { headers: this._headers(token), timeout: HE_TIMEOUT_MS }
+        );
+        return response.data || { ok: true };
+      },
+      { recover }
     );
-    return response.data || { ok: true };
   }
 
   async getConversation(conversationId) {
     if (!conversationId) throw new Error('conversationId is required');
     const token = await this.getToken();
-    const response = await axios.get(
-      `${HE_API_BASE}/v3/conversations/me/${encodeURIComponent(conversationId)}`,
-      { headers: this._headers(token), timeout: 20000 }
-    );
-    const data = response.data?.data || response.data || {};
-    return data.conversation || data;
+    return this._withRetry('heGetConversation', async () => {
+      const response = await this._http.get(
+        `${HE_API_BASE}/v3/conversations/me/${encodeURIComponent(conversationId)}`,
+        { headers: this._headers(token), timeout: HE_TIMEOUT_MS }
+      );
+      const data = response.data?.data || response.data || {};
+      return data.conversation || data;
+    });
   }
 
   /**
@@ -128,14 +195,16 @@ export class HomeExchangeClient {
   async getHomeCalendar(homeId) {
     if (!homeId) throw new Error('homeId is required');
     const token = await this.getToken();
-    const response = await axios.get(
-      `${HE_API_BASE}/v1/homes/${encodeURIComponent(homeId)}/calendar`,
-      { headers: this._headers(token), timeout: 20000 }
-    );
-    const payload = response.data;
-    if (Array.isArray(payload?.data)) return payload.data;
-    if (Array.isArray(payload)) return payload;
-    return [];
+    return this._withRetry('heGetHomeCalendar', async () => {
+      const response = await this._http.get(
+        `${HE_API_BASE}/v1/homes/${encodeURIComponent(homeId)}/calendar`,
+        { headers: this._headers(token), timeout: HE_TIMEOUT_MS }
+      );
+      const payload = response.data;
+      if (Array.isArray(payload?.data)) return payload.data;
+      if (Array.isArray(payload)) return payload;
+      return [];
+    });
   }
 
   /**
@@ -144,12 +213,14 @@ export class HomeExchangeClient {
   async getExchangesForConversation(conversationId) {
     if (!conversationId) throw new Error('conversationId is required');
     const token = await this.getToken();
-    const response = await axios.get(
-      `${HE_API_BASE}/v1/exchanges/${encodeURIComponent(conversationId)}/get-exchanges`,
-      { headers: this._headers(token), timeout: 20000 }
-    );
-    const data = response.data;
-    return Array.isArray(data) ? data : data?.data || [];
+    return this._withRetry('heGetExchanges', async () => {
+      const response = await this._http.get(
+        `${HE_API_BASE}/v1/exchanges/${encodeURIComponent(conversationId)}/get-exchanges`,
+        { headers: this._headers(token), timeout: HE_TIMEOUT_MS }
+      );
+      const data = response.data;
+      return Array.isArray(data) ? data : data?.data || [];
+    });
   }
 
   /**
@@ -160,14 +231,44 @@ export class HomeExchangeClient {
   async approveConversation(conversationId) {
     if (!conversationId) throw new Error('conversationId is required');
     const token = await this.getToken();
-    const exchanges = await this.getExchangesForConversation(conversationId);
-    if (!exchanges.length) throw new Error('no exchanges on conversation');
-    const response = await axios.patch(
-      `${HE_API_BASE}/v1/exchanges/${encodeURIComponent(conversationId)}/approve`,
-      exchanges,
-      { headers: this._headers(token), timeout: 20000 }
+    const recover = async (err) => {
+      try {
+        const current = await this.getExchangesForConversation(conversationId);
+        if (anyExchangeApproved(current)) {
+          console.warn(
+            `[HomeExchangeClient] approve failed (${err?.message || err}) but exchange is already pre-approved`
+          );
+          return { alreadyApproved: true, recovered: true, exchanges: current };
+        }
+      } catch (fetchErr) {
+        console.warn(
+          '[HomeExchangeClient] approve recover get-exchanges failed:',
+          fetchErr?.message || fetchErr
+        );
+      }
+      return false;
+    };
+    return this._withRetry(
+      'heApproveConversation',
+      async () => {
+        const exchanges = await this.getExchangesForConversation(conversationId);
+        if (!exchanges.length) {
+          const err = new Error('no exchanges on conversation');
+          err.permanent = true;
+          throw err;
+        }
+        if (anyExchangeApproved(exchanges)) {
+          return { alreadyApproved: true, exchanges };
+        }
+        const response = await this._http.patch(
+          `${HE_API_BASE}/v1/exchanges/${encodeURIComponent(conversationId)}/approve`,
+          exchanges,
+          { headers: this._headers(token), timeout: HE_TIMEOUT_MS }
+        );
+        return response.data || { ok: true };
+      },
+      { recover }
     );
-    return response.data || { ok: true };
   }
 
   /** @deprecated use approveConversation */

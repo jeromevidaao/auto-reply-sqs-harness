@@ -12,6 +12,7 @@
 import { DynamoDBClient, ScanCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { GoogleAuth } from 'google-auth-library';
+import { WRITE_MAX_ATTEMPTS, withExponentialBackoff } from '../../utils/httpRetry.js';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const DEVICE_TOKENS_TABLE = process.env.ANDROID_DEVICE_TOKENS_TABLE || 'androidDeviceTokens';
@@ -163,32 +164,48 @@ export async function notifyOwnerAndroid(opts) {
     };
 
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+      await withExponentialBackoff(
+        async () => {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(message),
+          });
+          const text = await res.text();
+          if (!res.ok) {
+            const err = new Error(`FCM HTTP ${res.status} ${text.slice(0, 200)}`);
+            err.response = { status: res.status };
+            err.fcmBody = text;
+            if (
+              res.status === 404 ||
+              text.includes('UNREGISTERED') ||
+              text.includes('INVALID_ARGUMENT')
+            ) {
+              err.permanent = true;
+            }
+            throw err;
+          }
+          return true;
         },
-        body: JSON.stringify(message),
-      });
-      const text = await res.text();
-      if (!res.ok) {
-        failureCount += 1;
-        console.error(`[fcm] error for …${token.slice(-8)}: HTTP ${res.status} ${text.slice(0, 300)}`);
-        if (
-          res.status === 404 ||
-          text.includes('UNREGISTERED') ||
-          text.includes('INVALID_ARGUMENT')
-        ) {
-          await deleteDeviceToken(token);
-        }
-        continue;
-      }
+        { operation: 'fcmSend', kind: 'write', maxAttempts: WRITE_MAX_ATTEMPTS }
+      );
       successCount += 1;
       console.log(`[fcm] delivered type=${type} to …${token.slice(-8)}`);
     } catch (err) {
       failureCount += 1;
+      const text = err?.fcmBody || '';
+      const status = err?.response?.status;
       console.error(`[fcm] send failed …${token.slice(-8)}:`, err.message);
+      if (
+        status === 404 ||
+        text.includes('UNREGISTERED') ||
+        text.includes('INVALID_ARGUMENT')
+      ) {
+        await deleteDeviceToken(token);
+      }
     }
   }
 

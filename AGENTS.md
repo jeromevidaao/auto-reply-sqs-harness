@@ -68,10 +68,12 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 4. **Send via HomeExchange** `POST /v1/messages` (`src/clients/HomeExchangeClient.js`). Never Hospitable. Dedup if the fee-after-stay ask is already on the thread.
 
 **Fee accepted + original exchange dates open (Hospitable AND HE calendar):**
-1. `PATCH /v1/exchanges/{id}/approve` (do not re-approve if `approved_at` / `finalized_at` set — Android notify, stop).
+1. `GET /v1/exchanges/{conversationId}/get-exchanges` then `PATCH /v1/exchanges/{conversationId}/approve` with that array (**conversation id**, not exchange id). Skip if `approved_at` / `finalized_at` set.
 2. Hospitable `PUT …/calendar` `available:false` for `[checkIn, checkOut)` (checkout day stays free). Block failure → Android notify, no guest message.
 3. Persist nights in DynamoDB `homeexchangePreapprovalBlocks`. EventBridge every **12 hours** (`act=homeexchange_expire_blocks`) unblocks those nights if the guest does not finalize within 4 days (skip `RESERVATION` nights).
 4. Guest message: **I just sent you a pre-approval and blocked those dates for you.** Do **not** say they are booked. Errors still Android-only (no guest send).
+
+**Resilience:** every HE HTTP call (conversation, calendar, get-exchanges, approve, send) and Hospitable calendar PUT retries **4 times** with exp backoff **5s / 15s / 30s** (~1 min in-Lambda). Approve/send GET-confirm after timeout so a landed call is not repeated. Permanent 4xx (except 408/429) do not retry. FCM owner notify uses the same write retry. Airbnb Hospitable **message POST** stays on the 2/min-aware 4×/~3 min path. Then SQS `grok_message` 4 receives / 12 min visibility.
 
 Follow-up extra-date questions (Caroline Sep 30–Oct 3) still draft/send a date-check reply. Generic follow-ups with no fee/date ask still produce no draft. Implementation: `src/useCases/homeExchange.js` + `homeExchangeExpire.js`. Tests: `tests/homeExchange.test.js`.
 

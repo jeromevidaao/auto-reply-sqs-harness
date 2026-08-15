@@ -88,6 +88,13 @@ describe('computeRetryDelay / Retry-After', () => {
     assert.equal(d1, 2000);
     assert.equal(d2, 4000);
   });
+
+  it('uses 5/15/30s write backoff (HE + calendar PUT, ~1 min)', () => {
+    const waits = [1, 2, 3].map((attempt) =>
+      computeRetryDelay(timeoutErr(), { attempt, kind: 'write', jitter: false })
+    );
+    assert.deepEqual(waits, [5000, 15000, 30000]);
+  });
 });
 
 describe('withExponentialBackoff', () => {
