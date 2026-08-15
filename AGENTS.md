@@ -4,6 +4,13 @@ This is the canonical instruction file for any AI/agent working in this repo (Gr
 
 **Do not offer manual Lambda deploy.** Push to `main` → CI (tests + eval) → auto-deploy via `.github/workflows/deploy.yml`. See README **CI/CD & Deployment** and `docs/deployment.md`. Only mention manual/AWS-console steps when the user explicitly asks for something outside that path (e.g. DLQ redrive, alarm investigation).
 
+## HARD: Always commit + push (never ask)
+
+After finishing requested work: **commit → public → `git push origin main` → watch CI green → private**.  
+**Never** ask “want me to push?” — standing user mandate.  
+Exceptions only: user said not to push, or force-push / destructive git.  
+Before every CI push: `gh repo edit --visibility public --accept-visibility-change-consequences`. After green: `--visibility private`. Do not wait for a quota failure. Jerome does not pay for GitHub; repos stay private at rest.
+
 ## Core Product
 Local-first evaluation harness + core agent logic for the Grok-powered guest messaging / auto-reply system (originally the `auto-reply-sqs` Lambda).
 
@@ -19,7 +26,7 @@ Local-first evaluation harness + core agent logic for the Grok-powered guest mes
 2. Run relevant verification: `npm test` (must be green), and ideally `npm run eval` or targeted scenario if you touched prompts/categories/tools for HVAC, thermostat, etc.
 3. `git add -A`
 4. `git commit -m "Clear message describing the change and why (e.g. the user request or bug)."`
-5. `git push`
+5. Make the repo **public**, then `git push`. Watch CI green, then make it **private** again.
 6. `git status` — must be clean.
 7. Verify the remote at the exact new SHA using the GitHub MCP tools (get_file_contents on the key files you edited, at the commit SHA on main branch of jeromevidaao/auto-reply-sqs-harness).
 8. Only after the above is the change "done".
