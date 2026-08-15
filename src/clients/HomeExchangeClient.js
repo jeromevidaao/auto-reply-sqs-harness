@@ -139,16 +139,32 @@ export class HomeExchangeClient {
   }
 
   /**
-   * Host pre-approve. Live route: PATCH /v1/conversations/{id} { accepted: true }
-   * (PATCH /v1/exchanges/{id}/approve is a 400 PHP offset error.)
-   * Guest then has ~4 days to finalize.
+   * Exchanges for a conversation (array). Approve uses this same array as the body.
+   */
+  async getExchangesForConversation(conversationId) {
+    if (!conversationId) throw new Error('conversationId is required');
+    const token = await this.getToken();
+    const response = await axios.get(
+      `${HE_API_BASE}/v1/exchanges/${encodeURIComponent(conversationId)}/get-exchanges`,
+      { headers: this._headers(token), timeout: 20000 }
+    );
+    const data = response.data;
+    return Array.isArray(data) ? data : data?.data || [];
+  }
+
+  /**
+   * Host pre-approve (the orange Pre-approve button).
+   * PATCH /v1/exchanges/{conversationId}/approve with the get-exchanges array.
+   * Using the exchange id in the URL is a 400 PHP "Undefined offset: 0".
    */
   async approveConversation(conversationId) {
     if (!conversationId) throw new Error('conversationId is required');
     const token = await this.getToken();
+    const exchanges = await this.getExchangesForConversation(conversationId);
+    if (!exchanges.length) throw new Error('no exchanges on conversation');
     const response = await axios.patch(
-      `${HE_API_BASE}/v1/conversations/${encodeURIComponent(conversationId)}`,
-      { accepted: true },
+      `${HE_API_BASE}/v1/exchanges/${encodeURIComponent(conversationId)}/approve`,
+      exchanges,
       { headers: this._headers(token), timeout: 20000 }
     );
     return response.data || { ok: true };
