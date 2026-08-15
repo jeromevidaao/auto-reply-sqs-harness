@@ -23,6 +23,11 @@ import {
 } from './utils/reservationAccept.js';
 import { applyHighConfidenceForceReply } from './utils/replyPolicy.js';
 import {
+  HE_AIRBNB_ONLY_CATEGORY_FILES,
+  isAirbnbOnlyHeCategory,
+  isHomeExchangeContext,
+} from './useCases/homeExchangeSharedCategories.js';
+import {
   getTimeBasedGreeting,
   resolveNowForGreeting,
   stripLeadingFormalTimeGreeting,
@@ -209,7 +214,9 @@ export class GuestMessagingAgent {
         const categoryFiles = await fs.readdir(this.categoriesDir);
         const mdFiles = categoryFiles.filter(f => f.endsWith('.md')).sort();
 
+        const skipAirbnbOnly = isHomeExchangeContext(context);
         for (const catFile of mdFiles) {
+          if (skipAirbnbOnly && HE_AIRBNB_ONLY_CATEGORY_FILES.has(catFile)) continue;
           const content = await fs.readFile(path.join(this.categoriesDir, catFile), 'utf8');
           categoryKnowledge += `\n\n## ${catFile.replace('.md', '')}\n${content.trim()}`;
           loadedCategories.push(catFile.replace('.md', ''));
@@ -343,6 +350,13 @@ export class GuestMessagingAgent {
       } else {
         throw new Error('Agent returned invalid JSON: ' + raw);
       }
+    }
+
+    if (isHomeExchangeContext(context) && isAirbnbOnlyHeCategory(parsed.typeOfMessageReceived)) {
+      parsed.typeOfMessageReceived = 'OTHER_MESSAGE';
+      parsed.shouldReply = false;
+      parsed.proposedResponse = 'none';
+      parsed.notes = `${parsed.notes || ''} HE skipped Airbnb-only category.`.trim();
     }
 
     // Normalize
@@ -2791,6 +2805,16 @@ export class GuestMessagingAgent {
       'Context:'
     ];
 
+    if (isHomeExchangeContext(context)) {
+      lines.push('- Platform: Home Exchange (NOT Airbnb)');
+      lines.push(
+        '- CRITICAL HOME EXCHANGE: Same Pine unit facts as Airbnb (check-in 4pm, checkout strictly 10am, parking, wifi, laundry, directions, HVAC). ' +
+          'Do NOT mention Airbnb, Superhost, security deposits, payment methods, or cancellation policy articles. ' +
+          'Do NOT classify as NEW_RESERVATION_WELCOME, NEW_INQUIRY_WELCOME, CANCELLATION*, PAYMENT_METHOD_UPDATE, OFF_PLATFORM_BOOKING, or SECURITY_DEPOSIT. ' +
+          'The HE fee / pre-approval flow is handled separately — answer only shared operational or courtesy categories. ' +
+          'Send will go through Home Exchange, never Hospitable.'
+      );
+    }
     if (context.guestName || context.guestDisplayName) {
       const raw = context.guestName || '';
       const disp = context.guestDisplayName || raw;

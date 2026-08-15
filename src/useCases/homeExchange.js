@@ -29,6 +29,11 @@
  *   HE/Hospitable writes retry 4× with 5/15/30s backoff (~1 min) then SQS.
  *   Every successful HE guest send (and send-fail after retries) FCM the owner
  *   phone. Airbnb auto-replies are not notified this way.
+ *
+ * Shared categories (after HE-specific draft is not sendable):
+ *   Thank-you, check-in 4pm, checkout 10am, parking, wifi, laundry, etc.
+ *   Airbnb-only welcome / cancellation / payment stay off this path.
+ *   Send is still HomeExchange-only.
  */
 
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
@@ -39,6 +44,12 @@ import {
 } from '../clients/homeExchangeExchange.js';
 import { buildBlockRecord, createDdbBlockStore } from './homeExchangeBlocks.js';
 import { notifyHeAutoReply, notifyHePreapproval } from './homeExchangeNotify.js';
+import {
+  isAirbnbOnlyHeCategory,
+  runSharedHeCategories,
+  shouldRunSharedHeCategories,
+  thisTurnWantsHePreapprove,
+} from './homeExchangeSharedCategories.js';
 
 export const HOMEEXCHANGE_PLATFORM = 'homeexchange';
 export const HOMEEXCHANGE_ACT = 'homeexchange_message';
@@ -779,12 +790,22 @@ export function shouldSendHomeExchangeDraft(draft, _isFirst) {
   if (!draft?.shouldReply) return false;
   if (!draft?.proposedResponse || draft.proposedResponse === 'none') return false;
   if (HE_DRAFT_NO_SEND.has(draft.reason)) return false;
+  if (isAirbnbOnlyHeCategory(draft.typeOfMessageReceived)) return false;
   return true;
 }
 
-export function shouldAttemptPreapprove({ isFirst, feeAccepted, originalCheckIn, originalCheckOut, originalCalendar } = {}) {
+export function shouldAttemptPreapprove({
+  isFirst,
+  feeAccepted,
+  originalCheckIn,
+  originalCheckOut,
+  originalCalendar,
+  thisTurnWantsPreapprove,
+} = {}) {
   if (isFirst) return false;
   if (!feeAccepted) return false;
+  // Thank-you / wifi / checkout after a prior fee-accept must not re-run pre-approve.
+  if (thisTurnWantsPreapprove === false) return false;
   if (!originalCheckIn || !originalCheckOut) return false;
   return !!(originalCalendar?.checked && originalCalendar?.open);
 }
@@ -843,6 +864,8 @@ export async function handleHomeExchangeMessage({
   notifyOwner = null,
   blockStore = null,
   now = new Date(),
+  sharedCategoryAgent = null,
+  sharedCategoryRunner = null,
 } = {}) {
   const extracted = extractHomeExchangeMessage(event);
   const message = extracted.message;
@@ -965,6 +988,8 @@ export async function handleHomeExchangeMessage({
     nights: stayNights(originalCheckIn, originalCheckOut),
   };
 
+  const thisTurnWantsPreapprove = thisTurnWantsHePreapprove(message);
+
   if (
     shouldAttemptPreapprove({
       isFirst,
@@ -972,6 +997,7 @@ export async function handleHomeExchangeMessage({
       originalCheckIn,
       originalCheckOut,
       originalCalendar,
+      thisTurnWantsPreapprove,
     })
   ) {
     preapprove = await runHomeExchangePreapprove({
@@ -1013,10 +1039,43 @@ export async function handleHomeExchangeMessage({
     });
   }
 
-  const sendEnabled = shouldSendHomeExchangeDraft(draft, isFirst);
+  let sendEnabled = shouldSendHomeExchangeDraft(draft, isFirst);
   let sent = false;
   let sendError = null;
   let sendSkipReason = null;
+  if (
+    shouldRunSharedHeCategories({
+      isFirst,
+      heDraftSendable: sendEnabled,
+      preapproveOk: !!preapprove.ok,
+    })
+  ) {
+    try {
+      const shared = await runSharedHeCategories({
+        message,
+        guestName,
+        checkIn: originalCheckIn || checkIn,
+        checkOut: originalCheckOut || checkOut,
+        conversationId,
+        conversationHistory,
+        listingId: propertyId,
+        propertyName: context.propertyName || APT3_PROPERTY_NAME,
+        sharedCategoryAgent,
+        sharedCategoryRunner,
+      });
+      if (shared) {
+        draft.typeOfMessageReceived = shared.typeOfMessageReceived;
+        draft.shouldReply = shared.shouldReply;
+        draft.proposedResponse = shared.proposedResponse;
+        draft.reason = shared.reason;
+        draft.sharedCategory = true;
+        sendEnabled = shouldSendHomeExchangeDraft(draft, isFirst);
+      }
+    } catch (err) {
+      draft.reason = 'homeexchange_shared_agent_failed';
+      sendError = err?.message || String(err);
+    }
+  }
 
   if (sendEnabled && homeExchangeClient && typeof homeExchangeClient.sendMessage === 'function') {
     if (!conversationId) {

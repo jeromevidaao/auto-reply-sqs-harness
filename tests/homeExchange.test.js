@@ -23,6 +23,15 @@ import {
   HOMEEXCHANGE_PLATFORM,
   APT3_AIRBNB_LISTING_ID,
 } from '../src/useCases/homeExchange.js';
+import {
+  isHeSharedThankYouMessage,
+  isHeCheckoutTimeQuestion,
+  isHeCheckinTimeQuestion,
+  buildDeterministicHeSharedDraft,
+  shouldRunSharedHeCategories,
+  isAirbnbOnlyHeCategory,
+  thisTurnWantsHePreapprove,
+} from '../src/useCases/homeExchangeSharedCategories.js';
 import { alreadySentEquivalent } from '../src/clients/HomeExchangeClient.js';
 import { shouldUnblockPreapproval, canUnblockCalendarDay } from '../src/useCases/homeExchangeExpire.js';
 import { exchangeAlreadyApproved } from '../src/clients/homeExchangeExchange.js';
@@ -380,11 +389,42 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(sendCalled, false);
   });
 
-  it('does not send a follow-up even when an HE client is present', async () => {
+  it('sends a shared thank-you on HE follow-up (does not re-run pre-approve)', async () => {
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Thank you. Coming your way!',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+          checkIn: '2027-05-13',
+          checkOut: '2027-05-19',
+          conversationHistory: [
+            { sender_type: 'guest', content: 'Hi Ruby, the cleaning fee is fine.' },
+          ],
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+        },
+      },
+    });
+    assert.equal(result.sendDisabled, false);
+    assert.equal(result.sent, true);
+    assert.equal(result.preapprove.attempted, false);
+    assert.equal(result.typeOfMessageReceived, 'THANK_YOU_MESSAGE');
+    assert.equal(sentBodies[0], "You're welcome, Caroline!");
+    assert.equal(result.reason, 'homeexchange_shared_thank_you');
+  });
+
+  it('does not send a non-category HE follow-up when no shared agent is present', async () => {
     let sent = 0;
     const result = await handleHomeExchangeMessage({
       event: {
-        message: 'Thanks!',
+        message: 'Just thinking about our trip.',
         context: {
           platform: HOMEEXCHANGE_PLATFORM,
           isFirstMessage: false,
@@ -1017,7 +1057,7 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     const notifications = [];
     const result = await handleHomeExchangeMessage({
       event: {
-        message: 'Thanks!',
+        message: 'Just thinking about our trip.',
         context: {
           platform: HOMEEXCHANGE_PLATFORM,
           isFirstMessage: false,
@@ -1032,6 +1072,143 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     });
     assert.equal(result.sent, false);
     assert.equal(notifications.length, 0);
+  });
+
+  it('notifies Android when a shared HE thank-you is sent', async () => {
+    const notifications = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Thanks!',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage() {
+          return { ok: true };
+        },
+      },
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
+    });
+    assert.equal(result.sent, true);
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].type, HE_NOTIFY_SENT);
+    assert.match(notifications[0].body, /You.?re welcome/i);
+  });
+
+  it('shares checkout time with HE via deterministic category', async () => {
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'What is the latest checkout time?',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+        },
+      },
+    });
+    assert.equal(result.sent, true);
+    assert.match(sentBodies[0], /Checkout is strictly at 10am/i);
+    assert.equal(result.reason, 'homeexchange_shared_checkout_time');
+  });
+
+  it('uses injected shared agent for other HE categories and never Airbnb-only ones', async () => {
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Where can we park?',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+        },
+      },
+      sharedCategoryRunner: async () => ({
+        typeOfMessageReceived: 'PARKING',
+        shouldReply: true,
+        proposedResponse: 'You will have one dedicated off-street parking spot at the property.',
+        reason: 'homeexchange_shared_agent',
+        sharedCategory: true,
+      }),
+    });
+    assert.equal(result.sent, true);
+    assert.equal(result.typeOfMessageReceived, 'PARKING');
+    assert.match(sentBodies[0], /parking spot/i);
+
+    const blocked = await handleHomeExchangeMessage({
+      event: {
+        message: 'Can I update my payment method?',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95101669',
+          guestName: 'Caroline',
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage() {
+          throw new Error('must not send airbnb-only');
+        },
+      },
+      sharedCategoryRunner: async () => ({
+        typeOfMessageReceived: 'PAYMENT_METHOD_UPDATE',
+        shouldReply: true,
+        proposedResponse: 'Please reach out to Airbnb.',
+        reason: 'homeexchange_airbnb_only_category',
+        sharedCategory: true,
+      }),
+    });
+    assert.equal(blocked.sent, false);
+    assert.equal(isAirbnbOnlyHeCategory('PAYMENT_METHOD_UPDATE'), true);
+    assert.equal(isAirbnbOnlyHeCategory('THANK_YOU_MESSAGE'), false);
+  });
+
+  it('detects HE shared thank-you / times and does not treat thanks as a pre-approve turn', () => {
+    assert.equal(isHeSharedThankYouMessage('Thank you. Coming your way!'), true);
+    assert.equal(isHeSharedThankYouMessage('Thanks!'), true);
+    assert.equal(isHeSharedThankYouMessage('What time is checkout?'), false);
+    assert.equal(isHeCheckoutTimeQuestion('What is the latest checkout time?'), true);
+    assert.equal(isHeCheckinTimeQuestion('What time is check-in?'), true);
+    assert.equal(thisTurnWantsHePreapprove('Thank you. Coming your way!'), false);
+    assert.equal(thisTurnWantsHePreapprove('the cleaning fee is fine'), true);
+    assert.equal(thisTurnWantsHePreapprove('Wonderful. I guess u pre approve then we finalize?'), true);
+    assert.equal(
+      shouldAttemptPreapprove({
+        isFirst: false,
+        feeAccepted: true,
+        originalCheckIn: '2027-05-13',
+        originalCheckOut: '2027-05-19',
+        originalCalendar: { checked: true, open: true },
+        thisTurnWantsPreapprove: false,
+      }),
+      false
+    );
+    const thanks = buildDeterministicHeSharedDraft({
+      message: 'Thank you. Coming your way!',
+      guestName: 'Caroline',
+    });
+    assert.equal(thanks.proposedResponse, "You're welcome, Caroline!");
+    assert.equal(shouldRunSharedHeCategories({ isFirst: true, heDraftSendable: false }), false);
+    assert.equal(shouldRunSharedHeCategories({ isFirst: false, heDraftSendable: false, preapproveOk: false }), true);
   });
 
   it('builds HE owner FCM payloads for sent / failed auto-replies', () => {

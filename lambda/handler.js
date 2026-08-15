@@ -161,10 +161,23 @@ export const handler = async (event, context) => {
   // Isolated HomeExchange guest-chat path. Must run before the Airbnb agent so
   // HE traffic cannot classify as NEW_RESERVATION_WELCOME / send via Hospitable.
   if (isHomeExchangePayload(event) || act === 'homeexchange_message') {
-    console.log('[Handler] HomeExchange use case — isolated path (fee ask + pre-approval note send via HE)');
+    console.log('[Handler] HomeExchange use case — isolated path (fee/pre-approve + shared categories via HE send)');
     const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
     const hospitableClient = new HospitableClient();
     const homeExchangeClient = new HomeExchangeClient();
+    await getGrokApiKey();
+    await loadHostContacts();
+    const sharedCategoryAgent = process.env.GROK_API_KEY
+      ? new GuestMessagingAgent({
+          llm: 'auto',
+          notification: 'console',
+          enableReflection: false,
+          enableConversationJudge: false,
+          requireLiveConversationHistory: false,
+          ddbClient,
+          hospitableClient,
+        })
+      : null;
     const heResult = await handleHomeExchangeMessage({
       event,
       hospitableClient,
@@ -172,6 +185,7 @@ export const handler = async (event, context) => {
       homeExchangeClient,
       notifyOwner: notifyOwnerAndroid,
       blockStore: createDdbBlockStore(ddbClient),
+      sharedCategoryAgent,
     });
     const duration = Date.now() - startTime;
     console.log('[Handler] HomeExchange result:', {
