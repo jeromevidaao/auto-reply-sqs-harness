@@ -32,10 +32,14 @@ export function alreadySentEquivalent(messages, proposedResponse) {
   const preview = proposed.slice(0, 80);
   const list = Array.isArray(messages) ? messages : [];
   const proposedIsFeeAsk = /cleaning fee/.test(proposed) && /after your stay/.test(proposed);
+  const proposedIsPreapprove = /blocked those dates/.test(proposed);
   return list.some((m) => {
     const text = String(m.content || m.body || m.text || '').trim().toLowerCase();
     if (!text) return false;
     if (text === proposed) return true;
+    if (proposedIsPreapprove) {
+      return /blocked those dates/.test(text) && /pre-approval/.test(text);
+    }
     if (text.includes(preview) || proposed.includes(text.slice(0, 80))) return true;
     // Only the first-message fee-after-stay ask is equivalent to another fee ask.
     // A later "fee is fine + extra dates" reply must still send.

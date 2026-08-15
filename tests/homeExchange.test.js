@@ -628,6 +628,15 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(sent, 0);
     assert.equal(alreadySentEquivalent([{ content: draftText }], draftText), true);
   });
+
+  it('does not treat the earlier fee-confirm host note as the pre-approval send', () => {
+    const prior =
+      'Hi Caroline — thanks for confirming the $125 cleaning fee is fine for May 13–19, 2027. We can accept that request.';
+    const next =
+      'Hi Caroline — thanks for confirming the $125 cleaning fee is fine for May 13–19, 2027. I just sent you a pre-approval for May 13–19, 2027 and blocked those dates for you.';
+    assert.equal(alreadySentEquivalent([{ content: prior }], next), false);
+    assert.equal(alreadySentEquivalent([{ content: next }], next), true);
+  });
 });
 
 describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', () => {
