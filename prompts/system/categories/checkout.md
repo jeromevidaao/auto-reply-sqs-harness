@@ -20,7 +20,7 @@ If combined with thanks ("Sounds great! Thank you! And what is the latest time..
 This ensures it always auto-replies.
 
 **Bundled with leaving the car (Cassidy incident)**:
-If they also ask to leave the car in the parking spot after checkout / during the day, classify as `["PARKING", "CHECKOUT"]`. Checkout stays 10am. **Never** say they can leave the car in their dedicated/current spot after 10am. See parking.md.
+If they also ask to leave the car in the parking spot after checkout / during the day, classify as `["PARKING", "CHECKOUT"]`. Checkout stays 10am. **Never** say they can leave the car in their dedicated/current spot after 10am. Always explain that the cleaning team needs that spot to clean the unit and get it ready for the next guests. If the vacant-sibling exception applies, name the specific spot (1B / Apt 2 / Apt 3 parking spot). See parking.md.
 
 **CRITICAL - Always reply for checkout time questions combined with thanks**:
 For the exact message: "Sounds great! Thank you! And what is the latest time we are able to check out Monday?"

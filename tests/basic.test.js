@@ -966,9 +966,12 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(applied.applied, true);
     assert.equal(applied.shouldReply, true);
     assert.match(applied.proposedResponse, /10am/i);
+    assert.match(applied.proposedResponse, /cleaning team/i);
+    assert.match(applied.proposedResponse, /clean the unit/i);
+    assert.match(applied.proposedResponse, /next guests/i);
     assert.doesNotMatch(applied.proposedResponse, /yes you can leave the car/i);
     assert.doesNotMatch(applied.proposedResponse, /leave the car in your dedicated/i);
-    assert.doesNotMatch(applied.proposedResponse, /spot for 1b/i);
+    assert.doesNotMatch(applied.proposedResponse, /1B parking spot/i);
   });
 
   it('offers vacant sibling spot until 1pm only when all exception conditions hold', () => {
@@ -988,19 +991,55 @@ describe('EventRequestTool (no LLM)', () => {
         postCheckoutParkingInfo: {
           detected: true,
           exceptionEligible: true,
-          vacantSibling: { shortName: '1B', listingId: 'c899481f-2e5b-402d-80c4-3167fd824d96' },
-          suggestedResponseSnippet:
-            "Checkout is strictly at 10am, so please don't leave the car in your current spot — we need it for the cleaners and next guests. The spot for 1B will be free, so please put the car in that spot, and don't leave it after 1pm.",
+          vacantSibling: {
+            shortName: '1B',
+            listingId: 'c899481f-2e5b-402d-80c4-3167fd824d96',
+            spotLabel: '1B parking spot',
+          },
         },
       },
       msg
     );
     assert.equal(applied.applied, true);
-    assert.match(applied.proposedResponse, /1B/i);
+    assert.match(applied.proposedResponse, /1B parking spot/i);
     assert.match(applied.proposedResponse, /1pm/i);
     assert.match(applied.proposedResponse, /current spot/i);
     assert.match(applied.proposedResponse, /10am/i);
+    assert.match(applied.proposedResponse, /cleaning team/i);
+    assert.match(applied.proposedResponse, /clean the unit/i);
+    assert.match(applied.proposedResponse, /next guests/i);
     assert.doesNotMatch(applied.proposedResponse, /yes you can leave the car in your dedicated/i);
+  });
+
+  it('names Apt 3 parking spot when that sibling is the vacant exception', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyPostCheckoutParkingPolicy(
+      { typeOfMessageReceived: 'PARKING', proposedResponse: 'none', shouldReply: false },
+      {
+        guestName: 'Cassidy',
+        listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+        checkOut: '2026-08-17',
+        asOfInstant: '2026-08-16T20:30:00-04:00',
+        postCheckoutParkingInfo: {
+          detected: true,
+          exceptionEligible: true,
+          vacantSibling: {
+            shortName: 'Apt 3',
+            listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+            spotLabel: 'Apt 3 parking spot',
+          },
+        },
+      },
+      'Could we leave the car in the parking spot during the day tomorrow?'
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /Apt 3 parking spot/i);
+    assert.match(applied.proposedResponse, /cleaning team/i);
+    assert.match(applied.proposedResponse, /clean the unit/i);
+    assert.doesNotMatch(applied.proposedResponse, /1B parking spot/i);
   });
 
   it('does not treat Amie pre-check-in parking as post-checkout car leave', () => {
@@ -1070,7 +1109,10 @@ describe('PostCheckoutParkingTool (mocked Hospitable, no LLM)', () => {
     assert.equal(result.exceptionEligible, false);
     assert.equal(result.vacantSibling, null);
     assert.match(result.suggestedResponseSnippet, /10am/i);
-    assert.doesNotMatch(result.suggestedResponseSnippet, /1B/i);
+    assert.match(result.suggestedResponseSnippet, /cleaning team/i);
+    assert.match(result.suggestedResponseSnippet, /clean the unit/i);
+    assert.match(result.suggestedResponseSnippet, /next guests/i);
+    assert.doesNotMatch(result.suggestedResponseSnippet, /1B parking spot/i);
   });
 
   it('offers 1B until 1pm after 8pm ET when 1B is vacant that night', async () => {
@@ -1084,9 +1126,12 @@ describe('PostCheckoutParkingTool (mocked Hospitable, no LLM)', () => {
     assert.equal(result.occupancyChecked, true);
     assert.equal(result.exceptionEligible, true);
     assert.equal(result.vacantSibling.shortName, '1B');
-    assert.match(result.suggestedResponseSnippet, /1B/i);
+    assert.equal(result.vacantSibling.spotLabel, '1B parking spot');
+    assert.match(result.suggestedResponseSnippet, /1B parking spot/i);
     assert.match(result.suggestedResponseSnippet, /1pm/i);
     assert.match(result.suggestedResponseSnippet, /current spot/i);
+    assert.match(result.suggestedResponseSnippet, /cleaning team/i);
+    assert.match(result.suggestedResponseSnippet, /clean the unit/i);
   });
 
   it('does not offer a sibling when every other unit is occupied that night', async () => {
@@ -2900,10 +2945,13 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
     assert.equal(refused.shouldReply, true, 'Must auto-reply to Cassidy parking + checkout ask');
     assert.ok(refused.proposedResponse && refused.proposedResponse !== 'none');
     assert.match(refused.proposedResponse, /10\s*(:00)?\s*am/i);
+    assert.match(refused.proposedResponse, /cleaning team/i);
+    assert.match(refused.proposedResponse, /clean the unit/i);
+    assert.match(refused.proposedResponse, /next guests/i);
     assert.doesNotMatch(refused.proposedResponse, /yes you can leave the car/i);
     assert.doesNotMatch(refused.proposedResponse, /you can leave the car in your/i);
     assert.doesNotMatch(refused.proposedResponse, /car in your dedicated spot/i);
-    assert.doesNotMatch(refused.proposedResponse, /spot for 1b/i);
+    assert.doesNotMatch(refused.proposedResponse, /1B parking spot/i);
     assert.equal(refused.postCheckoutParkingInfo?.detected, true);
     assert.equal(refused.postCheckoutParkingInfo?.exceptionEligible, false);
 
@@ -2920,9 +2968,11 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
 
     assert.equal(offered.shouldReply, true);
     assert.match(offered.proposedResponse, /10\s*(:00)?\s*am/i);
-    assert.match(offered.proposedResponse, /1B/i);
+    assert.match(offered.proposedResponse, /1B parking spot/i);
     assert.match(offered.proposedResponse, /1\s*(:00)?\s*pm/i);
     assert.match(offered.proposedResponse, /current spot/i);
+    assert.match(offered.proposedResponse, /cleaning team/i);
+    assert.match(offered.proposedResponse, /clean the unit/i);
     assert.doesNotMatch(offered.proposedResponse, /yes you can leave the car/i);
     assert.doesNotMatch(offered.proposedResponse, /leave the car in your dedicated/i);
     assert.equal(offered.postCheckoutParkingInfo?.exceptionEligible, true);

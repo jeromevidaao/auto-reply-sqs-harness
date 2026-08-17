@@ -29,6 +29,10 @@ export const PINE_PARKING_UNITS = [
 export const POST_CHECKOUT_PARKING_MAX_UNTIL = '1pm';
 export const POST_CHECKOUT_PARKING_BOOKING_CUTOFF_HOUR_ET = 20;
 
+/** Always said when we refuse the guest's own spot (refuse and exception paths). */
+export const POST_CHECKOUT_PARKING_WHY =
+  'the cleaning team needs that spot to clean the unit and get it ready for the next guests';
+
 /**
  * Cassidy / Olivia class: leave the car after checkout or during checkout day.
  *
@@ -135,6 +139,28 @@ export class PostCheckoutParkingTool extends BaseTool {
     return PINE_PARKING_UNITS.find((u) => u.listingId === listingId) || null;
   }
 
+  /** Guest-facing label: "1B parking spot", "Apt 2 parking spot", "Apt 3 parking spot". */
+  static spotLabel(shortName) {
+    const name = String(shortName || '').trim();
+    if (!name) return 'parking spot';
+    return /parking spot/i.test(name) ? name : `${name} parking spot`;
+  }
+
+  static refuseSnippet() {
+    return (
+      `Checkout is strictly at 10am. We can't leave the car in your parking spot after that because ` +
+      `${POST_CHECKOUT_PARKING_WHY}.`
+    );
+  }
+
+  static exceptionSnippet(siblingShortName) {
+    const label = PostCheckoutParkingTool.spotLabel(siblingShortName);
+    return (
+      `Checkout is strictly at 10am, so please don't leave the car in your current spot — ${POST_CHECKOUT_PARKING_WHY}. ` +
+      `The ${label} will be free, so please put the car in the ${label}, and don't leave it after 1pm.`
+    );
+  }
+
   static siblingUnits(listingId) {
     return PINE_PARKING_UNITS.filter((u) => u.listingId !== listingId);
   }
@@ -190,8 +216,7 @@ export class PostCheckoutParkingTool extends BaseTool {
       siblingOccupancy: [],
       exceptionEligible: false,
       reason: 'own_spot_never_allowed_after_10am',
-      suggestedResponseSnippet:
-        'Checkout is strictly at 10am. We can\'t leave the car in your parking spot after that — the cleaning team and next guests need the space.',
+      suggestedResponseSnippet: PostCheckoutParkingTool.refuseSnippet(),
     };
 
     if (!isDayBeforeCheckout || !isAfter8pmEt || !checkOut) {
@@ -224,6 +249,7 @@ export class PostCheckoutParkingTool extends BaseTool {
             listingId: unit.listingId,
             shortName: unit.shortName,
             displayName: unit.displayName,
+            spotLabel: PostCheckoutParkingTool.spotLabel(unit.shortName),
           };
         }
       }
@@ -236,9 +262,9 @@ export class PostCheckoutParkingTool extends BaseTool {
     if (result.vacantSibling && result.occupancyChecked) {
       result.exceptionEligible = true;
       result.reason = 'sibling_vacant_after_8pm_day_before';
-      result.suggestedResponseSnippet =
-        `Checkout is strictly at 10am, so please don't leave the car in your current spot — we need it for the cleaners and next guests. ` +
-        `The spot for ${result.vacantSibling.shortName} will be free, so please put the car in that spot, and don't leave it after 1pm.`;
+      result.suggestedResponseSnippet = PostCheckoutParkingTool.exceptionSnippet(
+        result.vacantSibling.shortName
+      );
     } else {
       result.reason = result.occupancyChecked
         ? 'no_vacant_sibling_for_checkout_night'

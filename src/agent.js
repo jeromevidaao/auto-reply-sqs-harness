@@ -1359,11 +1359,19 @@ export class GuestMessagingAgent {
     return (
       /yes[,!]?\s+you can leave the car/i.test(text) ||
       /you can leave the car in your/i.test(text) ||
-      /leave the car in your (dedicated|current|parking)/i.test(text) ||
-      /leave (the |your )car in (your |the )(dedicated |current )?(spot|parking)/i.test(text) ||
+      /leave the car in your dedicated/i.test(text) ||
       /dedicated spot while you walk/i.test(text) ||
       /car in your dedicated spot/i.test(text) ||
       /keep (the |your )car in your/i.test(text)
+    );
+  }
+
+  _draftExplainsCleaningNeed(draft = '') {
+    const text = String(draft || '');
+    return (
+      /cleaning team/i.test(text) &&
+      /clean the unit/i.test(text) &&
+      /next guests?/i.test(text)
     );
   }
 
@@ -1382,16 +1390,19 @@ export class GuestMessagingAgent {
 
     const exception = !!(info.exceptionEligible && info.vacantSibling?.shortName);
     const siblingName = info.vacantSibling?.shortName || '';
+    const spotLabel =
+      info.vacantSibling?.spotLabel ||
+      (siblingName ? PostCheckoutParkingTool.spotLabel(siblingName) : '');
     const snippet = (info.suggestedResponseSnippet || '').trim();
 
     const refuseBody =
       snippet && !exception
         ? snippet
-        : 'Checkout is strictly at 10am. We can\'t leave the car in your parking spot after that — the cleaning team and next guests need the space.';
+        : PostCheckoutParkingTool.refuseSnippet();
     const exceptionBody =
       snippet && exception
         ? snippet
-        : `Checkout is strictly at 10am, so please don't leave the car in your current spot — we need it for the cleaners and next guests. The spot for ${siblingName} will be free, so please put the car in that spot, and don't leave it after 1pm.`;
+        : PostCheckoutParkingTool.exceptionSnippet(siblingName);
 
     const body = exception ? exceptionBody : refuseBody;
     let proposedResponse = `${greetingPrefix} ${body}`.replace(/\s+/g, ' ').replace(/ ,/g, ',').trim();
@@ -1399,8 +1410,9 @@ export class GuestMessagingAgent {
     const draft = String(parsed.proposedResponse || '').trim();
     const has10am = /10\s*(:00)?\s*am/i.test(draft);
     const allowsOwn = this._draftAllowsOwnSpotAfterCheckout(draft);
-    const mentionsSibling = exception && siblingName
-      ? new RegExp(siblingName.replace(/\s+/g, '\\s*'), 'i').test(draft)
+    const explainsWhy = this._draftExplainsCleaningNeed(draft);
+    const mentionsSiblingSpot = exception && spotLabel
+      ? new RegExp(spotLabel.replace(/\s+/g, '\\s*'), 'i').test(draft)
       : false;
     const mentions1pm = /1\s*(:00)?\s*pm/i.test(draft);
     const saysDontCurrent =
@@ -1413,12 +1425,14 @@ export class GuestMessagingAgent {
       draft === 'none' ||
       draft.length < 20 ||
       !has10am ||
-      allowsOwn;
+      allowsOwn ||
+      !explainsWhy;
 
     if (exception) {
-      if (!mentionsSibling || !mentions1pm || !saysDontCurrent) needsRewrite = true;
+      if (!mentionsSiblingSpot || !mentions1pm || !saysDontCurrent) needsRewrite = true;
     } else if (
       /spot for (1b|apt\s*[23])/i.test(draft) ||
+      /(1b|apt\s*[23]) parking spot/i.test(draft) ||
       /put the car in that spot/i.test(draft)
     ) {
       // Sibling offer is only legal on the exception path.
@@ -3236,11 +3250,12 @@ export class GuestMessagingAgent {
 
     if (this._isPostCheckoutParkingAsk(message) || context.postCheckoutParkingInfo?.detected) {
       const p = context.postCheckoutParkingInfo || {};
-      lines.push('- CRITICAL POST-CHECKOUT PARKING (Cassidy incident): Guest asks to leave/keep the car in the parking spot after checkout or during checkout day. You MUST NEVER say they can leave the car in their dedicated / current / own spot after 10am. Checkout is strictly at 10am. The cleaning team and next guests need that spot. Production bug: "yes you can leave the car in your dedicated spot while you walk around tomorrow. Checkout is strictly at 10am." is FORBIDDEN.');
+      lines.push('- CRITICAL POST-CHECKOUT PARKING (Cassidy incident): Guest asks to leave/keep the car in the parking spot after checkout or during checkout day. You MUST NEVER say they can leave the car in their dedicated / current / own spot after 10am. Checkout is strictly at 10am. ALWAYS explain why: the cleaning team needs that spot to clean the unit and get it ready for the next guests. Production bug: "yes you can leave the car in your dedicated spot while you walk around tomorrow. Checkout is strictly at 10am." is FORBIDDEN.');
       if (p.exceptionEligible && p.vacantSibling?.shortName) {
-        lines.push(`- SINGLE EXCEPTION (all three already verified by PostCheckoutParkingTool): it is the evening before checkout, after 8pm ET (no new bookings), and ${p.vacantSibling.shortName} is vacant that night. Offer ONLY that unit's spot until 1pm max. MUST say they must NOT leave the car in their current spot. MUST include "1pm". Ruby gold: "the spot for 1b will be free tomorrow so please put the car in that spot, and don't leave it in your current spot".`);
+        const label = p.vacantSibling.spotLabel || PostCheckoutParkingTool.spotLabel(p.vacantSibling.shortName);
+        lines.push(`- SINGLE EXCEPTION (all three already verified by PostCheckoutParkingTool): it is the evening before checkout, after 8pm ET (no new bookings), and ${p.vacantSibling.shortName} is vacant that night. Name the specific spot (${label}) — e.g. "1B parking spot", "Apt 2 parking spot", or "Apt 3 parking spot". Offer ONLY that spot until 1pm max. MUST say they must NOT leave the car in their current spot. MUST include "1pm" and the cleaning-team reason. Ruby gold: name the vacant unit's spot, and don't leave it in the current spot.`);
       } else {
-        lines.push(`- Exception NOT eligible (reason=${p.reason || 'unknown / not yet checked'}). Do NOT offer another unit's spot. Do NOT say yes they can leave the car. Answer: checkout is strictly at 10am; we can't leave the car in their parking spot after that.`);
+        lines.push(`- Exception NOT eligible (reason=${p.reason || 'unknown / not yet checked'}). Do NOT offer another unit's spot. Do NOT say yes they can leave the car. Answer: checkout is strictly at 10am; we can't leave the car in their parking spot after that because the cleaning team needs that spot to clean the unit and get it ready for the next guests.`);
       }
       if (p.suggestedResponseSnippet) {
         lines.push(`- Tool suggested snippet (prefer this wording): "${p.suggestedResponseSnippet}"`);

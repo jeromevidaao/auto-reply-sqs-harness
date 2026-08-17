@@ -12,13 +12,13 @@
 
 **Special cases**:
 - **Pre-check-in parking (Amie incident)**: If the guest asks to park in the designated spot *before* 4pm / before check-in time, and no prior host message said the unit is ready for check-in now (`earlyUnitReadyOffered` is false), you **must not** say "yes", "the designated spot is available", or otherwise confirm they can park early. Say check-in is at 4pm; we **can't guarantee** the spot before then; the **cleaning team** may still be using it; **we'll message you** when the spot is ready. Only confirm early parking if the host already told them the unit is ready.
-- **Post-checkout / checkout-day car (Cassidy incident)**: If the guest asks to leave the car in the parking spot after checkout, during checkout day, or "while we walk around" after they leave: **NEVER** allow them to keep **their own** dedicated spot after 10am. Checkout is strictly at 10am. The cleaning team and next guests need that spot. Forbidden (the production bug): "yes you can leave the car in your dedicated spot while you walk around tomorrow."
+- **Post-checkout / checkout-day car (Cassidy incident)**: If the guest asks to leave the car in the parking spot after checkout, during checkout day, or "while we walk around" after they leave: **NEVER** allow them to keep **their own** dedicated spot after 10am. Checkout is strictly at 10am. **ALWAYS explain why** (refuse and exception): "the cleaning team needs that spot to clean the unit and get it ready for the next guests." Forbidden (the production bug): "yes you can leave the car in your dedicated spot while you walk around tomorrow."
   - **Single exception** — all three must already be true in `postCheckoutParkingInfo` from PostCheckoutParkingTool (never invent this):
     1. They are asking on the **day before** checkout.
     2. It is **after 8pm ET** (we do not take new bookings after that, so occupancy is locked).
     3. **Another Pine unit is vacant that night.**
-    Then and only then: tell them **not** to leave the car in their **current** spot, and they may put it in the **vacant unit's** spot **until 1pm max**. Ruby gold: "the spot for 1b will be free tomorrow so please put the car in that spot, and don't leave it in your current spot because we have someone else checking in tomorrow."
-  - If the exception is not eligible, refuse only — do not offer another unit.
+    Then and only then: tell them **not** to leave the car in their **current** spot, and name the **specific** vacant spot — **"1B parking spot"**, **"Apt 2 parking spot"**, or **"Apt 3 parking spot"** — **until 1pm max**. Still include the cleaning-team reason. Ruby gold: name the vacant unit's spot; don't leave it in the current spot.
+  - If the exception is not eligible, refuse only — do not offer another unit. Still include the cleaning-team reason.
 - On check-in day (stay timing = current): The cleaning team may be using the spot. Tell the guest the spot will be available once cleaning finishes and that **we will message you** when it's ready. Use phrasing close to "the cleaning team is preparing the unit" when appropriate. Do **not** say the spot is available now unless unit readiness was already communicated by a prior host message.
 - When a golden requires "message you", include that exact phrasing.
 - Temporary parking / non-guest use: Decline politely — cleaning team needs the spot.

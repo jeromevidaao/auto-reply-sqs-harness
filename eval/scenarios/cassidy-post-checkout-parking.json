@@ -23,7 +23,7 @@
       "vacantSibling": null,
       "exceptionEligible": false,
       "reason": "before_8pm_et_bookings_still_open",
-      "suggestedResponseSnippet": "Checkout is strictly at 10am. We can't leave the car in your parking spot after that — the cleaning team and next guests need the space."
+      "suggestedResponseSnippet": "Checkout is strictly at 10am. We can't leave the car in your parking spot after that because the cleaning team needs that spot to clean the unit and get it ready for the next guests."
     },
     "conversationHistory": []
   },
@@ -40,7 +40,10 @@
       "dedicated spot while you walk"
     ],
     "requiredPhrases": [
-      "10am"
+      "10am",
+      "cleaning team",
+      "clean the unit",
+      "next guests"
     ]
   },
   "notes": "Cassidy 2026-08-16 5:56pm ET production miss. Ruby corrected: do not leave the car in the current spot. Auto must refuse own-spot parking after 10am. Sibling-spot exception only after 8pm ET the evening before checkout when another unit is vacant — not this timestamp."
