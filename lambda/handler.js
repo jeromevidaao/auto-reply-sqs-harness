@@ -7,7 +7,7 @@
  *     { body: "<json-string>" }                 → often contains nested { data: { body, conversation_id, ... } }
  *     { data: { body, reservation_id, conversation_id, ... } }
  * - HomeExchange guest chat (act=homeexchange_message / platform=homeexchange):
- *     Isolated first-message path (Hospitable calendar open? + DDB cleaning fee).
+ *     Isolated first-message path (personalized ack + calendar + DDB cleaning fee).
  *     Sends via HomeExchange API only — never Hospitable. Airbnb paths unchanged.
  * - Real SQS traffic from grok_reservation (reservation.created / reservation.changed):
  *     API Gateway envelope with act=reservation and Hospitable reservation payload.
@@ -37,6 +37,7 @@ import {
 } from '../src/utils/reservationAccept.js';
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
 import { isHomeExchangePayload, handleHomeExchangeMessage } from '../src/useCases/homeExchange.js';
+import { createHeFirstAckWriter } from '../src/useCases/homeExchangeFirstAck.js';
 import { expireHomeExchangeBlocks } from '../src/useCases/homeExchangeExpire.js';
 import { createDdbBlockStore } from '../src/useCases/homeExchangeBlocks.js';
 
@@ -186,6 +187,7 @@ export const handler = async (event, context) => {
       notifyOwner: notifyOwnerAndroid,
       blockStore: createDdbBlockStore(ddbClient),
       sharedCategoryAgent,
+      firstAckWriter: process.env.GROK_API_KEY ? createHeFirstAckWriter() : null,
     });
     const duration = Date.now() - startTime;
     console.log('[Handler] HomeExchange result:', {

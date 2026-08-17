@@ -31,7 +31,28 @@ export const HE_AIRBNB_ONLY_CATEGORY_FILES = new Set([
 ]);
 
 const OPERATIONAL_ASK =
-  /check.?in|check.?out|wifi|password|parking|laundry|door code|lockbox|lock out|early|late checkout|heat|ac\b|thermostat|linens|towels|directions|old port|fee is fine|pre-?approv|available|dates|pets?|ev charger|trash|code/i;
+  /check.?in|check.?out|wifi|password|parking|laundry|door code|lockbox|lock out|early|late checkout|heat|ac\b|thermostat|linens|towels|directions|old port|fee is fine|fine with|cleaning fee|pre-?approv|available|dates|pets?|ev charger|trash|code/i;
+
+/** Straighten curly quotes so “We’re fine with the fee” matches the same as ASCII. */
+export function normalizeHeGuestText(text) {
+  return String(text || '')
+    .replace(/[\u2018\u2019\u02BC]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"');
+}
+
+/**
+ * Guest agreed to pay the HE cleaning fee on this turn.
+ * Must catch Katie (2026-08-17): "We're completely fine with the cleaning fee!"
+ * not only Caroline's "the cleaning fee is fine".
+ */
+export const HE_FEE_ACCEPTED_RE =
+  /(?:cleaning\s+)?fees?\s+is\s+fine|(?:cleaning\s+)?fees?\s+works|(?:completely\s+|totally\s+|just\s+)?fine\s+with(?:\s+paying)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:happy|glad)\s+to\s+(?:pay|cover)(?:\s+the)?(?:\s+cleaning)?\s+fees?|ok(?:ay)?(?:\s+with|\s+paying|\s+to\s+pay)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|no\s+problem(?:\s+with|\s+paying)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:we(?:'re|\s+are)|i(?:'m|\s+am))\s+(?:completely\s+|totally\s+)?(?:fine|ok(?:ay)?)\s+with(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:will|can|we'll|we\s+will|we\s+can)\s+(?:pay|cover)(?:\s+the)?(?:\s+cleaning)?\s+fees?/i;
+
+export function guestAcceptedCleaningFeeText(text) {
+  const raw = normalizeHeGuestText(text);
+  if (!raw.trim()) return false;
+  return HE_FEE_ACCEPTED_RE.test(raw);
+}
 
 export function isHomeExchangeContext(context = {}) {
   const platform = String(context.platform || context.source || context.channel || '').toLowerCase();
@@ -54,14 +75,10 @@ export function isAirbnbOnlyHeCategory(value) {
 }
 
 export function thisTurnWantsHePreapprove(text) {
-  const raw = String(text || '');
+  const raw = normalizeHeGuestText(text);
   // HE system line after the guest already finalized — not a request to pre-approve.
   if (/has finalized the exchange/i.test(raw)) return false;
-  return (
-    /cleaning fee is fine|fee is fine|happy to pay (the )?(cleaning )?fee|ok(?:ay)? (with |paying )?the (cleaning )?fee|fee works/i.test(
-      raw
-    ) || /\bpre-?approv|\bfinalize\b/i.test(raw)
-  );
+  return guestAcceptedCleaningFeeText(raw) || /\bpre-?approv|\bfinalize\b/i.test(raw);
 }
 
 /** Pure / short courtesy thanks with no operational question. */
@@ -139,10 +156,17 @@ export function buildDeterministicHeSharedDraft({ message, guestName } = {}) {
   return null;
 }
 
-export function shouldRunSharedHeCategories({ isFirst, heDraftSendable, preapproveOk } = {}) {
+export function shouldRunSharedHeCategories({
+  isFirst,
+  heDraftSendable,
+  preapproveOk,
+  thisTurnWantsPreapprove,
+} = {}) {
   if (isFirst) return false;
   if (preapproveOk) return false;
   if (heDraftSendable) return false;
+  // Katie incident: fee-agree must never fall through to shared "You're welcome".
+  if (thisTurnWantsPreapprove) return false;
   return true;
 }
 

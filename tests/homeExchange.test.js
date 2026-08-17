@@ -34,6 +34,13 @@ import {
   isAirbnbOnlyHeCategory,
   thisTurnWantsHePreapprove,
 } from '../src/useCases/homeExchangeSharedCategories.js';
+import {
+  applyHeFirstAckWriter,
+  buildHeFirstAckClause,
+  composeHeFirstReply,
+  extractHeFirstMessageHooks,
+  isSafeHeFirstAck,
+} from '../src/useCases/homeExchangeFirstAck.js';
 import { alreadySentEquivalent } from '../src/clients/HomeExchangeClient.js';
 import { shouldUnblockPreapproval, canUnblockCalendarDay } from '../src/useCases/homeExchangeExpire.js';
 import { exchangeAlreadyApproved } from '../src/clients/homeExchangeExchange.js';
@@ -202,6 +209,8 @@ describe('HomeExchange unit mapping (Katie Apt #2 wiring)', () => {
     assert.match(result.proposedResponse, /\$120/);
     assert.match(result.proposedResponse, /open on our calendar/i);
     assert.match(result.proposedResponse, /okay paying that after your stay/i);
+    assert.match(result.proposedResponse, /Halloween/i);
+    assert.match(result.proposedResponse, /Portland/i);
   });
 });
 
@@ -246,6 +255,7 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
 
     const draft = buildHomeExchangeDraft({
       guestName: 'Caroline',
+      guestMessage: caroline,
       checkIn: '2027-05-13',
       checkOut: '2027-05-19',
       calendar: open,
@@ -258,6 +268,9 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.match(draft.proposedResponse, /\$125/);
     assert.match(draft.proposedResponse, /after your stay/i);
     assert.match(draft.proposedResponse, /open on our calendar/i);
+    assert.match(draft.proposedResponse, /grandchildren/i);
+    assert.match(draft.proposedResponse, /Deering Park/i);
+    assert.match(draft.proposedResponse, /kind words about the place/i);
   });
 
   it('does not ask for a cleaning fee when the calendar is blocked', () => {
@@ -278,6 +291,7 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
 
     const draft = buildHomeExchangeDraft({
       guestName: 'Caroline',
+      guestMessage: caroline,
       checkIn: '2027-05-13',
       checkOut: '2027-05-19',
       calendar: blocked,
@@ -285,6 +299,7 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
       isFirst: true,
     });
     assert.match(draft.proposedResponse, /not open/i);
+    assert.match(draft.proposedResponse, /grandchildren/i);
     assert.equal(/\$125/.test(draft.proposedResponse), false);
     assert.equal(/paying that/.test(draft.proposedResponse), false);
   });
@@ -436,6 +451,8 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(result.calendar.open, true);
     assert.match(result.proposedResponse, /\$125/);
     assert.match(result.proposedResponse, /after your stay/i);
+    assert.match(result.proposedResponse, /grandchildren/i);
+    assert.match(result.proposedResponse, /Deering Park/i);
     assert.equal(notifications.length, 1);
     assert.equal(notifications[0].type, HE_NOTIFY_SENT);
     assert.match(notifications[0].title, /Caroline/);
@@ -783,6 +800,142 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
   });
 });
 
+describe('HomeExchange first-message personalization (Airbnb-style ack)', () => {
+  const caroline =
+    'Hi Ruby, your place looks great. We are asking for a points exchange visit checking in May 13 and checking out May 19 for 6 nights. Our grandchildren live just on the other side of Deering Park. It is ideal for us. I know it’s way out next May, but we have people staying in our home with Home Exchange. Look forward to hearing from you. Caroline & Ken.';
+  const katie =
+    'Hi! We would love to spend Halloween weekend in Portland with friends — your place looks great.';
+
+  it('extracts Caroline grandchildren / Deering Park / compliment hooks', () => {
+    const hooks = extractHeFirstMessageHooks(caroline);
+    assert.equal(hooks.complimentPlace, true);
+    assert.equal(hooks.family, 'grandchildren');
+    assert.equal(hooks.landmark, 'Deering Park');
+    const ack = buildHeFirstAckClause(caroline);
+    assert.match(ack, /kind words about the place/i);
+    assert.match(ack, /grandchildren/i);
+    assert.match(ack, /Deering Park/i);
+  });
+
+  it('extracts Katie Halloween-in-Portland hooks', () => {
+    const hooks = extractHeFirstMessageHooks(katie);
+    assert.equal(hooks.occasion, 'Halloween');
+    assert.equal(hooks.city, 'Portland');
+    assert.equal(hooks.complimentPlace, true);
+    const ack = buildHeFirstAckClause(katie);
+    assert.match(ack, /Halloween/i);
+    assert.match(ack, /Portland/i);
+  });
+
+  it('keeps a generic opener only for short hi/thanks first messages', () => {
+    assert.equal(buildHeFirstAckClause('Hi'), 'thanks for reaching out');
+    assert.equal(buildHeFirstAckClause('Thanks!'), 'thanks for reaching out');
+    assert.equal(buildHeFirstAckClause(''), 'thanks for reaching out');
+  });
+
+  it('composes ack + policy without dropping the operational paragraph', () => {
+    const text = composeHeFirstReply({
+      guestName: 'Katie',
+      ackClause: 'Halloween in Portland sounds like a fun trip',
+      policySentence:
+        'I checked our calendar for October 29–November 2, 2026 and those dates are not open, so we can\'t accept the request as it stands.',
+    });
+    assert.match(text, /^Hi Katie — Halloween in Portland sounds like a fun trip\./);
+    assert.match(text, /those dates are not open/i);
+    assert.equal(/\$120/.test(text), false);
+  });
+
+  it('declines Katie with a Halloween ack and no cleaning-fee ask', async () => {
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: katie,
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: true,
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-02',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [
+            { date: '2026-10-29', status: { available: false } },
+            { date: '2026-10-30', status: { available: true } },
+            { date: '2026-10-31', status: { available: true } },
+            { date: '2026-11-01', status: { available: true } },
+          ];
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
+        },
+        async sendMessage() {
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(result.calendar.open, false);
+    assert.equal(result.reason, 'calendar_not_open');
+    assert.match(result.proposedResponse, /Hi Katie/i);
+    assert.match(result.proposedResponse, /Halloween/i);
+    assert.match(result.proposedResponse, /Portland/i);
+    assert.match(result.proposedResponse, /not open/i);
+    assert.match(result.proposedResponse, /can't accept the request/i);
+    assert.equal(/\$120/.test(result.proposedResponse), false);
+    assert.equal(/after your stay/.test(result.proposedResponse), false);
+  });
+
+  it('rejects an ack writer that invents fees or availability', () => {
+    assert.equal(isSafeHeFirstAck('Halloween in Portland sounds like a fun trip'), true);
+    assert.equal(isSafeHeFirstAck('those dates are not open on our calendar'), false);
+    assert.equal(isSafeHeFirstAck('the cleaning fee after you leave is $120'), false);
+    assert.equal(isSafeHeFirstAck('Hi Katie, thanks for reaching out'), false);
+    assert.equal(isSafeHeFirstAck('ok'), false);
+  });
+
+  it('uses a safe writer ack and ignores an unsafe one', async () => {
+    const base = buildHomeExchangeDraft({
+      guestName: 'Katie',
+      guestMessage: katie,
+      checkIn: '2026-10-29',
+      checkOut: '2026-11-02',
+      calendar: { checked: true, open: false, unavailable: ['2026-10-29'] },
+      isFirst: true,
+    });
+    const good = await applyHeFirstAckWriter(base, {
+      message: katie,
+      guestName: 'Katie',
+      writer: async () =>
+        'Halloween weekend with friends in Portland sounds like a great trip, and thanks for the kind words about the place',
+    });
+    assert.equal(good.ackSource, 'writer');
+    assert.match(good.proposedResponse, /with friends/i);
+    assert.match(good.proposedResponse, /not open/i);
+
+    const bad = await applyHeFirstAckWriter(base, {
+      message: katie,
+      guestName: 'Katie',
+      writer: async () => 'those dates are open and the cleaning fee is $120',
+    });
+    assert.equal(bad.ackSource, 'hooks');
+    assert.equal(bad.proposedResponse, base.proposedResponse);
+  });
+
+  it('treats a prior decline as already sent even if the ack wording changed', () => {
+    const prior =
+      'Hi Katie, thanks for reaching out. I checked our calendar for October 29–November 2, 2026 and those dates are not open, so we can\'t accept the request as it stands.';
+    const next =
+      'Hi Katie — Halloween in Portland sounds like a fun trip. I checked our calendar for October 29–November 2, 2026 and those dates are not open, so we can\'t accept the request as it stands.';
+    assert.equal(alreadySentEquivalent([{ content: prior }], next), true);
+  });
+});
+
 describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', () => {
   it('treats HE RESERVED / missing ranges as closed even if Hospitable is open', () => {
     const he = analyzeHeCalendarOpen({
@@ -918,6 +1071,119 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
       originalCheckOut: '2027-05-19',
       originalCalendar: result.originalCalendar,
     }), true);
+  });
+
+  it('Katie Apt #2: “completely fine with the cleaning fee” pre-approves (not you’re welcome)', async () => {
+    // Exact 2026-08-17 guest text (curly apostrophe) that was wrongly answered
+    // with "You're welcome, Katie!" instead of HE pre-approve + invite.
+    const katieFeeOk =
+      'Hi Ruby, oh that is great news. We\u2019re completely fine with the cleaning fee!';
+    assert.equal(guestAcceptedCleaningFee(katieFeeOk), true);
+    assert.equal(guestAcceptedCleaningFee(katieFeeOk.replace('\u2019', "'")), true);
+    assert.equal(thisTurnWantsHePreapprove(katieFeeOk), true);
+    assert.equal(isHeSharedThankYouMessage(katieFeeOk), false);
+    assert.equal(
+      shouldRunSharedHeCategories({
+        isFirst: false,
+        heDraftSendable: false,
+        preapproveOk: false,
+        thisTurnWantsPreapprove: true,
+      }),
+      false
+    );
+
+    const approved = [];
+    const blocked = [];
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: katieFeeOk,
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95201321',
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-02',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar(propertyId) {
+          assert.equal(propertyId, '114663c5-0709-4eff-a868-fa9ebd6ed42d');
+          return ['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01'].map((date) => ({
+            date,
+            status: { available: true },
+          }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar(_id, dates) {
+          blocked.push(...dates);
+          return { status: 'accepted' };
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 20150380, name: 'Pine Apt #2', price: 120 } };
+        },
+      },
+      homeExchangeClient: {
+        async getHomeCalendar(homeId) {
+          assert.equal(String(homeId), '3285044');
+          return heOpenRange('2026-10-25', '2026-11-05');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127348833,
+                status: 0,
+                approved_at: null,
+                start_on: '2026-10-29',
+                end_on: '2026-11-02',
+                home: { id: 3285044 },
+              },
+            ],
+          };
+        },
+        async approveConversation(conversationId) {
+          approved.push(conversationId);
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      blockStore: {
+        async put(item) {
+          return item;
+        },
+      },
+      notifyOwner: async () => ({ ok: true }),
+      sharedCategoryRunner: async () => {
+        throw new Error('must not fall through to shared thank-you');
+      },
+    });
+    assert.equal(result.feeAccepted, true);
+    assert.equal(result.homeId, '3285044');
+    assert.equal(result.propertyId, '114663c5-0709-4eff-a868-fa9ebd6ed42d');
+    assert.equal(result.calendar.open, true);
+    assert.equal(result.preapprove.ok, true);
+    assert.deepEqual(approved, ['95201321']);
+    assert.equal(blocked.length, 4);
+    assert.equal(blocked[0].date, '2026-10-29');
+    assert.equal(blocked[3].date, '2026-11-01');
+    assert.equal(result.sent, true);
+    assert.equal(sentBodies.length, 1);
+    assert.match(sentBodies[0], /pre-approval/i);
+    assert.match(sentBodies[0], /blocked those dates for you/i);
+    assert.match(sentBodies[0], /\$120/);
+    assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
+    assert.equal(result.typeOfMessageReceived, 'HOMEEXCHANGE_FOLLOWUP');
+    assert.equal(result.reason, 'homeexchange_preapproved');
   });
 
   it('treats a later “pre approve then we finalize” as fee-accepted via thread history', async () => {
@@ -1277,6 +1543,12 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(isHeCheckinTimeQuestion('What time is check-in?'), true);
     assert.equal(thisTurnWantsHePreapprove('Thank you. Coming your way!'), false);
     assert.equal(thisTurnWantsHePreapprove('the cleaning fee is fine'), true);
+    assert.equal(
+      thisTurnWantsHePreapprove(
+        'Hi Ruby, oh that is great news. We\u2019re completely fine with the cleaning fee!'
+      ),
+      true
+    );
     assert.equal(thisTurnWantsHePreapprove('Wonderful. I guess u pre approve then we finalize?'), true);
     assert.equal(
       shouldAttemptPreapprove({

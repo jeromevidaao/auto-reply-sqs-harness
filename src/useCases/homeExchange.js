@@ -8,7 +8,9 @@
  *   1) Confirm the Hospitable calendar is open for the requested nights
  *      (request can be accepted).
  *   2) Load the unit cleaning fee from DynamoDB `listing`.
- *   3) Draft a reply asking if they will pay that fee after the stay.
+ *   3) Draft: acknowledge a specific detail from their first message
+ *      (Airbnb-style first engagement), then dates-open + fee ask, or
+ *      dates-not-open decline. Policy sentences stay deterministic.
  *   4) Send via the HomeExchange API (never Hospitable) when a client is provided.
  *
  * Follow-up (e.g. fee accepted + extra dates like Caroline Sep 30–Oct 3):
@@ -49,7 +51,13 @@ import {
   runSharedHeCategories,
   shouldRunSharedHeCategories,
   thisTurnWantsHePreapprove,
+  guestAcceptedCleaningFeeText,
 } from './homeExchangeSharedCategories.js';
+import {
+  applyHeFirstAckWriter,
+  buildHeFirstAckClause,
+  composeHeFirstReply,
+} from './homeExchangeFirstAck.js';
 
 export const HOMEEXCHANGE_PLATFORM = 'homeexchange';
 export const HOMEEXCHANGE_ACT = 'homeexchange_message';
@@ -326,9 +334,7 @@ export function extractAskedStayDates(text, { now = new Date() } = {}) {
 }
 
 export function guestAcceptedCleaningFee(text) {
-  return /cleaning fee is fine|fee is fine|happy to pay (the )?(cleaning )?fee|ok(?:ay)? (with |paying )?the (cleaning )?fee|fee works/i.test(
-    String(text || '')
-  );
+  return guestAcceptedCleaningFeeText(text);
 }
 
 export function guestAskedToPreapprove(text) {
@@ -757,8 +763,34 @@ export function buildHomeExchangeFollowupDraft({
   };
 }
 
+function firstHeDraft({
+  guestName,
+  guestMessage,
+  reason,
+  policySentence,
+  extraParagraph,
+} = {}) {
+  const ackClause = buildHeFirstAckClause(guestMessage);
+  return {
+    typeOfMessageReceived: 'HOMEEXCHANGE_FIRST_MESSAGE',
+    shouldReply: true,
+    ackClause,
+    ackSource: 'hooks',
+    policySentence,
+    extraParagraph: extraParagraph || null,
+    proposedResponse: composeHeFirstReply({
+      guestName,
+      ackClause,
+      policySentence,
+      extraParagraph,
+    }),
+    reason,
+  };
+}
+
 export function buildHomeExchangeDraft({
   guestName,
+  guestMessage,
   checkIn,
   checkOut,
   originalCheckIn,
@@ -769,7 +801,6 @@ export function buildHomeExchangeDraft({
   feeAccepted,
   askedDates,
 } = {}) {
-  const name = (guestName || 'there').split(/\s+/)[0];
   const range = formatStayRange(checkIn, checkOut);
 
   if (!isFirst) {
@@ -787,42 +818,42 @@ export function buildHomeExchangeDraft({
   }
 
   if (!calendar?.checked) {
-    return {
-      typeOfMessageReceived: 'HOMEEXCHANGE_FIRST_MESSAGE',
-      shouldReply: true,
-      proposedResponse:
-        `Hi ${name}, thanks for your message. I'm checking whether those dates are open on our calendar and will follow up shortly about the stay and the cleaning fee.`,
+    return firstHeDraft({
+      guestName,
+      guestMessage,
       reason: 'calendar_not_checked',
-    };
+      policySentence:
+        "I'm checking whether those dates are open on our calendar and will follow up shortly about the stay and the cleaning fee.",
+    });
   }
 
   if (!calendar.open) {
     const blocked = (calendar.unavailable || []).join(', ');
-    return {
-      typeOfMessageReceived: 'HOMEEXCHANGE_FIRST_MESSAGE',
-      shouldReply: true,
-      proposedResponse:
-        `Hi ${name}, thanks for reaching out. I checked our calendar` +
+    return firstHeDraft({
+      guestName,
+      guestMessage,
+      reason: 'calendar_not_open',
+      policySentence:
+        `I checked our calendar` +
         (range ? ` for ${range}` : '') +
         ` and those dates are not open, so we can't accept the request as it stands.` +
         (blocked ? ` Unavailable night(s): ${blocked}.` : ''),
-      reason: 'calendar_not_open',
-    };
+    });
   }
 
   const feeText = feeAmountText(cleaningFee);
 
-  return {
-    typeOfMessageReceived: 'HOMEEXCHANGE_FIRST_MESSAGE',
-    shouldReply: true,
-    proposedResponse:
-      `Hi ${name}, thanks for your message` +
-      (range ? ` — ${range} is open on our calendar` : '') +
-      `, so we can accept the request.\n\n` +
+  return firstHeDraft({
+    guestName,
+    guestMessage,
+    reason: 'calendar_open_ask_cleaning_fee',
+    policySentence: range
+      ? `${range} is open on our calendar, so we can accept the request.`
+      : 'Those dates are open on our calendar, so we can accept the request.',
+    extraParagraph:
       `One thing we ask for Home Exchange stays: the cleaning fee after you leave is ${feeText}. ` +
       `Would you be okay paying that after your stay?`,
-    reason: 'calendar_open_ask_cleaning_fee',
-  };
+  });
 }
 
 function buildPreapproveGuestMessage({
@@ -933,6 +964,7 @@ export async function handleHomeExchangeMessage({
   now = new Date(),
   sharedCategoryAgent = null,
   sharedCategoryRunner = null,
+  firstAckWriter = null,
 } = {}) {
   const extracted = extractHomeExchangeMessage(event);
   const message = extracted.message;
@@ -1031,8 +1063,9 @@ export async function handleHomeExchangeMessage({
     cleaningFee = await loadCleaningFeeFromDdb(ddbClient, airbnbListingId);
   }
 
-  const draft = buildHomeExchangeDraft({
+  let draft = buildHomeExchangeDraft({
     guestName,
+    guestMessage: message,
     checkIn,
     checkOut,
     originalCheckIn,
@@ -1043,6 +1076,13 @@ export async function handleHomeExchangeMessage({
     feeAccepted,
     askedDates,
   });
+  if (isFirst) {
+    draft = await applyHeFirstAckWriter(draft, {
+      message,
+      guestName,
+      writer: firstAckWriter,
+    });
+  }
 
   const store = blockStore || createDdbBlockStore(ddbClient);
   let preapprove = {
@@ -1113,6 +1153,7 @@ export async function handleHomeExchangeMessage({
       isFirst,
       heDraftSendable: sendEnabled,
       preapproveOk: !!preapprove.ok,
+      thisTurnWantsPreapprove,
     })
   ) {
     try {

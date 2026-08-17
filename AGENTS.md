@@ -65,8 +65,8 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 1. Resolve the Pine unit from the HE home id (`3202475`=#3, `3285044`=#2, `3285159`=#1B). Never fall back to Apt #3 when `listing.platform_id` is another home (Katie Halloween incident).
 2. Check **that unit’s** Hospitable calendar + accepted reservations **and** the **same HE home calendar** (`GET /v1/homes/{homeId}/calendar`). Both must be open.
 3. If open, load that unit’s cleaning fee from DynamoDB `listing` (`20150380`=#2 $120, `24259977`=#3 $125, `20904545`=#1B $80).
-3. Draft: dates are open + ask if they will pay that fee after the stay.
-4. **Send via HomeExchange** `POST /v1/messages` (`src/clients/HomeExchangeClient.js`). Never Hospitable. Dedup if the fee-after-stay ask is already on the thread.
+4. Draft like Airbnb first engagement, not a bare calendar template: open with a specific ack of what they already said (place compliment, grandchildren / Deering Park, Halloween in Portland, first visit — `src/useCases/homeExchangeFirstAck.js`). Then the operational paragraph: dates open + ask if they will pay that fee after the stay, **or** dates not open so we can't accept. Policy sentences stay deterministic. Grok may polish only the ack sentence (never fees / availability). Do not send a generic "thanks for reaching out" when the guest shared trip context (Katie decline incident).
+5. **Send via HomeExchange** `POST /v1/messages` (`src/clients/HomeExchangeClient.js`). Never Hospitable. Dedup if the fee-after-stay ask or the same-dates decline is already on the thread.
 
 **Fee accepted + original exchange dates open (Hospitable AND HE calendar):**
 1. `GET /v1/exchanges/{conversationId}/get-exchanges` then `PATCH /v1/exchanges/{conversationId}/approve` with that array (**conversation id**, not exchange id). Skip if `approved_at` / `finalized_at` set.
@@ -74,6 +74,8 @@ New guest messages from HomeExchange are enqueued onto the same `grok_message` S
 3. Persist nights in DynamoDB `homeexchangePreapprovalBlocks`. EventBridge every **12 hours** (`act=homeexchange_expire_blocks`) unblocks those nights if the guest does not finalize within 4 days (skip `RESERVATION` nights).
 4. Guest message: **I just sent you a pre-approval and blocked those dates for you.** Do **not** say they are booked. Errors still Android-only (no guest send).
 5. **Owner Android (HE only):** FCM on every successful HE auto-reply send (`homeexchange_auto_reply_sent`) and on send failure after retries (`homeexchange_auto_reply_failed`). Pre-approve still uses `homeexchange_preapproval_ready` / `_error`; expire unblock uses `_expired`. Airbnb auto-replies do **not** get this phone trail.
+
+Fee-accept phrasing is not only Caroline’s “the cleaning fee is fine.” **Katie 2026-08-17 Apt #2** wrote “We’re completely fine with the cleaning fee!” — that is the same yes. Shared thank-you must **not** run on a fee-agree turn (that miss sent “You’re welcome, Katie!” instead of pre-approving). Detector: `guestAcceptedCleaningFee` / `thisTurnWantsHePreapprove`. Airbnb path is unchanged.
 
 **Resilience:** every HE HTTP call (conversation, calendar, get-exchanges, approve, send) and Hospitable calendar PUT retries **4 times** with exp backoff **5s / 15s / 30s** (~1 min in-Lambda). Approve/send GET-confirm after timeout so a landed call is not repeated. Permanent 4xx (except 408/429) do not retry. FCM owner notify uses the same write retry. Airbnb Hospitable **message POST** stays on the 2/min-aware 4×/~3 min path. Then SQS `grok_message` 4 receives / 12 min visibility.
 
