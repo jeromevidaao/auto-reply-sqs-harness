@@ -16,9 +16,16 @@
  * Follow-up (e.g. fee accepted + extra dates like Caroline Sep 30–Oct 3):
  *   1) Parse asked dates from the guest text (year = next future occurrence).
  *   2) Confirm Hospitable calendar + accepted reservations for those nights.
- *   3) Draft: acknowledge fee if they agreed + say whether the new dates are open.
+ *   3) Draft: acknowledge fee if they agreed *and we have not already thanked
+ *      them for it* + say whether the new dates are open.
  *   4) Extra-date replies may still send. Confirmation is pre-approve + block
  *      + "I just sent you a pre-approval and blocked those dates" (never "you're booked").
+ *
+ * Full thread + reservation context (Katie double-thank 2026-08-17):
+ *   Always fetch the live HE conversation (do not trust a truncated SQS
+ *   snippet). If the guest already accepted the cleaning fee, put that on
+ *   `heReservation.cleaningFeeAccepted` so later turns and shared categories
+ *   see it. Never say "thanks for confirming the cleaning fee" twice.
  *
  * Extra night after a cancelled pre-approval (Katie 2026-08-17 Apt #2):
  *   Guest cancels the HE pre-approval, adds a night, and resubmits.
@@ -30,6 +37,13 @@
  *      alteration request.
  *   4) If the extra night is free, pre-approve the new stay and block the
  *      full range on Hospitable again.
+ *
+ * Guest confirmed / finalized (Katie 2026-08-17 Apt #2, status 3):
+ *   HE posts a type=1 / type_auto=2 system line
+ *   ("{{firstname}} has finalized the exchange") and sets finalized_at.
+ *   Conversation last_message often stays on the last host chat, so the
+ *   poller also watches exchange status (act=homeexchange_approval_status).
+ *   Thank them for confirming. Do not pre-approve, do not "You're welcome".
  *
  * Confirmation (fee accepted + original exchange dates available on Hospitable
  * AND on the HomeExchange home calendar):
@@ -66,6 +80,7 @@ import {
   guestAskedToAddNights,
   threadHasCancelledPreapproval,
   guestResubmittedAfterHeCancel,
+  guestFinalizedHeExchange,
 } from './homeExchangeSharedCategories.js';
 import {
   applyHeFirstAckWriter,
@@ -75,6 +90,7 @@ import {
 
 export const HOMEEXCHANGE_PLATFORM = 'homeexchange';
 export const HOMEEXCHANGE_ACT = 'homeexchange_message';
+export const HOMEEXCHANGE_APPROVAL_ACT = 'homeexchange_approval_status';
 
 /** Pine HE home → Hospitable / Airbnb. Default only when the home id is missing. */
 export const HE_HOME_ID = '3202475';
@@ -180,7 +196,7 @@ export function isHomeExchangePayload(event) {
   for (const p of candidates) {
     if (!p || typeof p !== 'object') continue;
     const act = p?.queryStringParameters?.act || p?.act || null;
-    if (act === HOMEEXCHANGE_ACT) return true;
+    if (act === HOMEEXCHANGE_ACT || act === HOMEEXCHANGE_APPROVAL_ACT) return true;
     // Reservation calendar-sync act is a different product path — never treat as HE chat.
     if (act === 'new_reservation_home_exchange') continue;
 
@@ -500,6 +516,103 @@ export function guestAcceptedCleaningFeeInThread(text, conversationHistory = [],
   );
 }
 
+const HOST_THANKED_CLEANING_FEE_RE =
+  /thanks for confirming[\s\S]{0,80}cleaning fee|thank you for confirming[\s\S]{0,80}cleaning fee/i;
+
+/** Host already acknowledged the cleaning-fee yes on this thread. */
+export function hostAlreadyThankedCleaningFee(conversationHistory = []) {
+  return (conversationHistory || []).some((m) => HOST_THANKED_CLEANING_FEE_RE.test(messageText(m)));
+}
+
+/** SQS / reservation envelope already marked the HE stay as fee-accepted. */
+export function contextSaysCleaningFeeAccepted(context = {}) {
+  if (!context || typeof context !== 'object') return false;
+  if (context.cleaningFeeAccepted === true) return true;
+  if (context.reservation?.cleaningFeeAccepted === true) return true;
+  if (context.heReservation?.cleaningFeeAccepted === true) return true;
+  return false;
+}
+
+/** Thank for the fee only the first time we acknowledge it. */
+export function shouldThankForCleaningFee({ feeAccepted = false, alreadyThanked = false } = {}) {
+  return !!feeAccepted && !alreadyThanked;
+}
+
+export function mergeHeConversationHistory(provided = [], live = []) {
+  const out = [];
+  const seen = new Set();
+  for (const m of [...(Array.isArray(provided) ? provided : []), ...(Array.isArray(live) ? live : [])]) {
+    if (!m || typeof m !== 'object') continue;
+    const text = messageText(m).trim().toLowerCase();
+    const role = String(m.sender_type || m.sender?.type || m.role || '').toLowerCase();
+    const key = `${role}|${text}`;
+    if (!text) {
+      out.push(m);
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(m);
+  }
+  return out;
+}
+
+export async function loadHeConversationHistory({
+  provided = [],
+  conversationId = null,
+  homeExchangeClient = null,
+} = {}) {
+  const base = Array.isArray(provided) ? provided : [];
+  if (!conversationId || typeof homeExchangeClient?.listMessages !== 'function') {
+    return { conversationHistory: base, historyFetched: false, historyError: null };
+  }
+  try {
+    const raw = await homeExchangeClient.listMessages(conversationId);
+    const live = Array.isArray(raw) ? raw : [];
+    return {
+      conversationHistory: mergeHeConversationHistory(base, live),
+      historyFetched: true,
+      historyError: null,
+    };
+  } catch (err) {
+    return {
+      conversationHistory: base,
+      historyFetched: false,
+      historyError: err?.message || String(err),
+    };
+  }
+}
+
+export function buildHeReservationContext({
+  conversationId = null,
+  exchange = null,
+  guestName = null,
+  checkIn = null,
+  checkOut = null,
+  homeId = null,
+  propertyName = null,
+  airbnbListingId = null,
+  cleaningFee = null,
+  cleaningFeeAccepted = false,
+  cleaningFeeThanked = false,
+} = {}) {
+  return {
+    platform: HOMEEXCHANGE_PLATFORM,
+    conversationId: conversationId != null ? String(conversationId) : null,
+    exchangeId: exchange?.id != null ? String(exchange.id) : null,
+    status: exchange?.status ?? null,
+    guestName: guestName || null,
+    checkIn: checkIn || null,
+    checkOut: checkOut || null,
+    homeId: homeId != null ? String(homeId) : null,
+    propertyName: propertyName || null,
+    airbnbListingId: airbnbListingId || null,
+    cleaningFee: cleaningFee?.amount ?? null,
+    cleaningFeeAccepted: !!cleaningFeeAccepted,
+    cleaningFeeThanked: !!cleaningFeeThanked,
+  };
+}
+
 export function formatStayRange(checkIn, checkOut) {
   const start = dateOnly(checkIn);
   const end = dateOnly(checkOut);
@@ -543,7 +656,13 @@ export function extractHomeExchangeMessage(event) {
     const ctx = event.context || {};
     return {
       message: String(event.message || ''),
-      context: { ...ctx, ...contextWithResolvedUnit(ctx) },
+      context: {
+        ...ctx,
+        ...contextWithResolvedUnit(ctx),
+        conversationHistory: Array.isArray(ctx.conversationHistory) ? ctx.conversationHistory : [],
+        cleaningFeeAccepted: contextSaysCleaningFeeAccepted(ctx),
+        reservation: ctx.reservation || ctx.heReservation || null,
+      },
     };
   }
 
@@ -564,6 +683,7 @@ export function extractHomeExchangeMessage(event) {
     if (
       platform !== HOMEEXCHANGE_PLATFORM &&
       act !== HOMEEXCHANGE_ACT &&
+      act !== HOMEEXCHANGE_APPROVAL_ACT &&
       source !== HOMEEXCHANGE_PLATFORM
     ) {
       continue;
@@ -581,6 +701,13 @@ export function extractHomeExchangeMessage(event) {
         isFirstMessage: src.isFirstMessage === true || src.is_first_message === true,
         messageCount: src.messageCount != null ? Number(src.messageCount) : null,
         ...contextWithResolvedUnit(src),
+        conversationHistory: Array.isArray(src.conversationHistory)
+          ? src.conversationHistory
+          : Array.isArray(p.conversationHistory)
+            ? p.conversationHistory
+            : [],
+        cleaningFeeAccepted: contextSaysCleaningFeeAccepted(src) || contextSaysCleaningFeeAccepted(p),
+        reservation: src.reservation || src.heReservation || p.reservation || null,
         platform: HOMEEXCHANGE_PLATFORM,
         source: HOMEEXCHANGE_PLATFORM,
       },
@@ -832,6 +959,14 @@ function feeAmountText(cleaningFee) {
   return 'our standard cleaning fee';
 }
 
+export function buildHeFeeThanksLine(cleaningFee, stayRange) {
+  const feeText = feeAmountText(cleaningFee);
+  return (
+    `thanks for confirming the ${feeText} cleaning fee is fine` +
+    (stayRange ? ` for ${stayRange}` : '')
+  );
+}
+
 export function buildHomeExchangeFollowupDraft({
   guestName,
   checkIn,
@@ -842,15 +977,15 @@ export function buildHomeExchangeFollowupDraft({
   cleaningFee,
   feeAccepted,
   askedDates,
+  shouldThankForFee,
 } = {}) {
   const name = (guestName || 'there').split(/\s+/)[0];
   const askedRange = askedDates ? formatStayRange(askedDates.checkIn, askedDates.checkOut) : formatStayRange(checkIn, checkOut);
   const originalRange = formatStayRange(originalCheckIn, originalCheckOut);
   const feeText = feeAmountText(cleaningFee);
-  const feeThanks = feeAccepted
-    ? `thanks for confirming the ${feeText} cleaning fee is fine` +
-      (originalRange ? ` for ${originalRange}` : '')
-    : null;
+  const thankFee =
+    shouldThankForFee != null ? !!shouldThankForFee : !!feeAccepted;
+  const feeThanks = thankFee ? buildHeFeeThanksLine(cleaningFee, originalRange) : null;
 
   if (!askedDates && !feeAccepted) {
     return {
@@ -952,6 +1087,7 @@ export function buildHomeExchangeDraft({
   isFirst,
   feeAccepted,
   askedDates,
+  shouldThankForFee,
 } = {}) {
   const range = formatStayRange(checkIn, checkOut);
 
@@ -966,6 +1102,7 @@ export function buildHomeExchangeDraft({
       cleaningFee,
       feeAccepted,
       askedDates,
+      shouldThankForFee,
     });
   }
 
@@ -1068,6 +1205,19 @@ export function buildHeExtraNightDraft({
         ? `Update the request on HomeExchange to ${stayRange} and I'll send a new pre-approval.`
         : `Update the request on HomeExchange for those dates and I'll send a new pre-approval.`),
     reason: 'homeexchange_extra_night_open',
+  };
+}
+
+export function buildHeFinalizeThankYouDraft({ guestName, checkIn, checkOut } = {}) {
+  const name = (guestName || '').trim().split(/\s+/)[0] || 'there';
+  const range = formatStayRange(checkIn, checkOut);
+  return {
+    typeOfMessageReceived: 'HOMEEXCHANGE_EXCHANGE_FINALIZED',
+    shouldReply: true,
+    proposedResponse: range
+      ? `Thank you for confirming, ${name}! We're looking forward to hosting you ${range}.`
+      : `Thank you for confirming, ${name}! We're looking forward to hosting you.`,
+    reason: 'homeexchange_exchange_finalized',
   };
 }
 
@@ -1189,31 +1339,40 @@ export async function handleHomeExchangeMessage({
   const message = extracted.message;
   const context = extracted.context || {};
   const conversationId = context.conversation_id || context.conversationId || null;
-  let conversationHistory = Array.isArray(context.conversationHistory)
+  const providedHistory = Array.isArray(context.conversationHistory)
     ? context.conversationHistory
     : [];
-  if (
-    conversationHistory.length === 0 &&
-    conversationId &&
-    homeExchangeClient &&
-    typeof homeExchangeClient.listMessages === 'function'
-  ) {
-    try {
-      conversationHistory = await homeExchangeClient.listMessages(conversationId);
-    } catch {
-      conversationHistory = [];
-    }
-  }
+  const loadedHistory = await loadHeConversationHistory({
+    provided: providedHistory,
+    conversationId,
+    homeExchangeClient,
+  });
+  const conversationHistory = loadedHistory.conversationHistory;
   const contextCheckIn = dateOnly(context.checkIn || context.check_in);
   const contextCheckOut = dateOnly(context.checkOut || context.check_out);
-  const isFirst = isFirstHomeExchangeMessage(context, conversationHistory);
+  const guestFinalized = guestFinalizedHeExchange(message, context);
+  const isFirst = guestFinalized
+    ? false
+    : isFirstHomeExchangeMessage(context, conversationHistory);
   const homeId = extractHeHomeId(context) || HE_HOME_ID;
   const unit = resolveHeUnit(homeId);
   const propertyId = unit.propertyId;
   const airbnbListingId = unit.airbnbListingId;
   const guestName = context.guestName || context.sender?.first_name || null;
-  const feeAccepted = guestAcceptedCleaningFeeInThread(message, conversationHistory, guestName);
-  const thisTurnWantsPreapprove = thisTurnWantsHePreapprove(message, { conversationHistory });
+  const feeAccepted =
+    contextSaysCleaningFeeAccepted(context) ||
+    guestAcceptedCleaningFeeInThread(message, conversationHistory, guestName);
+  const alreadyThankedFee = hostAlreadyThankedCleaningFee(conversationHistory);
+  const thankForFee = shouldThankForCleaningFee({
+    feeAccepted,
+    alreadyThanked: alreadyThankedFee,
+  });
+  const thisTurnWantsPreapprove = thisTurnWantsHePreapprove(message, {
+    conversationHistory,
+    eventType: context.eventType,
+    action: context.action,
+    act: context.act,
+  });
   const cancelledPreapproval = threadHasCancelledPreapproval(conversationHistory);
   const resubmittedAfterCancel = guestResubmittedAfterHeCancel(message, conversationHistory);
   const priorPreapprovalStay = extractPriorPreapprovalStay(conversationHistory);
@@ -1298,6 +1457,7 @@ export async function handleHomeExchangeMessage({
   const approveCheckOut = isExtension || resubmittedAfterCancel ? checkOut : originalCheckOut;
 
   const shouldCheckCalendar = !!(
+    !guestFinalized &&
     checkIn &&
     checkOut &&
     hospitableClient &&
@@ -1307,7 +1467,7 @@ export async function handleHomeExchangeMessage({
     ? await loadHospitableWindow(hospitableClient, propertyId, checkIn, checkOut)
     : { calendarDays: [], reservations: [], calendarError: null, reservationsError: null };
 
-  const heCalRaw = (isFirst || askedDates || feeAccepted || thisTurnWantsPreapprove || isExtension || cancelledPreapproval)
+  const heCalRaw = (!guestFinalized && (isFirst || askedDates || feeAccepted || thisTurnWantsPreapprove || isExtension || cancelledPreapproval))
     ? await loadHeCalendar(homeExchangeClient, homeId)
     : { ranges: null, error: null, fetched: false };
 
@@ -1384,6 +1544,7 @@ export async function handleHomeExchangeMessage({
     isFirst,
     feeAccepted,
     askedDates,
+    shouldThankForFee: thankForFee,
   });
   if (isFirst) {
     draft = await applyHeFirstAckWriter(draft, {
@@ -1455,16 +1616,14 @@ export async function handleHomeExchangeMessage({
       checkIn: approveCheckIn,
       checkOut: approveCheckOut,
       now,
+      cleaningFeeAccepted: feeAccepted,
     });
   }
 
   if (preapprove.ok) {
     const approvedRange = formatStayRange(approveCheckIn, approveCheckOut);
     const feeText = feeAmountText(cleaningFee);
-    const feeThanks = feeAccepted
-      ? `thanks for confirming the ${feeText} cleaning fee is fine` +
-        (approvedRange ? ` for ${approvedRange}` : '')
-      : null;
+    const feeThanks = thankForFee ? buildHeFeeThanksLine(cleaningFee, approvedRange) : null;
     let extraParagraph = null;
     if (askedDates && calendar?.checked && !isExtension && !resubmittedAfterCancel) {
       const askedRange = formatStayRange(askedDates.checkIn, askedDates.checkOut);
@@ -1480,6 +1639,28 @@ export async function handleHomeExchangeMessage({
       originalRange: approvedRange,
       extraParagraph,
       extraNightNote: extraNightNoteText(extraNights, extraNightsOpen),
+    });
+  }
+
+  const heReservation = buildHeReservationContext({
+    conversationId,
+    exchange: liveExchange,
+    guestName,
+    checkIn: approveCheckIn || originalCheckIn || checkIn,
+    checkOut: approveCheckOut || originalCheckOut || checkOut,
+    homeId,
+    propertyName: unit.propertyName,
+    airbnbListingId,
+    cleaningFee,
+    cleaningFeeAccepted: feeAccepted,
+    cleaningFeeThanked: alreadyThankedFee,
+  });
+
+  if (guestFinalized) {
+    draft = buildHeFinalizeThankYouDraft({
+      guestName,
+      checkIn: exchangeCheckIn || checkIn || originalCheckIn,
+      checkOut: exchangeCheckOut || checkOut || originalCheckOut,
     });
   }
 
@@ -1505,6 +1686,8 @@ export async function handleHomeExchangeMessage({
         conversationHistory,
         listingId: propertyId,
         propertyName: context.propertyName || APT3_PROPERTY_NAME,
+        cleaningFeeAccepted: feeAccepted,
+        reservation: heReservation,
         sharedCategoryAgent,
         sharedCategoryRunner,
       });
@@ -1560,6 +1743,9 @@ export async function handleHomeExchangeMessage({
     listingId: airbnbListingId,
     homeId,
   };
+  if (sent && thankForFee) {
+    heReservation.cleaningFeeThanked = true;
+  }
   if (sent) {
     try {
       await notifyHeAutoReply(notifyOwner, { kind: 'sent', ...notifyPayload });
@@ -1586,6 +1772,7 @@ export async function handleHomeExchangeMessage({
     sendSkipReason,
     conversationId,
     isFirstMessage: isFirst,
+    guestFinalized,
     guestMessage: message,
     guestName,
     checkIn,
@@ -1599,6 +1786,10 @@ export async function handleHomeExchangeMessage({
     isExtension,
     cancelledPreapproval,
     feeAccepted,
+    alreadyThankedFee,
+    heReservation,
+    historyFetched: loadedHistory.historyFetched,
+    historyError: loadedHistory.historyError,
     propertyId,
     airbnbListingId,
     homeId,
@@ -1631,6 +1822,7 @@ export async function runHomeExchangePreapprove({
   checkIn,
   checkOut,
   now = new Date(),
+  cleaningFeeAccepted = false,
 } = {}) {
   const nights = stayNights(checkIn, checkOut);
   const base = {
@@ -1751,6 +1943,7 @@ export async function runHomeExchangePreapprove({
           checkOut,
           nights,
           now,
+          cleaningFeeAccepted,
         })
       );
     } catch (err) {

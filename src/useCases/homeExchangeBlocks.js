@@ -92,6 +92,7 @@ export function buildBlockRecord({
   checkOut,
   nights,
   now = new Date(),
+  cleaningFeeAccepted = false,
 }) {
   const approvedAt = new Date(now).toISOString();
   return {
@@ -107,5 +108,6 @@ export function buildBlockRecord({
     expiresAt: preapprovalExpiresAt(approvedAt),
     status: STATUS_PENDING,
     createdAt: approvedAt,
+    cleaningFeeAccepted: !!cleaningFeeAccepted,
   };
 }

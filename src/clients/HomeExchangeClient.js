@@ -82,6 +82,8 @@ export function alreadySentEquivalent(messages, proposedResponse) {
   const proposedIsDecline =
     /those dates are not open/.test(proposed) && /can'?t accept the request/.test(proposed);
   const proposedIsPreapprove = /blocked those dates/.test(proposed);
+  const proposedIsFinalizeThanks =
+    /thank you for confirming/.test(proposed) && /looking forward to hosting you/.test(proposed);
   const proposedRange = stayRangeFingerprint(proposed);
   return list.some((m) => {
     const text = String(m.content || m.body || m.text || '').trim().toLowerCase();
@@ -92,6 +94,13 @@ export function alreadySentEquivalent(messages, proposedResponse) {
       if (!/blocked those dates/.test(text) || !/pre-approval/.test(text)) return false;
       if (proposedRange && existingRange && proposedRange !== existingRange) return false;
       return !proposedRange || !existingRange || proposedRange === existingRange;
+    }
+    if (
+      proposedIsFinalizeThanks &&
+      /thank you for confirming/.test(text) &&
+      /looking forward to hosting you/.test(text)
+    ) {
+      return true;
     }
     if (text.includes(preview) || proposed.includes(text.slice(0, 80))) return true;
     // Only the first-message fee-after-stay ask is equivalent to another fee ask.
@@ -156,7 +165,7 @@ export class HomeExchangeClient {
     return this._withRetry('heListMessages', async () => {
       const response = await this._http.get(`${HE_API_BASE}/v3/messages`, {
         headers: this._headers(token),
-        params: { conversation_id: conversationId },
+        params: { conversation_id: conversationId, limit: 100 },
         timeout: HE_TIMEOUT_MS,
       });
       return (

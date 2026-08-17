@@ -23,11 +23,19 @@ import {
   guestAcceptedCleaningFee,
   guestAcceptedCleaningFeeInThread,
   guestAskedToPreapprove,
+  hostAlreadyThankedCleaningFee,
+  shouldThankForCleaningFee,
+  contextSaysCleaningFeeAccepted,
+  mergeHeConversationHistory,
+  buildHeReservationContext,
+  buildHeFeeThanksLine,
   analyzeHeCalendarOpen,
   mergeStayCalendars,
   HOMEEXCHANGE_ACT,
+  HOMEEXCHANGE_APPROVAL_ACT,
   HOMEEXCHANGE_PLATFORM,
   APT3_AIRBNB_LISTING_ID,
+  buildHeFinalizeThankYouDraft,
 } from '../src/useCases/homeExchange.js';
 import {
   isHeSharedThankYouMessage,
@@ -40,6 +48,7 @@ import {
   guestAskedToAddNights,
   threadHasCancelledPreapproval,
   guestResubmittedAfterHeCancel,
+  guestFinalizedHeExchange,
 } from '../src/useCases/homeExchangeSharedCategories.js';
 import {
   applyHeFirstAckWriter,
@@ -107,6 +116,10 @@ describe('HomeExchange detector isolation (must not match Airbnb traffic)', () =
   it('matches only explicit HomeExchange chat payloads', () => {
     assert.equal(
       isHomeExchangePayload({ queryStringParameters: { act: HOMEEXCHANGE_ACT } }),
+      true
+    );
+    assert.equal(
+      isHomeExchangePayload({ queryStringParameters: { act: HOMEEXCHANGE_APPROVAL_ACT } }),
       true
     );
     assert.equal(
@@ -1206,6 +1219,7 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.match(sentBodies[0], /pre-approval/i);
     assert.match(sentBodies[0], /blocked those dates for you/i);
     assert.match(sentBodies[0], /\$120/);
+    assert.match(sentBodies[0], /thanks for confirming/i);
     assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
     assert.equal(result.typeOfMessageReceived, 'HOMEEXCHANGE_FOLLOWUP');
     assert.equal(result.reason, 'homeexchange_preapproved');
@@ -1882,8 +1896,13 @@ describe('HomeExchange extra night after cancelled pre-approval (Katie)', () => 
     assert.match(sentBodies[0], /extra night/i);
     assert.match(sentBodies[0], /November 2, 2026/);
     assert.match(sentBodies[0], /is open/i);
+    assert.equal(/thanks for confirming/i.test(sentBodies[0]), false);
+    assert.equal(/cleaning fee is fine/i.test(sentBodies[0]), false);
     assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
     assert.equal(/alteration/i.test(sentBodies[0]), false);
+    assert.equal(result.alreadyThankedFee, true);
+    assert.equal(result.heReservation.cleaningFeeAccepted, true);
+    assert.equal(result.heReservation.cleaningFeeThanked, true);
     assert.equal(result.reason, 'homeexchange_preapproved');
     assert.equal(
       alreadySentEquivalent([{ content: priorPreapproval }], sentBodies[0]),
@@ -2058,5 +2077,311 @@ describe('HomeExchange extra night after cancelled pre-approval (Katie)', () => 
     assert.match(sentBodies[0], /HomeExchange/i);
     assert.equal(/alteration/i.test(sentBodies[0]), false);
     assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
+  });
+});
+
+describe('HomeExchange guest finalized / approval status change (Katie)', () => {
+  const katieFinalizeHistory = [
+    { sender_type: 'guest', content: "We're completely fine with the cleaning fee!" },
+    { sender_type: 'host', content: 'Hi Katie — thanks for confirming the $120 cleaning fee is fine for October 29 – November 3, 2026. I just sent you a pre-approval and blocked those dates for you.' },
+    { sender_type: 'guest', content: '((firstName)) has cancelled the pre-approval' },
+    { sender_type: 'guest', content: 'Just submitted, thank you!' },
+    { sender_type: 'guest', content: '((firstName)) has finalized the exchange' },
+  ];
+
+  it('detects the HE finalize system line and approval-status act', () => {
+    assert.equal(guestFinalizedHeExchange('Katie has finalized the exchange'), true);
+    assert.equal(guestFinalizedHeExchange('((firstName)) has finalized the exchange'), true);
+    assert.equal(
+      guestFinalizedHeExchange('', { eventType: 'exchange_finalized' }),
+      true
+    );
+    assert.equal(
+      guestFinalizedHeExchange('', { act: 'homeexchange_approval_status' }),
+      true
+    );
+    assert.equal(guestFinalizedHeExchange('Just submitted, thank you!'), false);
+    assert.equal(thisTurnWantsHePreapprove('Katie has finalized the exchange'), false);
+    const draft = buildHeFinalizeThankYouDraft({
+      guestName: 'Katie',
+      checkIn: '2026-10-29',
+      checkOut: '2026-11-03',
+    });
+    assert.match(draft.proposedResponse, /Thank you for confirming, Katie/);
+    assert.match(draft.proposedResponse, /looking forward to hosting you/);
+    assert.match(draft.proposedResponse, /October 29/);
+    assert.match(draft.proposedResponse, /November 3, 2026/);
+    assert.equal(/you.?re welcome/i.test(draft.proposedResponse), false);
+  });
+
+  it('thanks Katie for confirming and does not pre-approve or say you are welcome', async () => {
+    const approved = [];
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        queryStringParameters: { act: HOMEEXCHANGE_APPROVAL_ACT },
+        body: JSON.stringify({
+          action: 'homeexchange.exchange.finalized',
+          data: {
+            body: 'Katie has finalized the exchange',
+            platform: HOMEEXCHANGE_PLATFORM,
+            source: HOMEEXCHANGE_PLATFORM,
+            eventType: 'exchange_finalized',
+            exchangeStatus: 3,
+            conversation_id: '95201321',
+            guestName: 'Katie',
+            checkIn: '2026-10-29',
+            checkOut: '2026-11-03',
+            isFirstMessage: false,
+            listing: { platform: 'homeexchange', platform_id: '3285044' },
+            conversationHistory: katieFinalizeHistory,
+          },
+        }),
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          throw new Error('must not check calendar on finalize thank-you');
+        },
+        async getPropertyReservations() {
+          throw new Error('must not check reservations on finalize thank-you');
+        },
+        async updatePropertyCalendar() {
+          throw new Error('must not reblock on finalize');
+        },
+      },
+      homeExchangeClient: {
+        async listMessages() {
+          return katieFinalizeHistory;
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127348833,
+                status: 3,
+                approved_at: '2026-08-17T17:34:07+00:00',
+                finalized_at: '2026-08-17T17:49:34+00:00',
+                start_on: '2026-10-29',
+                end_on: '2026-11-03',
+                home: { id: 3285044 },
+              },
+            ],
+          };
+        },
+        async approveConversation() {
+          approved.push('nope');
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      notifyOwner: async () => ({ ok: true }),
+      sharedCategoryRunner: async () => {
+        throw new Error('must not fall through to shared thank-you');
+      },
+    });
+    assert.equal(result.guestFinalized, true);
+    assert.equal(result.preapprove.attempted, false);
+    assert.deepEqual(approved, []);
+    assert.equal(result.sent, true);
+    assert.equal(result.reason, 'homeexchange_exchange_finalized');
+    assert.equal(result.typeOfMessageReceived, 'HOMEEXCHANGE_EXCHANGE_FINALIZED');
+    assert.match(sentBodies[0], /Thank you for confirming, Katie/);
+    assert.match(sentBodies[0], /looking forward to hosting you/);
+    assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
+    assert.equal(/pre-approval/i.test(sentBodies[0]), false);
+    assert.equal(
+      alreadySentEquivalent([{ content: sentBodies[0] }], sentBodies[0]),
+      true
+    );
+  });
+
+  it('skips send when the confirm thank-you is already on the thread', async () => {
+    let sends = 0;
+    const existing =
+      "Thank you for confirming, Katie! We're looking forward to hosting you October 29 – November 3, 2026.";
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Katie has finalized the exchange',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          eventType: 'exchange_finalized',
+          isFirstMessage: false,
+          conversation_id: '95201321',
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-03',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+          conversationHistory: [...katieFinalizeHistory, { sender_type: 'host', content: existing }],
+        },
+      },
+      homeExchangeClient: {
+        async listMessages() {
+          return [...katieFinalizeHistory, { content: existing }];
+        },
+        async sendMessage() {
+          sends += 1;
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(result.guestFinalized, true);
+    assert.equal(result.sent, false);
+    assert.equal(result.sendSkipReason, 'already_sent');
+    assert.equal(sends, 0);
+  });
+});
+
+describe('HomeExchange cleaning-fee thank-you is once per reservation', () => {
+  const priorThank =
+    'Hi Katie — thanks for confirming the $120 cleaning fee is fine for October 29 – November 2, 2026. I just sent you a pre-approval for October 29 – November 2, 2026 and blocked those dates for you.';
+
+  it('detects a prior host fee thank and does not thank again', () => {
+    const history = [
+      {
+        sender_type: 'guest',
+        content: 'We’re completely fine with the cleaning fee!',
+      },
+      { sender_type: 'host', content: priorThank },
+    ];
+    assert.equal(
+      guestAcceptedCleaningFeeInThread('Just submitted, thank you!', history, 'Katie'),
+      true
+    );
+    assert.equal(hostAlreadyThankedCleaningFee(history), true);
+    assert.equal(
+      shouldThankForCleaningFee({ feeAccepted: true, alreadyThanked: true }),
+      false
+    );
+    assert.equal(
+      shouldThankForCleaningFee({ feeAccepted: true, alreadyThanked: false }),
+      true
+    );
+    assert.match(buildHeFeeThanksLine({ amount: 120 }, 'October 29 – November 2, 2026'), /\$120/);
+    assert.equal(hostAlreadyThankedCleaningFee([{ content: 'Those dates are open.' }]), false);
+  });
+
+  it('honors reservation.cleaningFeeAccepted from the HE SQS payload', () => {
+    assert.equal(
+      contextSaysCleaningFeeAccepted({ reservation: { cleaningFeeAccepted: true } }),
+      true
+    );
+    assert.equal(contextSaysCleaningFeeAccepted({ cleaningFeeAccepted: true }), true);
+    assert.equal(contextSaysCleaningFeeAccepted({ reservation: {} }), false);
+    const reservation = buildHeReservationContext({
+      conversationId: '95201321',
+      guestName: 'Katie',
+      checkIn: '2026-10-29',
+      checkOut: '2026-11-03',
+      homeId: '3285044',
+      propertyName: 'Pine Apt #2',
+      cleaningFee: { amount: 120 },
+      cleaningFeeAccepted: true,
+      cleaningFeeThanked: true,
+    });
+    assert.equal(reservation.platform, 'homeexchange');
+    assert.equal(reservation.cleaningFeeAccepted, true);
+    assert.equal(reservation.cleaningFeeThanked, true);
+    assert.equal(reservation.cleaningFee, 120);
+    assert.equal(reservation.conversationId, '95201321');
+  });
+
+  it('merges payload history with the live HE thread', () => {
+    const merged = mergeHeConversationHistory(
+      [{ sender_type: 'guest', content: 'We’re completely fine with the cleaning fee!' }],
+      [{ sender_type: 'host', content: priorThank }]
+    );
+    assert.equal(merged.length, 2);
+    assert.equal(hostAlreadyThankedCleaningFee(merged), true);
+    const deduped = mergeHeConversationHistory(
+      [{ sender_type: 'host', content: priorThank }],
+      [{ sender_type: 'host', content: priorThank }]
+    );
+    assert.equal(deduped.length, 1);
+  });
+
+  it('always lists the live HE thread even when the payload already has history', async () => {
+    let listed = 0;
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Just submitted, thank you!',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95201321',
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-03',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+          conversationHistory: [{ sender_type: 'guest', content: 'hi' }],
+          reservation: { cleaningFeeAccepted: true },
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [
+            { date: '2026-10-29', status: { available: false } },
+            { date: '2026-10-30', status: { available: false } },
+            { date: '2026-10-31', status: { available: false } },
+            { date: '2026-11-01', status: { available: false } },
+            { date: '2026-11-02', status: { available: true } },
+          ];
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar() {
+          return { status: 'accepted' };
+        },
+      },
+      ddbClient: { async send() { return { Item: { price: 120 } }; } },
+      homeExchangeClient: {
+        async listMessages() {
+          listed += 1;
+          return [
+            {
+              sender_type: 'guest',
+              content: 'We’re completely fine with the cleaning fee!',
+            },
+            { sender_type: 'host', content: priorThank },
+            { content: '((firstName)) has cancelled the pre-approval' },
+            { sender_type: 'guest', content: 'Just submitted, thank you!' },
+          ];
+        },
+        async getHomeCalendar() {
+          return heOpenRange('2026-10-25', '2026-11-05');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127348833,
+                status: 0,
+                approved_at: null,
+                start_on: '2026-10-29',
+                end_on: '2026-11-03',
+                home: { id: 3285044 },
+              },
+            ],
+          };
+        },
+        async approveConversation() {
+          return { ok: true };
+        },
+        async sendMessage() {
+          return { ok: true };
+        },
+      },
+      blockStore: { async put(item) { return item; } },
+      notifyOwner: async () => ({ ok: true }),
+    });
+    assert.ok(listed >= 1);
+    assert.equal(result.historyFetched, true);
+    assert.equal(result.feeAccepted, true);
+    assert.equal(result.alreadyThankedFee, true);
+    assert.equal(result.heReservation.cleaningFeeAccepted, true);
+    assert.equal(/thanks for confirming/i.test(result.proposedResponse || ''), false);
   });
 });

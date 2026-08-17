@@ -105,11 +105,26 @@ export function guestResubmittedAfterHeCancel(text, history = []) {
 export function thisTurnWantsHePreapprove(text, extras = {}) {
   const raw = normalizeHeGuestText(text);
   // HE system line after the guest already finalized — not a request to pre-approve.
-  if (/has finalized the exchange/i.test(raw)) return false;
+  if (guestFinalizedHeExchange(raw, extras)) return false;
   if (guestAcceptedCleaningFeeText(raw) || /\bpre-?approv|\bfinalize\b/i.test(raw)) return true;
   if (guestAskedToAddNights(raw)) return true;
   if (guestResubmittedAfterHeCancel(raw, extras.conversationHistory)) return true;
   return false;
+}
+
+/** Guest confirmed the HE stay (status 3 / type_auto 2 / poll status-change). */
+export function guestFinalizedHeExchange(text, extras = {}) {
+  const raw = normalizeHeGuestText(text);
+  if (/has finalized the exchange/i.test(raw)) return true;
+  const eventType = String(
+    extras.eventType || extras.action || extras.heEventType || extras.act || ''
+  ).toLowerCase();
+  return (
+    eventType === 'exchange_finalized' ||
+    eventType === 'homeexchange.exchange.finalized' ||
+    eventType === 'homeexchange_approval_status' ||
+    eventType === 'approval_status_change'
+  );
 }
 
 /** Pure / short courtesy thanks with no operational question. */
@@ -228,6 +243,8 @@ export function heSharedAgentContext({
   conversationHistory,
   listingId,
   propertyName,
+  cleaningFeeAccepted = false,
+  reservation = null,
 } = {}) {
   return {
     platform: 'homeexchange',
@@ -242,6 +259,8 @@ export function heSharedAgentContext({
     conversationHistory: mapHeHistoryForAgent(conversationHistory, guestName),
     listingId,
     propertyName,
+    cleaningFeeAccepted: !!cleaningFeeAccepted,
+    reservation: reservation || null,
   };
 }
 
@@ -290,6 +309,8 @@ export async function runSharedHeCategories({
   conversationHistory,
   listingId,
   propertyName,
+  cleaningFeeAccepted = false,
+  reservation = null,
   sharedCategoryAgent = null,
   sharedCategoryRunner = null,
 } = {}) {
@@ -304,6 +325,8 @@ export async function runSharedHeCategories({
       checkOut,
       conversationId,
       conversationHistory,
+      cleaningFeeAccepted,
+      reservation,
     });
     if (out && isAirbnbOnlyHeCategory(out.typeOfMessageReceived)) {
       return {
@@ -337,6 +360,8 @@ export async function runSharedHeCategories({
       conversationHistory,
       listingId,
       propertyName,
+      cleaningFeeAccepted,
+      reservation,
     })
   );
   return draftFromAgentDecision(decision);

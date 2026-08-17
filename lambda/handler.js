@@ -9,6 +9,11 @@
  * - HomeExchange guest chat (act=homeexchange_message / platform=homeexchange):
  *     Isolated first-message path (personalized ack + calendar + DDB cleaning fee).
  *     Sends via HomeExchange API only — never Hospitable. Airbnb paths unchanged.
+ * - HomeExchange approval status change (act=homeexchange_approval_status):
+ *     Guest finalized the HE exchange. Thank-you-for-confirming only.
+ * - HomeExchange approval status change (act=homeexchange_approval_status):
+ *     Guest finalized the HE exchange. Thank-you-for-confirming only — never
+ *     pre-approve, never shared "You're welcome".
  * - Real SQS traffic from grok_reservation (reservation.created / reservation.changed):
  *     API Gateway envelope with act=reservation and Hospitable reservation payload.
  *     Pending→just-accepted (request-to-book) triggers a welcome that opens with
@@ -161,7 +166,11 @@ export const handler = async (event, context) => {
 
   // Isolated HomeExchange guest-chat path. Must run before the Airbnb agent so
   // HE traffic cannot classify as NEW_RESERVATION_WELCOME / send via Hospitable.
-  if (isHomeExchangePayload(event) || act === 'homeexchange_message') {
+  if (
+    isHomeExchangePayload(event) ||
+    act === 'homeexchange_message' ||
+    act === 'homeexchange_approval_status'
+  ) {
     console.log('[Handler] HomeExchange use case — isolated path (fee/pre-approve + shared categories via HE send)');
     const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
     const hospitableClient = new HospitableClient();
@@ -199,6 +208,8 @@ export const handler = async (event, context) => {
       sendError: heResult.sendError || null,
       calendarOpen: heResult.calendar?.open ?? null,
       cleaningFee: heResult.cleaningFee?.amount ?? null,
+      feeAccepted: heResult.feeAccepted ?? null,
+      alreadyThankedFee: heResult.alreadyThankedFee ?? null,
       reason: heResult.reason,
       preapprove: heResult.preapprove || null,
     });
