@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
-import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool, GoogleMapsTool, StayExtensionTool } from './tools/index.js';
+import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool, GoogleMapsTool, StayExtensionTool, PostCheckoutParkingTool } from './tools/index.js';
 import { EVENT_REQUEST_STANDARD_RESPONSE } from './tools/event/EventRequestTool.js';
 import { ConversationHistoryRequiredError } from './errors/ConversationHistoryRequiredError.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
@@ -143,6 +143,9 @@ export class GuestMessagingAgent {
       }
       if (!this.tools.has('check_stay_extension')) {
         this.tools.register(new StayExtensionTool({ hospitableClient: options.hospitableClient || null }));
+      }
+      if (!this.tools.has('check_post_checkout_parking')) {
+        this.tools.register(new PostCheckoutParkingTool({ hospitableClient: options.hospitableClient || null }));
       }
     }
   }
@@ -324,6 +327,28 @@ export class GuestMessagingAgent {
           }
         } catch {
           // non-fatal
+        }
+      }
+    }
+
+    // Cassidy incident: leave-car-after-checkout. Run before first-pass so the LLM
+    // sees occupancy + the hard "never own spot after 10am" rule.
+    if (!context.postCheckoutParkingInfo?.detected && PostCheckoutParkingTool.looksLikePostCheckoutParkingAsk(guestMessage)) {
+      const parkingTool = this.tools.get('check_post_checkout_parking');
+      if (parkingTool) {
+        try {
+          const parkInfo = await parkingTool.execute(guestMessage, context);
+          if (parkInfo?.detected) {
+            context.postCheckoutParkingInfo = parkInfo;
+            console.log(
+              '[Agent] → Post-checkout parking (processMessage): exceptionEligible=' +
+                parkInfo.exceptionEligible +
+                ' reason=' +
+                (parkInfo.reason || '')
+            );
+          }
+        } catch {
+          // non-fatal — policy still refuses the own-spot ask
         }
       }
     }
@@ -555,6 +580,14 @@ export class GuestMessagingAgent {
       confidence = preCheckInParkingPolicy.confidence;
     }
 
+    const postCheckoutParkingPolicy = this._applyPostCheckoutParkingPolicy(parsed, context, guestMessage);
+    if (postCheckoutParkingPolicy.applied) {
+      parsed.typeOfMessageReceived = postCheckoutParkingPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = postCheckoutParkingPolicy.proposedResponse;
+      shouldReply = postCheckoutParkingPolicy.shouldReply;
+      confidence = postCheckoutParkingPolicy.confidence;
+    }
+
     const postStayFeedbackPolicy = this._applyPostStayHousekeepingFeedbackPolicy(parsed, context, guestMessage);
     if (postStayFeedbackPolicy.applied) {
       parsed.typeOfMessageReceived = postStayFeedbackPolicy.typeOfMessageReceived;
@@ -616,6 +649,7 @@ export class GuestMessagingAgent {
       proposedResponse: parsed.proposedResponse || 'none',
       shouldReply,
       confidence,
+      postCheckoutParkingInfo: context.postCheckoutParkingInfo || null,
       rawModelOutput: raw,
       replyForceReason: force.reason || null,
     };
@@ -1311,6 +1345,110 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Guest asks to leave the car after 10am checkout (Cassidy / Olivia class).
+   * NEVER allow their own dedicated spot after checkout.
+   * Single exception: evening before checkout + after 8pm ET + a sibling Pine
+   * unit is vacant that night → offer that unit's spot until 1pm only.
+   */
+  _isPostCheckoutParkingAsk(guestMessage = '') {
+    return PostCheckoutParkingTool.looksLikePostCheckoutParkingAsk(guestMessage);
+  }
+
+  _draftAllowsOwnSpotAfterCheckout(draft = '') {
+    const text = String(draft || '');
+    return (
+      /yes[,!]?\s+you can leave the car/i.test(text) ||
+      /you can leave the car in your/i.test(text) ||
+      /leave the car in your (dedicated|current|parking)/i.test(text) ||
+      /leave (the |your )car in (your |the )(dedicated |current )?(spot|parking)/i.test(text) ||
+      /dedicated spot while you walk/i.test(text) ||
+      /car in your dedicated spot/i.test(text) ||
+      /keep (the |your )car in your/i.test(text)
+    );
+  }
+
+  _applyPostCheckoutParkingPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._isPostCheckoutParkingAsk(guestMessage)) {
+      return { applied: false };
+    }
+
+    const info = context.postCheckoutParkingInfo || {};
+    const name = this._guestDisplayFirstName(context);
+    const correctGreeting = getTimeBasedGreeting(this._nowForGreeting(context)).greeting;
+    const g = context.conversationTraces?.greeting;
+    const greetingPrefix = (g?.shouldUseGreeting)
+      ? `${correctGreeting}, ${name},`
+      : `Hi ${name},`;
+
+    const exception = !!(info.exceptionEligible && info.vacantSibling?.shortName);
+    const siblingName = info.vacantSibling?.shortName || '';
+    const snippet = (info.suggestedResponseSnippet || '').trim();
+
+    const refuseBody =
+      snippet && !exception
+        ? snippet
+        : 'Checkout is strictly at 10am. We can\'t leave the car in your parking spot after that — the cleaning team and next guests need the space.';
+    const exceptionBody =
+      snippet && exception
+        ? snippet
+        : `Checkout is strictly at 10am, so please don't leave the car in your current spot — we need it for the cleaners and next guests. The spot for ${siblingName} will be free, so please put the car in that spot, and don't leave it after 1pm.`;
+
+    const body = exception ? exceptionBody : refuseBody;
+    let proposedResponse = `${greetingPrefix} ${body}`.replace(/\s+/g, ' ').replace(/ ,/g, ',').trim();
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const has10am = /10\s*(:00)?\s*am/i.test(draft);
+    const allowsOwn = this._draftAllowsOwnSpotAfterCheckout(draft);
+    const mentionsSibling = exception && siblingName
+      ? new RegExp(siblingName.replace(/\s+/g, '\\s*'), 'i').test(draft)
+      : false;
+    const mentions1pm = /1\s*(:00)?\s*pm/i.test(draft);
+    const saysDontCurrent =
+      /don['’]?t leave it in your current|not (leave|keep).{0,40}(current|your) (spot|parking)|please don['’]?t leave the car in your current/i.test(
+        draft
+      );
+
+    let needsRewrite =
+      !draft ||
+      draft === 'none' ||
+      draft.length < 20 ||
+      !has10am ||
+      allowsOwn;
+
+    if (exception) {
+      if (!mentionsSibling || !mentions1pm || !saysDontCurrent) needsRewrite = true;
+    } else if (
+      /spot for (1b|apt\s*[23])/i.test(draft) ||
+      /put the car in that spot/i.test(draft)
+    ) {
+      // Sibling offer is only legal on the exception path.
+      needsRewrite = true;
+    }
+
+    if (!needsRewrite) {
+      parsed.typeOfMessageReceived = ['PARKING', 'CHECKOUT'];
+      return {
+        applied: true,
+        typeOfMessageReceived: ['PARKING', 'CHECKOUT'],
+        proposedResponse: draft,
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
+    parsed.typeOfMessageReceived = ['PARKING', 'CHECKOUT'];
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: ['PARKING', 'CHECKOUT'],
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
+  /**
    * Guest sent a pure thanks after we already delivered the full welcome/logistics.
    * Rene incident: duplicate 4pm/pet/parking block on "Thank you so much! I appreciate your prompt response!"
    */
@@ -1930,6 +2068,9 @@ export class GuestMessagingAgent {
   _applyLatestCheckoutTimePolicy(parsed = {}, context = {}, guestMessage = '') {
     const msg = String(guestMessage || '').trim();
     if (!msg) return { applied: false };
+    // Cassidy: parking + latest-checkout in one message. Parking policy owns the reply
+    // so we do not keep a "yes you can leave the car … checkout is strictly at 10am" draft.
+    if (this._isPostCheckoutParkingAsk(msg)) return { applied: false };
     // Exact production miss + close variants (latest/last checkout time, optional day)
     const asksLatestCheckout =
       /what is the (latest|last) time we (are able to|can) check\s*out/i.test(msg) ||
@@ -3093,6 +3234,19 @@ export class GuestMessagingAgent {
       lines.push('- CRITICAL PRE-CHECK-IN PARKING (Amie incident): Guest asks to park in the designated spot BEFORE 4pm check-in. No prior host message said the unit is ready (earlyUnitReadyOffered=false). You MUST NOT say "yes", "the designated spot is available", or confirm they can park before check-in. Correct answer: check-in is at 4pm; we can\'t guarantee the spot before then; cleaning team may still be using it; we\'ll message you when the spot is ready. Only confirm early parking if a prior host message explicitly said the unit is ready for check-in now.');
     }
 
+    if (this._isPostCheckoutParkingAsk(message) || context.postCheckoutParkingInfo?.detected) {
+      const p = context.postCheckoutParkingInfo || {};
+      lines.push('- CRITICAL POST-CHECKOUT PARKING (Cassidy incident): Guest asks to leave/keep the car in the parking spot after checkout or during checkout day. You MUST NEVER say they can leave the car in their dedicated / current / own spot after 10am. Checkout is strictly at 10am. The cleaning team and next guests need that spot. Production bug: "yes you can leave the car in your dedicated spot while you walk around tomorrow. Checkout is strictly at 10am." is FORBIDDEN.');
+      if (p.exceptionEligible && p.vacantSibling?.shortName) {
+        lines.push(`- SINGLE EXCEPTION (all three already verified by PostCheckoutParkingTool): it is the evening before checkout, after 8pm ET (no new bookings), and ${p.vacantSibling.shortName} is vacant that night. Offer ONLY that unit's spot until 1pm max. MUST say they must NOT leave the car in their current spot. MUST include "1pm". Ruby gold: "the spot for 1b will be free tomorrow so please put the car in that spot, and don't leave it in your current spot".`);
+      } else {
+        lines.push(`- Exception NOT eligible (reason=${p.reason || 'unknown / not yet checked'}). Do NOT offer another unit's spot. Do NOT say yes they can leave the car. Answer: checkout is strictly at 10am; we can't leave the car in their parking spot after that.`);
+      }
+      if (p.suggestedResponseSnippet) {
+        lines.push(`- Tool suggested snippet (prefer this wording): "${p.suggestedResponseSnippet}"`);
+      }
+    }
+
     // Live tool results from early traces (visible to first-pass LLM so it can use exact data + any auto-actions)
     if (context.earlyThermostatInfo || context.heatPumpInfo) {
       lines.push('');
@@ -3403,6 +3557,27 @@ export class GuestMessagingAgent {
         }
       } catch (err) {
         // Non-fatal — we still want to reply; the tool result will indicate we could not check calendar
+      }
+    }
+
+    // Leave-car-after-checkout (Cassidy). Mockable Hospitable occupancy for sibling spots.
+    if (!enrichedContext.postCheckoutParkingInfo?.detected && PostCheckoutParkingTool.looksLikePostCheckoutParkingAsk(guestMessage)) {
+      const parkingTool = this.tools.get('check_post_checkout_parking');
+      if (parkingTool) {
+        try {
+          const parkInfo = await parkingTool.execute(guestMessage, enrichedContext);
+          if (parkInfo?.detected) {
+            enrichedContext.postCheckoutParkingInfo = parkInfo;
+            console.log(
+              '[Agent] → Early post-checkout parking: exceptionEligible=' +
+                parkInfo.exceptionEligible +
+                ' reason=' +
+                (parkInfo.reason || '')
+            );
+          }
+        } catch (err) {
+          // Non-fatal — deterministic policy still refuses the own-spot ask
+        }
       }
     }
   }
@@ -3850,6 +4025,7 @@ export class GuestMessagingAgent {
       cancellationInfo,
       eventInfo,
       stayExtensionInfo,
+      postCheckoutParkingInfo: enrichedContext.postCheckoutParkingInfo || null,
       unitReadiness: enrichedContext.unitReadiness || null,
       earlyTraces: {
         conversationTraces: enrichedContext.conversationTraces || null,
@@ -4277,6 +4453,17 @@ export class GuestMessagingAgent {
       finalResult.proposedResponse = preCheckInParkingPolicyFinal.proposedResponse;
       finalResult.shouldReply = preCheckInParkingPolicyFinal.shouldReply;
       finalResult.confidence = preCheckInParkingPolicyFinal.confidence;
+    }
+
+    const postCheckoutParkingPolicyFinal = this._applyPostCheckoutParkingPolicy(finalResult, enrichedContext, guestMessage);
+    if (postCheckoutParkingPolicyFinal.applied) {
+      console.log('[Agent] → Post-checkout parking policy applied (never own spot after 10am)');
+      finalResult.typeOfMessageReceived = postCheckoutParkingPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = postCheckoutParkingPolicyFinal.proposedResponse;
+      finalResult.shouldReply = postCheckoutParkingPolicyFinal.shouldReply;
+      finalResult.confidence = postCheckoutParkingPolicyFinal.confidence;
+      finalResult.postCheckoutParkingInfo =
+        enrichedContext.postCheckoutParkingInfo || finalResult.postCheckoutParkingInfo || null;
     }
 
     const postStayFeedbackPolicyFinal = this._applyPostStayHousekeepingFeedbackPolicy(finalResult, enrichedContext, guestMessage);

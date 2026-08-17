@@ -33,6 +33,9 @@ jobs:
         run: npm ci
 
       - name: Run tests
+        env:
+          # Live Grok tests (Cassidy parking regression, etc.) skip without this.
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
         run: npm test
 
   eval:

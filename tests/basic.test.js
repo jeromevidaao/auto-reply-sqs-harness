@@ -7,6 +7,7 @@ import { setHostContactsForTests, TEST_HOST_CONTACTS, clearHostContactsCache } f
 import { EventRequestTool } from '../src/tools/event/EventRequestTool.js';
 import { ThermostatTool } from '../src/tools/hvac/ThermostatTool.js';
 import { StayExtensionTool } from '../src/tools/stay-extension/StayExtensionTool.js';
+import { PostCheckoutParkingTool } from '../src/tools/parking/PostCheckoutParkingTool.js';
 import {
   getTimeBasedGreeting,
   resolveNowForGreeting,
@@ -937,6 +938,184 @@ describe('EventRequestTool (no LLM)', () => {
       msg
     );
     assert.equal(applied.applied, false);
+  });
+
+  it('rewrites Cassidy own-spot leave-the-car yes (production miss)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const msg =
+      'Hi! We were also wondering for tomorrow if we could leave the car in the parking spot during the day as we walk around? And what would be the latest check out time?';
+    const applied = agent._applyPostCheckoutParkingPolicy(
+      {
+        typeOfMessageReceived: 'PARKING',
+        proposedResponse:
+          'Good evening, Cassidy, yes you can leave the car in your dedicated spot while you walk around tomorrow. Checkout is strictly at 10am.',
+        shouldReply: true,
+      },
+      {
+        guestName: 'Cassidy',
+        listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+        checkOut: '2026-08-17',
+        asOfInstant: '2026-08-16T17:56:00-04:00',
+        postCheckoutParkingInfo: { detected: true, exceptionEligible: false },
+      },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, true);
+    assert.match(applied.proposedResponse, /10am/i);
+    assert.doesNotMatch(applied.proposedResponse, /yes you can leave the car/i);
+    assert.doesNotMatch(applied.proposedResponse, /leave the car in your dedicated/i);
+    assert.doesNotMatch(applied.proposedResponse, /spot for 1b/i);
+  });
+
+  it('offers vacant sibling spot until 1pm only when all exception conditions hold', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const msg =
+      'Hi! We were also wondering for tomorrow if we could leave the car in the parking spot during the day as we walk around? And what would be the latest check out time?';
+    const applied = agent._applyPostCheckoutParkingPolicy(
+      { typeOfMessageReceived: 'PARKING', proposedResponse: 'none', shouldReply: false },
+      {
+        guestName: 'Cassidy',
+        listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+        checkOut: '2026-08-17',
+        asOfInstant: '2026-08-16T20:30:00-04:00',
+        postCheckoutParkingInfo: {
+          detected: true,
+          exceptionEligible: true,
+          vacantSibling: { shortName: '1B', listingId: 'c899481f-2e5b-402d-80c4-3167fd824d96' },
+          suggestedResponseSnippet:
+            "Checkout is strictly at 10am, so please don't leave the car in your current spot — we need it for the cleaners and next guests. The spot for 1B will be free, so please put the car in that spot, and don't leave it after 1pm.",
+        },
+      },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /1B/i);
+    assert.match(applied.proposedResponse, /1pm/i);
+    assert.match(applied.proposedResponse, /current spot/i);
+    assert.match(applied.proposedResponse, /10am/i);
+    assert.doesNotMatch(applied.proposedResponse, /yes you can leave the car in your dedicated/i);
+  });
+
+  it('does not treat Amie pre-check-in parking as post-checkout car leave', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const msg = 'Hi are we able to park in the designated spot before the check in time at 4?';
+    assert.equal(agent._isPostCheckoutParkingAsk(msg), false);
+    const applied = agent._applyPostCheckoutParkingPolicy(
+      { proposedResponse: 'Check-in is at 4pm.' },
+      {},
+      msg
+    );
+    assert.equal(applied.applied, false);
+  });
+});
+
+describe('PostCheckoutParkingTool (mocked Hospitable, no LLM)', () => {
+  const cassidyMsg =
+    'Hi! We were also wondering for tomorrow if we could leave the car in the parking spot during the day as we walk around? And what would be the latest check out time?';
+  const apt2 = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
+  const apt1b = 'c899481f-2e5b-402d-80c4-3167fd824d96';
+  const apt3 = '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd';
+
+  function mockOcc(occupiedByListing) {
+    return {
+      async hasGuestsOnDate(listingId) {
+        return !!occupiedByListing[listingId];
+      },
+    };
+  }
+
+  const cassidyCtx = (asOfInstant) => ({
+    guestName: 'Cassidy',
+    listingId: apt2,
+    checkIn: '2026-08-16',
+    checkOut: '2026-08-17',
+    propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+    asOfInstant,
+  });
+
+  it('detects Cassidy leave-the-car + latest checkout ask', () => {
+    assert.equal(PostCheckoutParkingTool.looksLikePostCheckoutParkingAsk(cassidyMsg), true);
+    assert.equal(
+      PostCheckoutParkingTool.looksLikePostCheckoutParkingAsk(
+        'Hi Jerome, we are about to check out. Would it be okay for us to leave the car for an hour or so while we walk to get breakfast?'
+      ),
+      true
+    );
+    assert.equal(
+      PostCheckoutParkingTool.looksLikePostCheckoutParkingAsk(
+        'Hi are we able to park in the designated spot before the check in time at 4?'
+      ),
+      false
+    );
+  });
+
+  it('refuses own spot before 8pm ET even if 1B is vacant (Cassidy 5:56pm)', async () => {
+    const tool = new PostCheckoutParkingTool({
+      hospitableClient: mockOcc({ [apt1b]: false, [apt3]: true }),
+    });
+    const result = await tool.execute(cassidyMsg, cassidyCtx('2026-08-16T17:56:00-04:00'));
+    assert.equal(result.detected, true);
+    assert.equal(result.isDayBeforeCheckout, true);
+    assert.equal(result.isAfter8pmEt, false);
+    assert.equal(result.exceptionEligible, false);
+    assert.equal(result.vacantSibling, null);
+    assert.match(result.suggestedResponseSnippet, /10am/i);
+    assert.doesNotMatch(result.suggestedResponseSnippet, /1B/i);
+  });
+
+  it('offers 1B until 1pm after 8pm ET when 1B is vacant that night', async () => {
+    const tool = new PostCheckoutParkingTool({
+      hospitableClient: mockOcc({ [apt1b]: false, [apt3]: true }),
+    });
+    const result = await tool.execute(cassidyMsg, cassidyCtx('2026-08-16T20:30:00-04:00'));
+    assert.equal(result.detected, true);
+    assert.equal(result.isDayBeforeCheckout, true);
+    assert.equal(result.isAfter8pmEt, true);
+    assert.equal(result.occupancyChecked, true);
+    assert.equal(result.exceptionEligible, true);
+    assert.equal(result.vacantSibling.shortName, '1B');
+    assert.match(result.suggestedResponseSnippet, /1B/i);
+    assert.match(result.suggestedResponseSnippet, /1pm/i);
+    assert.match(result.suggestedResponseSnippet, /current spot/i);
+  });
+
+  it('does not offer a sibling when every other unit is occupied that night', async () => {
+    const tool = new PostCheckoutParkingTool({
+      hospitableClient: mockOcc({ [apt1b]: true, [apt3]: true }),
+    });
+    const result = await tool.execute(cassidyMsg, cassidyCtx('2026-08-16T20:30:00-04:00'));
+    assert.equal(result.exceptionEligible, false);
+    assert.equal(result.vacantSibling, null);
+    assert.doesNotMatch(result.suggestedResponseSnippet, /1B|Apt 3/i);
+  });
+
+  it('does not offer the exception on checkout morning (Olivia class)', async () => {
+    const tool = new PostCheckoutParkingTool({
+      hospitableClient: mockOcc({ [apt1b]: false, [apt3]: false }),
+    });
+    const result = await tool.execute(
+      'Hi Jerome, we are about to check out. Would it be okay for us to leave the car for an hour or so while we walk to get breakfast?',
+      {
+        guestName: 'Olivia',
+        listingId: apt2,
+        checkIn: '2026-07-29',
+        checkOut: '2026-07-30',
+        asOfInstant: '2026-07-30T06:53:00-04:00',
+      }
+    );
+    assert.equal(result.detected, true);
+    assert.equal(result.isDayBeforeCheckout, false);
+    assert.equal(result.exceptionEligible, false);
   });
 
   it('resolves conversation_id for messages API instead of reservationId (Rene 404 bug)', async () => {
@@ -2681,5 +2860,72 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
     if (!usesNaturalName) {
       console.log('[test] Note: proposedResponse did not obviously use short name "David":', result.proposedResponse);
     }
+  });
+
+  it('Cassidy leave-the-car after checkout: never allows own spot (mock Hospitable, live Grok)', async () => {
+    const apt2 = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
+    const apt1b = 'c899481f-2e5b-402d-80c4-3167fd824d96';
+    const apt3 = '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd';
+    const occupiedByListing = { [apt1b]: false, [apt2]: false, [apt3]: true };
+    const mockHospitable = {
+      async hasGuestsOnDate(listingId) {
+        return !!occupiedByListing[listingId];
+      },
+      async getConversationMessages() { return []; },
+      async getReservationMessages() { return []; },
+      async getInquiryMessages() { return []; },
+      async getThreadMessages() { return []; },
+    };
+    const agent = new GuestMessagingAgent({
+      llm: 'auto',
+      projectRoot: projectRootForTests,
+      hospitableClient: mockHospitable,
+      requireLiveConversationHistory: false,
+    });
+    const msg =
+      'Hi! We were also wondering for tomorrow if we could leave the car in the parking spot during the day as we walk around? And what would be the latest check out time?';
+
+    // Exact production miss: Sunday 8/16 5:56pm ET, checkout Monday 8/17.
+    // 1B is vacant but it is before 8pm — exception must NOT fire.
+    const refused = await agent.processMessage(msg, {
+      guestName: 'Cassidy',
+      listingId: apt2,
+      propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+      checkIn: '2026-08-16',
+      checkOut: '2026-08-17',
+      asOfInstant: '2026-08-16T17:56:00-04:00',
+      nowForGreeting: new Date('2026-08-16T17:56:00-04:00'),
+    });
+
+    assert.equal(refused.shouldReply, true, 'Must auto-reply to Cassidy parking + checkout ask');
+    assert.ok(refused.proposedResponse && refused.proposedResponse !== 'none');
+    assert.match(refused.proposedResponse, /10\s*(:00)?\s*am/i);
+    assert.doesNotMatch(refused.proposedResponse, /yes you can leave the car/i);
+    assert.doesNotMatch(refused.proposedResponse, /you can leave the car in your/i);
+    assert.doesNotMatch(refused.proposedResponse, /car in your dedicated spot/i);
+    assert.doesNotMatch(refused.proposedResponse, /spot for 1b/i);
+    assert.equal(refused.postCheckoutParkingInfo?.detected, true);
+    assert.equal(refused.postCheckoutParkingInfo?.exceptionEligible, false);
+
+    // After 8pm ET the evening before + 1B vacant Monday night → Ruby path.
+    const offered = await agent.processMessage(msg, {
+      guestName: 'Cassidy',
+      listingId: apt2,
+      propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+      checkIn: '2026-08-16',
+      checkOut: '2026-08-17',
+      asOfInstant: '2026-08-16T20:30:00-04:00',
+      nowForGreeting: new Date('2026-08-16T20:30:00-04:00'),
+    });
+
+    assert.equal(offered.shouldReply, true);
+    assert.match(offered.proposedResponse, /10\s*(:00)?\s*am/i);
+    assert.match(offered.proposedResponse, /1B/i);
+    assert.match(offered.proposedResponse, /1\s*(:00)?\s*pm/i);
+    assert.match(offered.proposedResponse, /current spot/i);
+    assert.doesNotMatch(offered.proposedResponse, /yes you can leave the car/i);
+    assert.doesNotMatch(offered.proposedResponse, /leave the car in your dedicated/i);
+    assert.equal(offered.postCheckoutParkingInfo?.exceptionEligible, true);
+    assert.equal(offered.postCheckoutParkingInfo?.vacantSibling?.shortName, '1B');
   });
 });

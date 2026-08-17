@@ -1,0 +1,47 @@
+{
+  "id": "cassidy-post-checkout-parking",
+  "description": "Cassidy (Apt 2) asks the evening before checkout to leave the car in the parking spot during the day and what the latest checkout time is. Production auto said yes they can leave the car in their dedicated spot. Must NEVER allow their own spot after 10am. This seeded run is 5:56pm ET (before 8pm) so the vacant-sibling exception must not fire.",
+  "guestMessage": "Hi! We were also wondering for tomorrow if we could leave the car in the parking spot during the day as we walk around? And what would be the latest check out time?",
+  "guestName": "Cassidy",
+  "checkIn": "2026-08-16",
+  "checkOut": "2026-08-17",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "Sunny Downtown 2 Bed Apt, Parking",
+  "context": {
+    "asOfInstant": "2026-08-16T17:56:00-04:00",
+    "nowForGreeting": "2026-08-16T17:56:00-04:00",
+    "postCheckoutParkingInfo": {
+      "detected": true,
+      "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+      "ownUnitName": "Apt 2",
+      "checkOut": "2026-08-17",
+      "nowEtDate": "2026-08-16",
+      "nowEtHour": 17,
+      "isDayBeforeCheckout": true,
+      "isAfter8pmEt": false,
+      "occupancyChecked": false,
+      "vacantSibling": null,
+      "exceptionEligible": false,
+      "reason": "before_8pm_et_bookings_still_open",
+      "suggestedResponseSnippet": "Checkout is strictly at 10am. We can't leave the car in your parking spot after that — the cleaning team and next guests need the space."
+    },
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": ["PARKING", "CHECKOUT", "LATE_CHECKOUT"],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "forbiddenPhrases": [
+      "yes you can leave the car",
+      "leave the car in your dedicated",
+      "car in your dedicated spot",
+      "dedicated spot while you walk"
+    ],
+    "requiredPhrases": [
+      "10am"
+    ]
+  },
+  "notes": "Cassidy 2026-08-16 5:56pm ET production miss. Ruby corrected: do not leave the car in the current spot. Auto must refuse own-spot parking after 10am. Sibling-spot exception only after 8pm ET the evening before checkout when another unit is vacant — not this timestamp."
+}

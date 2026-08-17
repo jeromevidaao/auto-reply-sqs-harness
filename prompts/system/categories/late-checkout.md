@@ -19,3 +19,4 @@
 **Do not**:
 - Offer any flexibility on checkout unless the host has previously done so in the conversation history.
 - Classify a full-day stay extension request (changing the checkout *date*) as LATE_CHECKOUT. That produces the wrong policy answer (the 10AM cleaning team language does not apply to adding an extra paid night). Use STAY_EXTENSION + the calendar tool for 100% accurate availability instead.
+- Treat "can we leave the car after checkout / during the day tomorrow" as permission to stay in their own parking spot after 10am. That is **never** allowed (Cassidy incident). See parking.md post-checkout car rule. A bundled "latest checkout time" + leave-the-car ask is PARKING + CHECKOUT: 10am strictly, own spot not available after that.

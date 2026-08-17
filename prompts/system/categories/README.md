@@ -39,7 +39,7 @@ Each file corresponds to one or more `typeOfMessageReceived` categories used by 
 - `off-platform-booking.md`
 - `other-edge-cases.md`
 - `outdoor-trash.md`
-- `parking.md`
+- `parking.md` (includes Cassidy post-checkout car: never own spot after 10am; 8pm ET + vacant sibling until 1pm only)
 - `pet-policy.md`
 - `pricing.md`
 - `review.md`
