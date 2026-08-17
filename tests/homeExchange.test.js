@@ -6,6 +6,8 @@ import path from 'node:path';
 import {
   isHomeExchangePayload,
   extractHomeExchangeMessage,
+  resolveHeUnit,
+  extractHeHomeId,
   isFirstHomeExchangeMessage,
   stayNights,
   analyzeCalendarOpen,
@@ -115,6 +117,91 @@ describe('HomeExchange detector isolation (must not match Airbnb traffic)', () =
       }),
       true
     );
+  });
+});
+
+describe('HomeExchange unit mapping (Katie Apt #2 wiring)', () => {
+  it('maps HE home 3285044 to Apt #2 Hospitable + Airbnb ids', () => {
+    const unit = resolveHeUnit('3285044');
+    assert.equal(unit.propertyId, '114663c5-0709-4eff-a868-fa9ebd6ed42d');
+    assert.equal(unit.airbnbListingId, '20150380');
+    assert.equal(unit.propertyName, 'Pine Apt #2');
+    assert.equal(extractHeHomeId({ listing: { platform_id: '3285044' } }), '3285044');
+  });
+
+  it('prefers HE home id over a hardcoded Apt #3 property on the payload', () => {
+    const extracted = extractHomeExchangeMessage({
+      queryStringParameters: { act: HOMEEXCHANGE_ACT },
+      body: JSON.stringify({
+        data: {
+          body: 'Halloween weekend',
+          platform: HOMEEXCHANGE_PLATFORM,
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+          property: { id: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd', name: 'Pine Apt #3' },
+          airbnbListingId: '24259977',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-02',
+        },
+      }),
+    });
+    assert.equal(extracted.context.homeId, '3285044');
+    assert.equal(extracted.context.listingId, '114663c5-0709-4eff-a868-fa9ebd6ed42d');
+    assert.equal(extracted.context.airbnbListingId, '20150380');
+    assert.equal(extracted.context.propertyName, 'Pine Apt #2');
+  });
+
+  it('checks Apt #2 Hospitable calendar even when payload property is Apt #3', async () => {
+    const calendarIds = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Halloween weekend in Portland',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: true,
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-02',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+          listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+          airbnbListingId: '24259977',
+          property: { id: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd', name: 'Pine Apt #3' },
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar(propertyId) {
+          calendarIds.push(propertyId);
+          return ['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02'].map(
+            (date) => ({ date, status: { available: true } })
+          );
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 20150380, name: 'Pine Apt #2', price: 120 } };
+        },
+      },
+      homeExchangeClient: {
+        async getHomeCalendar(homeId) {
+          assert.equal(String(homeId), '3285044');
+          return heOpenRange('2026-10-25', '2026-11-05');
+        },
+        async sendMessage() {
+          return { ok: true };
+        },
+      },
+    });
+    assert.deepEqual(calendarIds, ['114663c5-0709-4eff-a868-fa9ebd6ed42d']);
+    assert.equal(result.homeId, '3285044');
+    assert.equal(result.propertyId, '114663c5-0709-4eff-a868-fa9ebd6ed42d');
+    assert.equal(result.airbnbListingId, '20150380');
+    assert.equal(result.calendar.open, true);
+    assert.equal(result.cleaningFee.amount, 120);
+    assert.match(result.proposedResponse, /\$120/);
+    assert.match(result.proposedResponse, /open on our calendar/i);
+    assert.match(result.proposedResponse, /okay paying that after your stay/i);
   });
 });
 

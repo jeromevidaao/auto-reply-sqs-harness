@@ -54,12 +54,60 @@ import {
 export const HOMEEXCHANGE_PLATFORM = 'homeexchange';
 export const HOMEEXCHANGE_ACT = 'homeexchange_message';
 
-/** HomeExchange home that maps to Pine Apt #3. */
+/** Pine HE home → Hospitable / Airbnb. Default only when the home id is missing. */
 export const HE_HOME_ID = '3202475';
-export const APT3_HOSPITABLE_PROPERTY_ID = '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd';
-export const APT3_AIRBNB_LISTING_ID = '24259977';
-export const APT3_PROPERTY_NAME = 'Pine Apt #3';
+export const HE_UNIT_BY_HOME = {
+  '3202475': {
+    homeId: '3202475',
+    propertyId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+    airbnbListingId: '24259977',
+    propertyName: 'Pine Apt #3',
+  },
+  '3285044': {
+    homeId: '3285044',
+    propertyId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+    airbnbListingId: '20150380',
+    propertyName: 'Pine Apt #2',
+  },
+  '3285159': {
+    homeId: '3285159',
+    propertyId: 'c899481f-2e5b-402d-80c4-3167fd824d96',
+    airbnbListingId: '20904545',
+    propertyName: 'Pine Apt #1B',
+  },
+};
+export const APT3_HOSPITABLE_PROPERTY_ID = HE_UNIT_BY_HOME[HE_HOME_ID].propertyId;
+export const APT3_AIRBNB_LISTING_ID = HE_UNIT_BY_HOME[HE_HOME_ID].airbnbListingId;
+export const APT3_PROPERTY_NAME = HE_UNIT_BY_HOME[HE_HOME_ID].propertyName;
 export const LISTING_TABLE = 'listing';
+
+export function resolveHeUnit(homeId) {
+  const key = homeId != null ? String(homeId).trim() : '';
+  return HE_UNIT_BY_HOME[key] || HE_UNIT_BY_HOME[HE_HOME_ID];
+}
+
+export function extractHeHomeId(src = {}) {
+  const listing = src.listing && typeof src.listing === 'object' ? src.listing : {};
+  const home = src.home && typeof src.home === 'object' ? src.home : {};
+  const candidates = [
+    listing.platform_id,
+    src.homeId,
+    src.home_id,
+    listing.id,
+    home.id,
+    src.heHomeId,
+  ];
+  for (const c of candidates) {
+    if (c == null || c === '') continue;
+    const key = String(c);
+    if (HE_UNIT_BY_HOME[key]) return key;
+  }
+  for (const c of candidates) {
+    if (c == null || c === '') continue;
+    return String(c);
+  }
+  return null;
+}
 
 /** Fallback only when DynamoDB `listing.price` cannot be read. */
 export const DEFAULT_CLEANING_FEES = {
@@ -330,9 +378,30 @@ export function formatStayRange(checkIn, checkOut) {
   return `${month} ${startDay}, ${startYear} – ${endMonth} ${endDay}, ${endYear}`;
 }
 
+function contextWithResolvedUnit(src = {}) {
+  const homeId = extractHeHomeId(src);
+  const mapped = homeId && HE_UNIT_BY_HOME[String(homeId)] ? resolveHeUnit(homeId) : null;
+  const unit = mapped || {
+    homeId: src.homeId || HE_HOME_ID,
+    propertyId: src.listingId || src.property?.id || APT3_HOSPITABLE_PROPERTY_ID,
+    airbnbListingId: src.airbnbListingId || APT3_AIRBNB_LISTING_ID,
+    propertyName: src.propertyName || src.property?.name || APT3_PROPERTY_NAME,
+  };
+  return {
+    homeId: unit.homeId,
+    listingId: unit.propertyId,
+    airbnbListingId: unit.airbnbListingId,
+    propertyName: unit.propertyName,
+  };
+}
+
 export function extractHomeExchangeMessage(event) {
   if (event?.message && (event.context?.platform === HOMEEXCHANGE_PLATFORM || event.context?.source === HOMEEXCHANGE_PLATFORM)) {
-    return { message: String(event.message || ''), context: { ...event.context } };
+    const ctx = event.context || {};
+    return {
+      message: String(event.message || ''),
+      context: { ...ctx, ...contextWithResolvedUnit(ctx) },
+    };
   }
 
   const candidates = collectPayloadCandidates(event);
@@ -368,9 +437,7 @@ export function extractHomeExchangeMessage(event) {
         checkOut: src.checkOut || src.check_out || null,
         isFirstMessage: src.isFirstMessage === true || src.is_first_message === true,
         messageCount: src.messageCount != null ? Number(src.messageCount) : null,
-        propertyName: src.propertyName || src.property?.name || APT3_PROPERTY_NAME,
-        listingId: src.listingId || src.property?.id || APT3_HOSPITABLE_PROPERTY_ID,
-        airbnbListingId: src.airbnbListingId || APT3_AIRBNB_LISTING_ID,
+        ...contextWithResolvedUnit(src),
         platform: HOMEEXCHANGE_PLATFORM,
         source: HOMEEXCHANGE_PLATFORM,
       },
@@ -892,14 +959,12 @@ export async function handleHomeExchangeMessage({
   const isFirst = isFirstHomeExchangeMessage(context, conversationHistory);
   const checkIn = !isFirst && askedDates?.checkIn ? askedDates.checkIn : originalCheckIn;
   const checkOut = !isFirst && askedDates?.checkOut ? askedDates.checkOut : originalCheckOut;
-  const propertyId = context.listingId || APT3_HOSPITABLE_PROPERTY_ID;
-  const airbnbListingId = context.airbnbListingId || APT3_AIRBNB_LISTING_ID;
+  const homeId = extractHeHomeId(context) || HE_HOME_ID;
+  const unit = resolveHeUnit(homeId);
+  const propertyId = unit.propertyId;
+  const airbnbListingId = unit.airbnbListingId;
   const guestName = context.guestName || context.sender?.first_name || null;
   const feeAccepted = guestAcceptedCleaningFeeInThread(message, conversationHistory, guestName);
-  const homeId =
-    context.listing?.platform_id ||
-    context.homeId ||
-    HE_HOME_ID;
 
   const shouldCheckCalendar = !!(
     checkIn &&
