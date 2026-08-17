@@ -174,6 +174,7 @@ When the agent **cannot auto-reply**, production notifies the **Cleaning Button 
 - SSM: `/fcm/project-id`, `/fcm/service-account-json` (SecureString)
 - DynamoDB: `androidDeviceTokens`
 - Lambda IAM: policy `FcmOwnerAndroidNotify` on `auto-reply-sqs-role-3i2ozrop`
+- Lambda IAM: inline policy `AirbnbHarnessDedup` (`dynamodb:PutItem` / `GetItem` / `DescribeTable` on `airbnb-harness-dedup`). Without this, webhook/SQS dedup is a no-op and retries can double-send.
 
 Full agent diagnostics remain in **CloudWatch**. The legacy SNS email topic (`SNS_TOPIC_ARN` → `airbnb-unanswered-guest-questions`) is used only if FCM is unavailable (no tokens / misconfigured).
 

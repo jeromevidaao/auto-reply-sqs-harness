@@ -83,8 +83,11 @@ export function isOperationalMustReplyAsk(guestMessage) {
     /\b(wifi|wi-fi|password|door code|lockbox|parking|where (do|can) i park|trash|linen|checkout is|check out)\b/i.test(
       msg
     ) ||
-    // Multi-intent thanks + question (Cassidy class)
-    (/thank/i.test(msg) && /\?/.test(msg) && msg.length < 280)
+    // Transport / indoor recs (Amber 2026-08-17: shuttle + rainy-day activities)
+    (/\b(shuttle|taxi|uber|lyft|airport|rainy day|indoor)\b/i.test(msg) && /\?/.test(msg)) ||
+    // Multi-intent thanks + question (Cassidy / Amber). No short-length cap —
+    // Amber's shuttle + rainy-day ask was ~400 chars and missed the old <280 rule.
+    (/thank/i.test(msg) && /\?/.test(msg))
   );
 }
 
@@ -116,7 +119,10 @@ export function applyHighConfidenceForceReply({
   let nextConf = confNum;
   let reason = null;
 
-  if (escalated) {
+  // Recent-host suppression used to set escalated=true and then this early
+  // return blocked the force-reply (Amber 2026-08-17). Operational asks with a
+  // sendable draft still go through the force rules below.
+  if (escalated && !isOperationalMustReplyAsk(guestMessage)) {
     return { force: false, shouldReply: reply, confidence: nextConf, reason: null };
   }
   if (!hasSendableDraft(proposedResponse)) {

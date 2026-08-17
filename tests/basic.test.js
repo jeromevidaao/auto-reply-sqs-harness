@@ -898,6 +898,90 @@ describe('EventRequestTool (no LLM)', () => {
     assert.ok(scen.rubric.minConfidence >= 0.95);
   });
 
+  it('HARDENING: Amber shuttle + rainy-day ask is an operational must-reply even when escalated', async () => {
+    const { applyHighConfidenceForceReply, isOperationalMustReplyAsk } =
+      await import('../src/utils/replyPolicy.js');
+    const amber =
+      "I saw the guidebook, thank you! We ended up having to drive my husband to the airport at 4:30am because we were unprepared for a taxi and Uber dead zone at that time lol. He'll be back at 1am early Wednesday before we check out. Is there a shuttle your recommend so I'm not dragging the kids out of bed again?\n\nAlso keeping my girls occupied in the city on a rainy day? Most of my big plans were outdoors.";
+    assert.equal(isOperationalMustReplyAsk(amber), true);
+
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    assert.equal(agent._guestAsksNewQuestion(amber, ['THANKS', 'TRANSPORT_QUESTION', 'ACTIVITIES_QUESTION']), true);
+    assert.equal(agent._hasSafeAutoReplyCategory({ typeOfMessageReceived: ['THANKS', 'TRANSPORT_QUESTION'] }), true);
+
+    const forced = applyHighConfidenceForceReply({
+      shouldReply: false,
+      confidence: 0.9,
+      proposedResponse:
+        "You're welcome, Amber! For the 1am airport run, the Portland Jetport shared-ride shuttle works well. For rainy days with the girls, the Children's Museum of Maine is a great indoor option.",
+      escalated: true,
+      typeOfMessageReceived: ['THANKS', 'TRANSPORT_QUESTION', 'ACTIVITIES_QUESTION'],
+      guestMessage: amber,
+    });
+    assert.equal(forced.shouldReply, true);
+    assert.ok(forced.reason);
+  });
+
+  it('HARDENING: thanks + shuttle/rainy-day forces a draft when Grok returns OTHER_MESSAGE + none', () => {
+    const amber =
+      "I saw the guidebook, thank you! We ended up having to drive my husband to the airport at 4:30am because we were unprepared for a taxi and Uber dead zone at that time lol. He'll be back at 1am early Wednesday before we check out. Is there a shuttle your recommend so I'm not dragging the kids out of bed again?\n\nAlso keeping my girls occupied in the city on a rainy day? Most of my big plans were outdoors.";
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyThanksPlusTransportActivitiesPolicy(
+      { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'none', shouldReply: false, confidence: 0.4 },
+      { guestName: 'Amber' },
+      amber
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, true);
+    assert.equal(applied.confidence, 1.0);
+    assert.deepEqual(applied.typeOfMessageReceived, ['THANKS', 'TRANSPORT_QUESTION', 'ACTIVITIES_QUESTION']);
+    assert.match(applied.proposedResponse, /you're welcome, amber/i);
+    assert.match(applied.proposedResponse, /taxi|shuttle/i);
+    assert.match(applied.proposedResponse, /museum|library|indoor/i);
+  });
+
+  it('HARDENING: processMessage still sends Amber-class ask when first-pass draft is none', async () => {
+    const amber =
+      "I saw the guidebook, thank you! We ended up having to drive my husband to the airport at 4:30am because we were unprepared for a taxi and Uber dead zone at that time lol. He'll be back at 1am early Wednesday before we check out. Is there a shuttle your recommend so I'm not dragging the kids out of bed again?\n\nAlso keeping my girls occupied in the city on a rainy day? Most of my big plans were outdoors.";
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: {
+        complete: async () =>
+          JSON.stringify({
+            typeOfMessageReceived: 'OTHER_MESSAGE',
+            proposedResponse: 'none',
+            shouldReply: false,
+            confidence: 0.4,
+          }),
+      },
+    });
+    const result = await agent.processMessage(amber, {
+      guestName: 'Amber',
+      reservationId: '48da4e7d-4aa9-43bf-8fc7-dd0ed7ea6a16',
+      recentHostActivity: true,
+      conversationTraces: { hasRecentHostMessage: true, minutesSinceLastHostMessage: 5.1 },
+      conversationHistory: [
+        {
+          sender_type: 'host',
+          body: 'Good morning Amber, I hope that you have settled in.',
+        },
+      ],
+    });
+    assert.equal(result.shouldReply, true);
+    assert.match(result.proposedResponse, /you're welcome, amber/i);
+    assert.ok(
+      Array.isArray(result.typeOfMessageReceived)
+        ? result.typeOfMessageReceived.includes('TRANSPORT_QUESTION')
+        : result.typeOfMessageReceived === 'TRANSPORT_QUESTION'
+    );
+  });
+
   it('rejects premature designated-spot confirmation before check-in (Amie incident)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
@@ -1957,6 +2041,53 @@ describe('THANK_YOU_MESSAGE repeat allowance (no LLM)', () => {
     assert.equal(result.typeOfMessageReceived, 'THANK_YOU_MESSAGE');
     assert.equal(result.shouldReply, true);
     assert.match(result.proposedResponse, /you're welcome, olivia/i);
+  });
+
+  it('HARDENING: recent host activity does not suppress THANKS + new shuttle/rainy-day questions (Amber)', async () => {
+    const amber =
+      "I saw the guidebook, thank you! We ended up having to drive my husband to the airport at 4:30am because we were unprepared for a taxi and Uber dead zone at that time lol. He'll be back at 1am early Wednesday before we check out. Is there a shuttle your recommend so I'm not dragging the kids out of bed again?\n\nAlso keeping my girls occupied in the city on a rainy day? Most of my big plans were outdoors.";
+    const draft =
+      "You're welcome, Amber! For the 1am airport run, the Portland Jetport shared-ride shuttle works well. For rainy days with the girls, the Children's Museum of Maine or Portland Public Library story times are great indoor options.";
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: {
+        complete: async () =>
+          JSON.stringify({
+            typeOfMessageReceived: ['THANKS', 'TRANSPORT_QUESTION', 'ACTIVITIES_QUESTION'],
+            proposedResponse: draft,
+            shouldReply: true,
+            confidence: 0.9,
+          }),
+      },
+      hospitableClient: mockHospitableClient({
+        getReservationMessages: async () => [
+          {
+            sender_type: 'host',
+            body: 'Good morning Amber, I hope that you have settled in after your travel and that you are enjoying your stay. Let me know if you need anything!',
+            created_at: fiveMinAgo,
+          },
+          { sender_type: 'guest', body: amber, created_at: new Date().toISOString() },
+        ],
+      }),
+      requireLiveConversationHistory: false,
+    });
+
+    const result = await agent.handleMessage(amber, {
+      guestName: 'Amber',
+      conversation_id: '5d52d6e7-68d0-4e2b-91e9-4bbf6af119df',
+      reservationId: '48da4e7d-4aa9-43bf-8fc7-dd0ed7ea6a16',
+      listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+      propertyName: 'Cozy, Central 2 Bd Apt, Parking',
+      checkIn: '2026-08-16T16:00:00-04:00',
+      checkOut: '2026-08-19T10:00:00-04:00',
+      sender_type: 'guest',
+    });
+
+    assert.equal(result.shouldReply, true);
+    assert.equal(result.suppressedDueToRecentHost, undefined);
+    assert.match(result.proposedResponse, /welcome, amber/i);
+    assert.match(result.proposedResponse, /shuttle|taxi|museum|library|indoor/i);
   });
 });
 

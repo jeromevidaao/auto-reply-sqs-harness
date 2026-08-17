@@ -1,0 +1,49 @@
+{
+  "id": "amber-airport-shuttle-rainy-day",
+  "description": "Amber (Apt 3) thanks for the guidebook and asks two new questions: shuttle rec for a 1am airport pickup, and rainy-day indoor ideas for kids 6 and 9. Host said good morning 5 min earlier. Production suppressed the sendable draft (array THANKS+TRANSPORT+ACTIVITIES treated as not THANK_YOU_MESSAGE).",
+  "guestMessage": "I saw the guidebook, thank you! We ended up having to drive my husband to the airport at 4:30am because we were unprepared for a taxi and Uber dead zone at that time lol. He'll be back at 1am early Wednesday before we check out. Is there a shuttle your recommend so I'm not dragging the kids out of bed again?\n\nAlso keeping my girls occupied in the city on a rainy day? Most of my big plans were outdoors.",
+  "guestName": "Amber",
+  "checkIn": "2026-08-16",
+  "checkOut": "2026-08-19",
+  "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+  "propertyName": "Cozy, Central 2 Bd Apt, Parking",
+  "context": {
+    "reservationId": "48da4e7d-4aa9-43bf-8fc7-dd0ed7ea6a16",
+    "conversation_id": "5d52d6e7-68d0-4e2b-91e9-4bbf6af119df",
+    "recentHostActivity": true,
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "minutesSinceLastHostMessage": 5.1,
+      "recentHostGreeting": "Good morning Amber",
+      "recentHostGreetingMinutesAgo": 5.1
+    },
+    "conversationHistory": [
+      {
+        "sender_type": "host",
+        "role": "host",
+        "body": "Good morning Amber,\n\nI hope that you have settled in after your travel and that you are enjoying your stay. Let me know if you need anything!",
+        "created_at": "2026-08-17T09:56:00-04:00"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": [
+      "THANKS",
+      "THANK_YOU_MESSAGE",
+      "TRANSPORT_QUESTION",
+      "ACTIVITIES_QUESTION",
+      "RECOMMENDATION"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.9,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "You're welcome"
+    ],
+    "forbiddenPhrases": []
+  },
+  "notes": "Amber 2026-08-17 10:06 ET production miss. Recent-host suppression wiped a 314-char draft answering shuttle + rainy-day questions. Deterministic policy forces a sendable draft if Grok returns OTHER_MESSAGE + none.",
+  "productionMiss": true,
+  "unitTestEnforced": true
+}

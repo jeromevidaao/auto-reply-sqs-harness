@@ -5,6 +5,7 @@ import {
   GROK_MESSAGE_MAX_RECEIVE_COUNT,
   GROK_MESSAGE_VISIBILITY_TIMEOUT_SEC,
   HOSPITABLE_429_DEFAULT_MS,
+  HOSPITABLE_READ_429_MIN_MS,
   HOSPITABLE_SEND_MAX_ATTEMPTS,
   HOSPITABLE_SEND_MIN_INTERVAL_MS,
   computeRetryDelay,
@@ -82,6 +83,32 @@ describe('computeRetryDelay / Retry-After', () => {
     assert.ok(delay >= 90000, `got ${delay}`);
   });
 
+  it('does not honor Retry-After: 0 (Amber 2026-08-17 — burned 4 GETs in 29s)', () => {
+    const err = statusErr(429);
+    err.response.headers = { 'retry-after': '0' };
+    assert.equal(parseRetryAfterMs(err), 0);
+    const readDelay = computeRetryDelay(err, { attempt: 2, kind: 'read', jitter: false });
+    const sendDelay = computeRetryDelay(err, { attempt: 2, kind: 'send', jitter: false });
+    assert.ok(readDelay >= HOSPITABLE_429_DEFAULT_MS, `read delay ${readDelay}`);
+    assert.ok(sendDelay >= HOSPITABLE_429_DEFAULT_MS, `send delay ${sendDelay}`);
+    assert.ok(readDelay >= HOSPITABLE_READ_429_MIN_MS);
+  });
+
+  it('does not honor a past Retry-After HTTP-date', () => {
+    const err = statusErr(429);
+    err.response.headers = { 'retry-after': 'Wed, 21 Oct 2015 07:28:00 GMT' };
+    assert.equal(parseRetryAfterMs(err), 0);
+    const delay = computeRetryDelay(err, { attempt: 3, kind: 'read', jitter: false });
+    assert.ok(delay >= HOSPITABLE_429_DEFAULT_MS, `got ${delay}`);
+  });
+
+  it('floors tiny Retry-After on reads to the 15s minimum via 60s fallback', () => {
+    const err = statusErr(429);
+    err.response.headers = { 'retry-after': '2' };
+    const delay = computeRetryDelay(err, { attempt: 1, kind: 'read', jitter: false });
+    assert.ok(delay >= HOSPITABLE_429_DEFAULT_MS, `got ${delay}`);
+  });
+
   it('uses shorter exponential backoff for reads', () => {
     const d1 = computeRetryDelay(timeoutErr(), { attempt: 1, kind: 'read', jitter: false });
     const d2 = computeRetryDelay(timeoutErr(), { attempt: 2, kind: 'read', jitter: false });
@@ -122,6 +149,33 @@ describe('withExponentialBackoff', () => {
     assert.equal(delays.length, 2);
     assert.ok(delays[0] >= HOSPITABLE_SEND_MIN_INTERVAL_MS, `timeout backoff ${delays[0]}`);
     assert.ok(delays[1] >= HOSPITABLE_429_DEFAULT_MS, `429 backoff ${delays[1]}`);
+  });
+
+  it('never sleeps 0ms on Retry-After: 0', async () => {
+    const delays = [];
+    let n = 0;
+    const err = statusErr(429);
+    err.response.headers = { 'retry-after': '0' };
+    const out = await withExponentialBackoff(
+      async () => {
+        n += 1;
+        if (n < 3) throw err;
+        return { ok: true };
+      },
+      {
+        operation: 'getReservationMessages',
+        kind: 'read',
+        jitter: false,
+        sleeper: async (ms) => {
+          delays.push(ms);
+        },
+      }
+    );
+    assert.deepEqual(out, { ok: true });
+    assert.equal(delays.length, 2);
+    for (const d of delays) {
+      assert.ok(d >= HOSPITABLE_READ_429_MIN_MS, `slept ${d}ms`);
+    }
   });
 
   it('does not retry 404', async () => {

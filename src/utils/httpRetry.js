@@ -16,7 +16,9 @@
  *
  * Rules:
  *   - Only retry transient failures (timeouts, 429, 5xx, network).
- *   - Honor Retry-After on 429; default 60s for message POSTs.
+ *   - Honor Retry-After on 429 when it is at least the kind floor; never honor 0
+ *     (Hospitable often sends Retry-After: 0 after the first 429 — Amber 2026-08-17).
+ *     Default 60s for message POSTs / reads when header is missing or too small.
  *   - Message POSTs must stay under 2/min (min spacing 30s).
  *   - After a send timeout, callers should GET the thread before POSTing again
  *     (timeout ≠ not delivered).
@@ -29,6 +31,8 @@ export const HOSPITABLE_SEND_MIN_INTERVAL_MS = 30000;
 export const HOSPITABLE_SEND_MAX_ATTEMPTS = 4;
 export const HOSPITABLE_READ_MAX_ATTEMPTS = 4;
 export const HOSPITABLE_429_DEFAULT_MS = 60000;
+/** Floor for GET/read 429s. Hospitable often sends Retry-After: 0 after the first 429. */
+export const HOSPITABLE_READ_429_MIN_MS = 15000;
 
 /** HE + calendar writes: 4 attempts, exp backoff 5/15/30s (~50s waits, ~1 min). */
 export const WRITE_MAX_ATTEMPTS = 4;
@@ -119,7 +123,16 @@ export function computeRetryDelay(err, opts = {}) {
   let delay;
   if (status === 429) {
     const fallback = kind === 'write' ? WRITE_429_DEFAULT_MS : HOSPITABLE_429_DEFAULT_MS;
-    delay = parseRetryAfterMs(err) ?? fallback;
+    const minFloor =
+      kind === 'write'
+        ? WRITE_429_DEFAULT_MS
+        : kind === 'send'
+          ? HOSPITABLE_SEND_MIN_INTERVAL_MS
+          : HOSPITABLE_READ_429_MIN_MS;
+    const parsed = parseRetryAfterMs(err);
+    // Retry-After: 0 / past HTTP-date / tiny values are not usable — Hospitable
+    // sent 0 on subsequent 429s and we burned 4 GET attempts in ~29s (Amber).
+    delay = parsed == null || parsed < minFloor ? Math.max(fallback, minFloor) : parsed;
     if (kind === 'write') {
       delay = Math.min(delay, WRITE_429_CAP_MS);
     }
@@ -207,12 +220,18 @@ export async function withExponentialBackoff(fn, options = {}) {
         throw makeCriticalHttpError(operation, attempt, err, transient);
       }
 
-      const delay = computeRetryDelay(err, { attempt, kind, random, jitter });
+      let delay = computeRetryDelay(err, { attempt, kind, random, jitter });
+      if (!Number.isFinite(delay) || delay < 1) {
+        delay = computeRetryDelay(err, { attempt, kind, random, jitter: false });
+        delay = Math.max(delay, 1000);
+      }
+      const retryAfterMs = parseRetryAfterMs(err);
       const msg =
         `[httpRetry] Transient error on ${operation} (attempt ${attempt}/${maxAttempts}). ` +
-        `Retrying in ${delay}ms... Error: ${err.message}`;
+        `Retrying in ${delay}ms (Retry-After=${retryAfterMs == null ? 'none' : `${retryAfterMs}ms`})... ` +
+        `Error: ${err.message}`;
       console.warn(msg);
-      if (typeof onRetry === 'function') onRetry({ attempt, delay, err });
+      if (typeof onRetry === 'function') onRetry({ attempt, delay, err, retryAfterMs });
       await sleeper(delay);
     }
   }

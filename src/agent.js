@@ -553,6 +553,19 @@ export class GuestMessagingAgent {
       confidence = latestCheckoutPolicy.confidence;
     }
 
+    // Amber 2026-08-17: thanks + shuttle/taxi + rainy-day indoor ask must send.
+    const transportActivitiesPolicy = this._applyThanksPlusTransportActivitiesPolicy(
+      parsed,
+      context,
+      guestMessage
+    );
+    if (transportActivitiesPolicy.applied) {
+      parsed.typeOfMessageReceived = transportActivitiesPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = transportActivitiesPolicy.proposedResponse;
+      shouldReply = transportActivitiesPolicy.shouldReply;
+      confidence = transportActivitiesPolicy.confidence;
+    }
+
     // Pending request-to-book just accepted by host → natural "I just accepted your inquiry" opener.
     const justAcceptedPolicy = this._applyJustAcceptedInquiryPolicy(parsed, context, guestMessage);
     if (justAcceptedPolicy.applied) {
@@ -763,13 +776,52 @@ export class GuestMessagingAgent {
       'DIRECTIONS',
       'WIFI',
       'CHECKOUT',
+      'THANKS',
+      'TRANSPORT_QUESTION',
+      'ACTIVITIES_QUESTION',
+      'RECOMMENDATION',
     ];
   }
 
+  _messageCategories(parsed = {}) {
+    const raw = parsed?.typeOfMessageReceived;
+    if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+    if (raw == null || raw === '') return [];
+    return [String(raw)];
+  }
+
   _messageCategory(parsed = {}) {
-    return Array.isArray(parsed.typeOfMessageReceived)
-      ? parsed.typeOfMessageReceived[0]
-      : parsed.typeOfMessageReceived;
+    return this._messageCategories(parsed)[0];
+  }
+
+  _hasSafeAutoReplyCategory(parsed = {}) {
+    const safe = this._safeAutoReplyCategories();
+    return this._messageCategories(parsed).some((c) => safe.includes(c));
+  }
+
+  /**
+   * Guest asked something new (not a pure ack). Recent-host suppression must
+   * not wipe these (Amber 2026-08-17: THANKS + shuttle + rainy-day questions).
+   */
+  _guestAsksNewQuestion(guestMessage = '', typeOfMessageReceived) {
+    if (/\?/.test(String(guestMessage || ''))) return true;
+    return this._messageCategories({ typeOfMessageReceived }).some((c) => {
+      if (/_QUESTION$/.test(c)) return true;
+      return [
+        'TRANSPORT_QUESTION',
+        'ACTIVITIES_QUESTION',
+        'RECOMMENDATION',
+        'EARLY_CHECKIN',
+        'PARKING',
+        'WIFI',
+        'STAY_EXTENSION',
+        'LATE_CHECKOUT',
+        'DIRECTIONS',
+        'HVAC_REMOTE_PER_UNIT',
+        'THERMOSTAT_HEATPUMP',
+        'APT2_STREET_DOOR_LOCKOUT',
+      ].includes(c);
+    });
   }
 
   _isSubstantialDraft(text = '') {
@@ -816,7 +868,7 @@ export class GuestMessagingAgent {
     const strength = cleaningIssue.strength || (cleaningIssue.matchedPhrase === 'cleaning' ? 'weak' : 'strong');
     const blocksFromTool = cleaningIssue.blocksAutoReply === true || strength === 'strong';
     const logistics = this._isLogisticsCleaningMention(guestMessage);
-    const safeCategory = this._safeAutoReplyCategories().includes(category);
+    const safeCategory = this._hasSafeAutoReplyCategory(parsed);
 
     // Layer 1–2: logistics or weak signal → keep draft, no wipe
     // Bare matchedPhrase "cleaning" is always treated as weak (never wipe alone).
@@ -885,7 +937,7 @@ export class GuestMessagingAgent {
     }
 
     const category = this._messageCategory(finalResult);
-    const safeCategory = this._safeAutoReplyCategories().includes(category);
+    const safeCategory = this._hasSafeAutoReplyCategory(finalResult);
     const wiped =
       finalResult.shouldReply === false ||
       !this._isSubstantialDraft(finalResult.proposedResponse);
@@ -1963,6 +2015,10 @@ export class GuestMessagingAgent {
     if (categories.some((c) => stayExtCategories.includes(c))) {
       return { applied: false };
     }
+    // Amber 2026-08-17: thanks + shuttle/rainy-day is not a first-host welcome.
+    if (this._isThanksPlusTransportActivitiesAsk(guestMessage)) {
+      return { applied: false };
+    }
     const draft = (parsed.proposedResponse || '').trim();
     const hasSendable =
       draft &&
@@ -2070,6 +2126,47 @@ export class GuestMessagingAgent {
       applied: true,
       typeOfMessageReceived: 'NEW_RESERVATION_WELCOME',
       proposedResponse: draft,
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
+  /**
+   * Amber 2026-08-17: thanks + shuttle/taxi for an odd-hour airport run and/or
+   * rainy-day indoor ideas. Grok sometimes classifies OTHER_MESSAGE + none when
+   * the host said good morning minutes earlier. Force a sendable draft.
+   */
+  _isThanksPlusTransportActivitiesAsk(guestMessage = '') {
+    const msg = String(guestMessage || '');
+    if (!/thank/i.test(msg) || !/\?/.test(msg)) return false;
+    const transport = /\b(shuttle|taxi|uber|lyft|airport)\b/i.test(msg);
+    const indoor = /\b(rainy day|rainy|indoor|occupied in the city|keeping my girls)\b/i.test(msg);
+    return transport || indoor;
+  }
+
+  _applyThanksPlusTransportActivitiesPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._isThanksPlusTransportActivitiesAsk(guestMessage)) {
+      return { applied: false };
+    }
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+    const hasWelcome = /you'?re welcome/i.test(draft);
+    const answersTransport = /\b(shuttle|taxi|uber|lyft|jetport|airport)\b/i.test(lower);
+    const answersIndoor = /\b(museum|library|indoor|children'?s)\b/i.test(lower);
+    const sendable = this._isSubstantialDraft(draft) && hasWelcome && (answersTransport || answersIndoor);
+
+    const guestRaw = context.guestDisplayName || context.guestName || '';
+    const firstName = (guestRaw.split(/[\s(·]/)[0] || guestRaw || '').trim();
+    const nameBit =
+      firstName && firstName.toLowerCase() !== 'guest' ? `, ${firstName}` : '';
+    const canned =
+      `You're welcome${nameBit}! For the early airport run, a pre-booked taxi or the Portland Jetport shuttle is more reliable than hoping for an Uber at that hour. For a rainy day with the girls, the Children's Museum of Maine and the Portland Public Library are great indoor options.`;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: ['THANKS', 'TRANSPORT_QUESTION', 'ACTIVITIES_QUESTION'],
+      proposedResponse: sendable ? draft : canned,
       shouldReply: true,
       confidence: 1.0,
     };
@@ -3210,7 +3307,9 @@ export class GuestMessagingAgent {
     }
     const isGuestThankYou = /^(thank|thanks)/i.test((message || '').trim()) ||
       (/(thank|thanks|appreciate)/i.test(message || '') && !/\?/.test(message || ''));
-    if (context.recentHostActivity && !isGuestThankYou) {
+    if (context.recentHostActivity && this._guestAsksNewQuestion(message, null)) {
+      lines.push('- IMPORTANT: A host message was sent very recently. Do NOT repeat the formal greeting. DO answer the guest\'s new question(s) — recent host activity is not a reason to withhold a shuttle / taxi / rainy-day / operational answer.');
+    } else if (context.recentHostActivity && !isGuestThankYou) {
       lines.push('- IMPORTANT: A host message was sent very recently. Be extremely conservative — consider not replying to avoid duplication.');
     }
     if (context.conversationTraces?.duplicateRisk) {
@@ -3847,11 +3946,21 @@ export class GuestMessagingAgent {
       }
     }
 
-    if (enrichedContext.recentHostActivity && finalDecision.shouldReply &&
-        !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext) &&
-        finalDecision.typeOfMessageReceived !== 'THANK_YOU_MESSAGE' &&
-        // Never suppress the mandatory first-host new-booking welcome (Roberto).
-        !this._isFirstHostOnConfirmedReservation(enrichedContext)) {
+    const recentHostCats = this._messageCategories(finalDecision);
+    const isThankYouCategory =
+      recentHostCats.includes('THANK_YOU_MESSAGE') || recentHostCats.includes('THANKS');
+    // Amber 2026-08-17: type was ['THANKS','TRANSPORT_QUESTION','ACTIVITIES_QUESTION'].
+    // `type !== 'THANK_YOU_MESSAGE'` is always true for arrays, so we wiped a
+    // sendable shuttle + rainy-day draft because the host had said good morning 5 min earlier.
+    if (
+      enrichedContext.recentHostActivity &&
+      finalDecision.shouldReply &&
+      !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext) &&
+      !isThankYouCategory &&
+      !this._guestAsksNewQuestion(guestMessage, finalDecision.typeOfMessageReceived) &&
+      // Never suppress the mandatory first-host new-booking welcome (Roberto).
+      !this._isFirstHostOnConfirmedReservation(enrichedContext)
+    ) {
       console.log('[Agent] → Recent host activity detected after first pass — forcing suppression to prevent duplicate reply');
       finalDecision = {
         ...finalDecision,
@@ -3859,6 +3968,11 @@ export class GuestMessagingAgent {
         proposedResponse: 'none',
         suppressedDueToRecentHost: true,
       };
+    } else if (
+      enrichedContext.recentHostActivity &&
+      this._guestAsksNewQuestion(guestMessage, finalDecision.typeOfMessageReceived)
+    ) {
+      console.log('[Agent] → Recent host activity present but guest asked a new question — not suppressing');
     }
 
     // Do not suppress auto-reply on simple early check-in / self-check-in flexibility questions
@@ -4447,6 +4561,20 @@ export class GuestMessagingAgent {
       finalResult.confidence = latestCheckoutFinal.confidence;
     }
 
+    const transportActivitiesFinal = this._applyThanksPlusTransportActivitiesPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (transportActivitiesFinal.applied) {
+      console.log('[Agent] → Thanks + transport/activities policy applied (Amber shuttle / rainy-day)');
+      finalResult.typeOfMessageReceived = transportActivitiesFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = transportActivitiesFinal.proposedResponse;
+      finalResult.shouldReply = transportActivitiesFinal.shouldReply;
+      finalResult.confidence = transportActivitiesFinal.confidence;
+      finalResult.escalated = false;
+    }
+
     const justAcceptedFinal = this._applyJustAcceptedInquiryPolicy(
       finalResult,
       enrichedContext,
@@ -4540,9 +4668,11 @@ export class GuestMessagingAgent {
       finalResult.safetyNetReason = approvedDraftNet.reason;
     }
 
-    // Final force-reply (Cassidy miss class): after all policies/judge/safety nets.
+    // Final force-reply (Cassidy / Amber miss class): after all policies/judge/safety nets.
     // High conf + sendable draft, or operational multi-intent ask, must auto-send.
-    if (!finalResult.escalated) {
+    // Still run when escalated=true — recent-host suppression used to set that flag
+    // and then skip this block, leaving a 314-char shuttle/rainy-day draft unsent.
+    {
       const forceFinal = applyHighConfidenceForceReply({
         shouldReply: finalResult.shouldReply,
         confidence: finalResult.confidence,
@@ -4564,6 +4694,9 @@ export class GuestMessagingAgent {
         finalResult.shouldReply = forceFinal.shouldReply;
         finalResult.confidence = forceFinal.confidence;
         finalResult.replyForceReason = forceFinal.reason;
+        if (forceFinal.shouldReply) {
+          finalResult.escalated = false;
+        }
       }
     }
 
