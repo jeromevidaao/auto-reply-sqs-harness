@@ -38,6 +38,9 @@ jobs:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
         run: npm test
 
+      - name: Check eval required phrases vs seeded snippets
+        run: npm run eval:phrases
+
   eval:
     name: Run Evaluation Suite
     needs: test

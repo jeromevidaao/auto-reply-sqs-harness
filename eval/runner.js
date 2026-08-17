@@ -4,6 +4,8 @@
  *
  * Usage:
  *   npm run eval                    # default modular prompt
+ *   npm run eval -- --fail-fast
+ *   npm run eval -- --only=cassidy-post-checkout-parking,late-checkout-10am-cleaning
  *   npm run eval -- --mode=raw --raw-prompt=prompts/system/raw/production-current.md
  */
 
@@ -29,12 +31,35 @@ async function main() {
   const mode = args.find(a => a.startsWith('--mode='))?.split('=')[1] || 'modular';
   const rawPromptPath = args.find(a => a.startsWith('--raw-prompt='))?.split('=')[1];
   const failFast = args.includes('--fail-fast');
+  const onlyArg = args.find(a => a.startsWith('--only='))?.split('=')[1];
+  const onlySet = onlyArg
+    ? new Set(
+        onlyArg
+          .split(',')
+          .map(s => s.trim().replace(/\.json$/, ''))
+          .filter(Boolean)
+      )
+    : null;
 
   console.log(`🧪 Running evaluation suite (mode: ${mode})\n`);
 
   // Eval must never need production SSM. Use synthetic host contacts (555 numbers).
   process.env.ALLOW_HOST_CONTACT_TEST_DEFAULTS = '1';
   setHostContactsForTests(TEST_HOST_CONTACTS);
+
+  let files = (await fs.readdir(scenariosDir)).filter(f => f.endsWith('.json'));
+  if (onlySet) {
+    const matched = files.filter(f => onlySet.has(f.replace(/\.json$/, '')) || onlySet.has(f));
+    const missing = [...onlySet].filter(
+      id => !matched.some(f => f.replace(/\.json$/, '') === id)
+    );
+    if (missing.length) {
+      console.error(`Unknown --only id(s): ${missing.join(', ')}`);
+      process.exit(1);
+    }
+    files = matched;
+    console.log(`Only: ${[...onlySet].join(', ')}\n`);
+  }
 
   if (!process.env.GROK_API_KEY) {
     console.warn('⚠️  Skipping evaluation suite: GROK_API_KEY is not set.');
@@ -57,7 +82,6 @@ async function main() {
 
   const agent = new GuestMessagingAgent(agentOptions);
 
-  const files = await fs.readdir(scenariosDir);
   let passed = 0;
   let failed = 0;
   const results = [];

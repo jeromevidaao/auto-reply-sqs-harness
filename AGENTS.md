@@ -23,7 +23,7 @@ Local-first evaluation harness + core agent logic for the Grok-powered guest mes
 
 ## Mandatory Process for ANY Code or Doc Change
 1. Make the edit(s).
-2. Run relevant verification: `npm test` (must be green), and ideally `npm run eval` or targeted scenario if you touched prompts/categories/tools for HVAC, thermostat, etc.
+2. **HARD prepush (do this before `git push`, not after CI is red):** `npm run prepush` (or `python3 ~/.grok/skills/guest-messaging-harness/scripts/prepush.py` so `GROK_API_KEY` is loaded from SSM `/grok/api-key`). That runs phrase/snippet sync, `npm test`, targeted live eval for changed goldens, then the **full** live suite with **no** `--fail-fast`. Skip the live Grok steps only for docs/tooling-only diffs. **Do not push if prepush is red.** Skill: `guest-messaging-harness`.
 3. `git add -A`
 4. `git commit -m "Clear message describing the change and why (e.g. the user request or bug)."`
 5. Make the repo **public**, then `git push`. Watch CI green, then make it **private** again.
@@ -31,7 +31,7 @@ Local-first evaluation harness + core agent logic for the Grok-powered guest mes
 7. Verify the remote at the exact new SHA using the GitHub MCP tools (get_file_contents on the key files you edited, at the commit SHA on main branch of jeromevidaao/auto-reply-sqs-harness).
 8. Only after the above is the change "done".
 
-This rule exists because the harness directly affects live guest replies and the Lambda is auto-deployed from main. Skipping hygiene has caused production drift in the past.
+This rule exists because the harness directly affects live guest replies and the Lambda is auto-deployed from main. Skipping hygiene has caused production drift in the past. CI eval must not be the first time new `requiredPhrases` are tested.
 
 ## Production miss → Grok eval golden (mandatory after any missed auto-reply)
 
