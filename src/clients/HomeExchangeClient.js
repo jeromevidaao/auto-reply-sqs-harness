@@ -54,6 +54,25 @@ async function _loadToken() {
   throw criticalErr;
 }
 
+const STAY_RANGE_RE =
+  /\b(january|february|march|april|may|june|july|august|september|sept|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:-|–|—)\s*(?:(january|february|march|april|may|june|july|august|september|sept|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+)?(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})/i;
+
+const MONTH_FINGERPRINT = {
+  january: '01', jan: '01', february: '02', feb: '02', march: '03', mar: '03',
+  april: '04', apr: '04', may: '05', june: '06', jun: '06', july: '07', jul: '07',
+  august: '08', aug: '08', september: '09', sept: '09', sep: '09',
+  october: '10', oct: '10', november: '11', nov: '11', december: '12', dec: '12',
+};
+
+export function stayRangeFingerprint(text) {
+  const match = String(text || '').match(STAY_RANGE_RE);
+  if (!match) return null;
+  const m1 = MONTH_FINGERPRINT[match[1].toLowerCase()];
+  const m2 = MONTH_FINGERPRINT[(match[3] || match[1]).toLowerCase()];
+  if (!m1 || !m2) return null;
+  return `${match[5]}-${m1}-${String(match[2]).padStart(2, '0')}-${m2}-${String(match[4]).padStart(2, '0')}`;
+}
+
 export function alreadySentEquivalent(messages, proposedResponse) {
   const proposed = String(proposedResponse || '').trim().toLowerCase();
   if (!proposed) return false;
@@ -63,12 +82,16 @@ export function alreadySentEquivalent(messages, proposedResponse) {
   const proposedIsDecline =
     /those dates are not open/.test(proposed) && /can'?t accept the request/.test(proposed);
   const proposedIsPreapprove = /blocked those dates/.test(proposed);
+  const proposedRange = stayRangeFingerprint(proposed);
   return list.some((m) => {
     const text = String(m.content || m.body || m.text || '').trim().toLowerCase();
     if (!text) return false;
     if (text === proposed) return true;
     if (proposedIsPreapprove) {
-      return /blocked those dates/.test(text) && /pre-approval/.test(text);
+      const existingRange = stayRangeFingerprint(text);
+      if (!/blocked those dates/.test(text) || !/pre-approval/.test(text)) return false;
+      if (proposedRange && existingRange && proposedRange !== existingRange) return false;
+      return !proposedRange || !existingRange || proposedRange === existingRange;
     }
     if (text.includes(preview) || proposed.includes(text.slice(0, 80))) return true;
     // Only the first-message fee-after-stay ask is equivalent to another fee ask.
@@ -81,10 +104,6 @@ export function alreadySentEquivalent(messages, proposedResponse) {
       /those dates are not open/.test(text) &&
       /can'?t accept the request/.test(text)
     ) {
-      return true;
-    }
-    if (/pre-approval/.test(proposed) && /blocked those dates/.test(proposed)
-      && /pre-approval/.test(text) && /blocked those dates/.test(text)) {
       return true;
     }
     return false;

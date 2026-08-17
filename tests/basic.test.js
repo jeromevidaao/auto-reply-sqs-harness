@@ -1442,6 +1442,19 @@ describe('PostCheckoutParkingTool (mocked Hospitable, no LLM)', () => {
     );
     assert.equal(applied.applied, true);
     assert.equal(applied.typeOfMessageReceived, 'SLEEPING_ARRANGEMENTS');
+    const missingGreeting = agent._applySofaBedLinensPolicy(
+      {
+        typeOfMessageReceived: 'SLEEPING_ARRANGEMENTS',
+        proposedResponse: "You're welcome! Yes the sofa has linens in the storage compartment.",
+      },
+      { checkIn: '2026-07-18', guestName: 'Amy' },
+      msg
+    );
+    assert.equal(missingGreeting.applied, true);
+    assert.match(missingGreeting.proposedResponse, /^Good (morning|afternoon|evening)/i);
+    assert.match(missingGreeting.proposedResponse, /sheets/i);
+    assert.match(missingGreeting.proposedResponse, /blankets/i);
+    assert.match(missingGreeting.proposedResponse, /storage compartment/i);
   });
 
   it('appends follow-up to in-stay extra towels replies (Sean incident)', () => {
@@ -1790,6 +1803,32 @@ describe('Post-checkout thank-you safeguards (no LLM)', () => {
     assert.match(applied.proposedResponse, /not available|already booked/i);
     assert.doesNotMatch(applied.proposedResponse, /looks available/i);
     assert.doesNotMatch(applied.proposedResponse, /alteration request/i);
+  });
+
+  it('forces guest first name onto EARLY_CHECKIN drafts that omit it (Olivia flake)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyEarlyCheckinNamePolicy(
+      {
+        typeOfMessageReceived: 'EARLY_CHECKIN',
+        proposedResponse:
+          'Good afternoon, check-in is at 4pm. If the unit is ready earlier we will message you.',
+      },
+      { guestName: 'Olivia' }
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /Olivia/);
+    assert.match(applied.proposedResponse, /4pm/);
+    const already = agent._applyEarlyCheckinNamePolicy(
+      {
+        typeOfMessageReceived: 'EARLY_CHECKIN',
+        proposedResponse: 'Hi Olivia, check-in is at 4pm.',
+      },
+      { guestName: 'Olivia' }
+    );
+    assert.equal(already.applied, false);
   });
 
   it('first-host welcome policy must NOT wipe stay-extension date-change drafts (Anna)', () => {

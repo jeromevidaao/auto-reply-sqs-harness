@@ -6,7 +6,7 @@
  * those retries a failed unblock is a hard error — Lambda must fail so
  * CloudWatch emails + EventBridge retry.
  */
-import { stayNights, dateOnly } from './homeExchange.js';
+import { stayNights, dateOnly, resolveHeUnit } from './homeExchange.js';
 import { STATUS_FINALIZED, STATUS_EXPIRED_UNBLOCKED } from './homeExchangeBlocks.js';
 import { notifyHePreapproval } from './homeExchangeNotify.js';
 import { pickExchangeFromConversation } from '../clients/homeExchangeExchange.js';
@@ -198,6 +198,9 @@ export async function expireHomeExchangeBlocks({
           checkOut: record.checkOut,
           conversationId: record.conversationId,
           exchangeId: record.exchangeId,
+          propertyName: resolveHeUnit(record.homeId).propertyName,
+          listingId: resolveHeUnit(record.homeId).airbnbListingId,
+          homeId: record.homeId,
           error: `Expire unblock failed after retries: ${err?.message || err}`,
         });
       } catch (notifyErr) {
@@ -218,6 +221,9 @@ export async function expireHomeExchangeBlocks({
         checkOut: record.checkOut,
         conversationId: record.conversationId,
         exchangeId: record.exchangeId,
+        propertyName: resolveHeUnit(record.homeId).propertyName,
+        listingId: resolveHeUnit(record.homeId).airbnbListingId,
+        homeId: record.homeId,
         nights: unblocked,
       });
     } catch (notifyErr) {

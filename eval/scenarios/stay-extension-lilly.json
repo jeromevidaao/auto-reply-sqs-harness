@@ -23,7 +23,7 @@
       "availableDates": [],
       "unavailableDates": ["2026-09-29"],
       "calendarWindow": {"start": "2026-09-27", "end": "2026-10-02"},
-      "suggestedResponseSnippet": "Unfortunately, the 29th is not available for 53 Pine St #3 — we already have another booking overlapping those dates."
+      "suggestedResponseSnippet": "I checked the calendar — unfortunately the 29th is not available for 53 Pine St #3. We already have another booking overlapping those dates."
     },
     "conversationHistory": []
   },

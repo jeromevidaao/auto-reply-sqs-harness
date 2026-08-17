@@ -16,6 +16,10 @@ import {
   shouldSendHomeExchangeDraft,
   shouldAttemptPreapprove,
   extractAskedStayDates,
+  extractFormattedStayRange,
+  extractPriorPreapprovalStay,
+  extraNightsOf,
+  isStayExtensionOf,
   guestAcceptedCleaningFee,
   guestAcceptedCleaningFeeInThread,
   guestAskedToPreapprove,
@@ -33,6 +37,9 @@ import {
   shouldRunSharedHeCategories,
   isAirbnbOnlyHeCategory,
   thisTurnWantsHePreapprove,
+  guestAskedToAddNights,
+  threadHasCancelledPreapproval,
+  guestResubmittedAfterHeCancel,
 } from '../src/useCases/homeExchangeSharedCategories.js';
 import {
   applyHeFirstAckWriter,
@@ -798,6 +805,15 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(alreadySentEquivalent([{ content: prior }], next), false);
     assert.equal(alreadySentEquivalent([{ content: next }], next), true);
   });
+
+  it('does not treat a prior pre-approval as sent when the stay range changed', () => {
+    const prior =
+      'Hi Katie — thanks for confirming the $120 cleaning fee is fine for October 29 – November 2, 2026. I just sent you a pre-approval for October 29 – November 2, 2026 and blocked those dates for you.';
+    const next =
+      'Hi Katie — thanks for confirming the $120 cleaning fee is fine for October 29 – November 3, 2026. I checked the extra night of November 2, 2026 and that night is open. I just sent you a pre-approval for October 29 – November 3, 2026 and blocked those dates for you.';
+    assert.equal(alreadySentEquivalent([{ content: prior }], next), false);
+    assert.equal(alreadySentEquivalent([{ content: next }], next), true);
+  });
 });
 
 describe('HomeExchange first-message personalization (Airbnb-style ack)', () => {
@@ -1054,9 +1070,14 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(stored[0].nights.length, 6);
     assert.equal(notifications.length, 2);
     assert.equal(notifications[0].type, HE_NOTIFY_READY);
+    assert.match(notifications[0].title, /Caroline/);
     assert.match(notifications[0].body, /Pre-approved on Home Exchange/i);
+    assert.match(notifications[0].body, /invited to book/i);
+    assert.match(notifications[0].body, /Pine Apt #3/);
+    assert.equal(notifications[0].data.listingId, '24259977');
     assert.equal(/NOT sent/i.test(notifications[0].body), false);
     assert.equal(notifications[1].type, HE_NOTIFY_SENT);
+    assert.match(notifications[1].title, /HE pre-approved/);
     assert.match(notifications[1].body, /pre-approval/i);
     assert.equal(sentBodies.length, 1);
     assert.match(sentBodies[0], /pre-approval/i);
@@ -1095,6 +1116,7 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     const approved = [];
     const blocked = [];
     const sentBodies = [];
+    const notifications = [];
     const result = await handleHomeExchangeMessage({
       event: {
         message: katieFeeOk,
@@ -1162,7 +1184,10 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
           return item;
         },
       },
-      notifyOwner: async () => ({ ok: true }),
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
       sharedCategoryRunner: async () => {
         throw new Error('must not fall through to shared thank-you');
       },
@@ -1184,6 +1209,16 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
     assert.equal(result.typeOfMessageReceived, 'HOMEEXCHANGE_FOLLOWUP');
     assert.equal(result.reason, 'homeexchange_preapproved');
+    assert.equal(notifications.length, 2);
+    assert.equal(notifications[0].type, HE_NOTIFY_READY);
+    assert.match(notifications[0].title, /Katie/);
+    assert.match(notifications[0].body, /Pine Apt #2/);
+    assert.match(notifications[0].body, /invited to book/i);
+    assert.equal(notifications[0].data.listingId, '20150380');
+    assert.equal(notifications[0].data.conversationId, '95201321');
+    assert.equal(notifications[1].type, HE_NOTIFY_SENT);
+    assert.match(notifications[1].title, /HE pre-approved/);
+    assert.match(notifications[1].body, /Pine Apt #2/);
   });
 
   it('treats a later “pre approve then we finalize” as fee-accepted via thread history', async () => {
@@ -1596,10 +1631,21 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(failed.type, HE_NOTIFY_SEND_FAILED);
     const ready = buildHePreapprovalNotify({
       kind: 'ready',
-      guestName: 'Caroline',
-      checkIn: '2027-05-13',
-      checkOut: '2027-05-19',
+      guestName: 'Katie',
+      checkIn: '2026-10-29',
+      checkOut: '2026-11-02',
+      conversationId: '95201321',
+      propertyName: 'Pine Apt #2',
+      listingId: '20150380',
+      homeId: '3285044',
     });
+    assert.equal(ready.type, HE_NOTIFY_READY);
+    assert.match(ready.title, /Katie/);
+    assert.match(ready.body, /Pine Apt #2/);
+    assert.match(ready.body, /invited to book/i);
+    assert.equal(/Pine #3/.test(ready.body), false);
+    assert.equal(ready.data.listingId, '20150380');
+    assert.equal(ready.data.conversationId, '95201321');
     assert.equal(/NOT sent/i.test(ready.body), false);
   });
 
@@ -1632,5 +1678,385 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
       canUnblockCalendarDay({ status: { available: false, reason: 'RESERVED', source_type: 'RESERVATION' } }),
       false
     );
+  });
+});
+
+describe('HomeExchange extra night after cancelled pre-approval (Katie)', () => {
+  const katieExtraNight =
+    'Hi Ruby, would you mind if we actually added one more night and checked out on November 3?';
+  const katieSubmitted = 'Just submitted, thank you!';
+  const priorPreapproval =
+    'Hi Katie — thanks for confirming the $120 cleaning fee is fine for October 29 – November 2, 2026. I just sent you a pre-approval for October 29 – November 2, 2026 and blocked those dates for you.';
+  const katieHistory = [
+    {
+      sender_type: 'guest',
+      author: { first_name: 'Katie' },
+      content: 'Hi Ruby, oh that is great news. We’re completely fine with the cleaning fee!',
+    },
+    { sender_type: 'host', content: priorPreapproval },
+    { sender_type: 'guest', author: { first_name: 'Katie' }, content: katieExtraNight },
+    { content: '((firstName)) has cancelled the pre-approval' },
+    { content: '((firstName)) has modified the end date' },
+    { sender_type: 'guest', author: { first_name: 'Katie' }, content: katieSubmitted },
+  ];
+
+  it('parses checkout-on extra night and leftover blocks', () => {
+    const asked = extractAskedStayDates(katieExtraNight, {
+      now: new Date('2026-08-17T12:00:00Z'),
+      originalCheckIn: '2026-10-29',
+      originalCheckOut: '2026-11-02',
+    });
+    assert.equal(asked.checkIn, '2026-10-29');
+    assert.equal(asked.checkOut, '2026-11-03');
+    assert.equal(guestAskedToAddNights(katieExtraNight), true);
+    assert.equal(isStayExtensionOf('2026-10-29', '2026-11-02', '2026-10-29', '2026-11-03'), true);
+    assert.deepEqual(extraNightsOf('2026-10-29', '2026-11-02', '2026-10-29', '2026-11-03'), [
+      '2026-11-02',
+    ]);
+    assert.deepEqual(
+      extractFormattedStayRange(priorPreapproval),
+      { checkIn: '2026-10-29', checkOut: '2026-11-02', yearSource: 'explicit' }
+    );
+    assert.deepEqual(extractPriorPreapprovalStay(katieHistory), {
+      checkIn: '2026-10-29',
+      checkOut: '2026-11-02',
+      yearSource: 'explicit',
+    });
+
+    const leftover = analyzeCalendarOpen({
+      calendarDays: [
+        { date: '2026-10-29', status: { available: false } },
+        { date: '2026-10-30', status: { available: false } },
+        { date: '2026-10-31', status: { available: false } },
+        { date: '2026-11-01', status: { available: false } },
+        { date: '2026-11-02', status: { available: true } },
+      ],
+      reservations: [],
+      checkIn: '2026-10-29',
+      checkOut: '2026-11-03',
+      leftoverNights: ['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01'],
+    });
+    assert.equal(leftover.open, true);
+    assert.deepEqual(leftover.unavailable, []);
+    assert.ok(leftover.available.includes('2026-11-02'));
+
+    const extraBlocked = analyzeCalendarOpen({
+      calendarDays: [
+        { date: '2026-10-29', status: { available: false } },
+        { date: '2026-10-30', status: { available: false } },
+        { date: '2026-10-31', status: { available: false } },
+        { date: '2026-11-01', status: { available: false } },
+        { date: '2026-11-02', status: { available: false } },
+      ],
+      reservations: [
+        {
+          check_in: '2026-11-02',
+          check_out: '2026-11-03',
+          reservation_status: { current: { category: 'accepted' } },
+        },
+      ],
+      checkIn: '2026-10-29',
+      checkOut: '2026-11-03',
+      leftoverNights: ['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01'],
+    });
+    assert.equal(extraBlocked.open, false);
+    assert.deepEqual(extraBlocked.unavailable, ['2026-11-02']);
+  });
+
+  it('treats Just submitted after cancel as a re-approve turn, not you’re welcome', () => {
+    assert.equal(threadHasCancelledPreapproval(katieHistory), true);
+    assert.equal(guestResubmittedAfterHeCancel(katieSubmitted, katieHistory), true);
+    assert.equal(thisTurnWantsHePreapprove(katieSubmitted, { conversationHistory: katieHistory }), true);
+    assert.equal(thisTurnWantsHePreapprove('Thank you. Coming your way!'), false);
+    assert.equal(isHeSharedThankYouMessage(katieSubmitted), true);
+    assert.equal(
+      shouldRunSharedHeCategories({
+        isFirst: false,
+        heDraftSendable: false,
+        preapproveOk: false,
+        thisTurnWantsPreapprove: true,
+      }),
+      false
+    );
+  });
+
+  it('Katie cancel + extra night: leftover Hospitable blocks, extra night free, re-approves Nov 3', async () => {
+    const approved = [];
+    const blocked = [];
+    const sentBodies = [];
+    const notifications = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: katieSubmitted,
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95201321',
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-03',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+          conversationHistory: katieHistory,
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar(propertyId) {
+          assert.equal(propertyId, '114663c5-0709-4eff-a868-fa9ebd6ed42d');
+          return [
+            { date: '2026-10-29', status: { available: false } },
+            { date: '2026-10-30', status: { available: false } },
+            { date: '2026-10-31', status: { available: false } },
+            { date: '2026-11-01', status: { available: false } },
+            { date: '2026-11-02', status: { available: true } },
+          ];
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar(_id, dates) {
+          blocked.push(...dates);
+          return { status: 'accepted' };
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 20150380, name: 'Pine Apt #2', price: 120 } };
+        },
+      },
+      homeExchangeClient: {
+        async listMessages() {
+          return katieHistory;
+        },
+        async getHomeCalendar(homeId) {
+          assert.equal(String(homeId), '3285044');
+          return heOpenRange('2026-10-25', '2026-11-05');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127348833,
+                status: 0,
+                approved_at: null,
+                start_on: '2026-10-29',
+                end_on: '2026-11-03',
+                home: { id: 3285044 },
+              },
+            ],
+          };
+        },
+        async approveConversation(conversationId) {
+          approved.push(conversationId);
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      blockStore: { async put(item) { return item; } },
+      notifyOwner: async (payload) => {
+        notifications.push(payload);
+        return { ok: true };
+      },
+      sharedCategoryRunner: async () => {
+        throw new Error('must not fall through to shared thank-you');
+      },
+    });
+    assert.equal(result.feeAccepted, true);
+    assert.equal(result.cancelledPreapproval, true);
+    assert.equal(result.isExtension, true);
+    assert.deepEqual(result.extraNights, ['2026-11-02']);
+    assert.equal(result.extraNightsOpen, true);
+    assert.equal(result.calendar.open, true);
+    assert.equal(result.preapprove.ok, true);
+    assert.deepEqual(approved, ['95201321']);
+    assert.equal(blocked.length, 5);
+    assert.equal(blocked[0].date, '2026-10-29');
+    assert.equal(blocked[4].date, '2026-11-02');
+    assert.equal(result.sent, true);
+    assert.equal(sentBodies.length, 1);
+    assert.match(sentBodies[0], /pre-approval/i);
+    assert.match(sentBodies[0], /blocked those dates for you/i);
+    assert.match(sentBodies[0], /November 3, 2026/);
+    assert.match(sentBodies[0], /extra night/i);
+    assert.match(sentBodies[0], /November 2, 2026/);
+    assert.match(sentBodies[0], /is open/i);
+    assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
+    assert.equal(/alteration/i.test(sentBodies[0]), false);
+    assert.equal(result.reason, 'homeexchange_preapproved');
+    assert.equal(
+      alreadySentEquivalent([{ content: priorPreapproval }], sentBodies[0]),
+      false
+    );
+    assert.equal(notifications[0].type, HE_NOTIFY_READY);
+  });
+
+  it('does not re-approve when the extra night is taken by another reservation', async () => {
+    const approved = [];
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: katieSubmitted,
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95201321',
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-03',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+          conversationHistory: katieHistory,
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [
+            { date: '2026-10-29', status: { available: false } },
+            { date: '2026-10-30', status: { available: false } },
+            { date: '2026-10-31', status: { available: false } },
+            { date: '2026-11-01', status: { available: false } },
+            { date: '2026-11-02', status: { available: false } },
+          ];
+        },
+        async getPropertyReservations() {
+          return [
+            {
+              check_in: '2026-11-02',
+              check_out: '2026-11-03',
+              reservation_status: { current: { category: 'accepted' } },
+            },
+          ];
+        },
+        async updatePropertyCalendar() {
+          throw new Error('must not block');
+        },
+      },
+      ddbClient: { async send() { return { Item: { price: 120 } }; } },
+      homeExchangeClient: {
+        async listMessages() {
+          return katieHistory;
+        },
+        async getHomeCalendar() {
+          return heOpenRange('2026-10-25', '2026-11-05');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127348833,
+                status: 0,
+                approved_at: null,
+                start_on: '2026-10-29',
+                end_on: '2026-11-03',
+                home: { id: 3285044 },
+              },
+            ],
+          };
+        },
+        async approveConversation() {
+          approved.push('nope');
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      blockStore: { async put() { return {}; } },
+      notifyOwner: async () => ({ ok: true }),
+    });
+    assert.equal(result.preapprove.ok, false);
+    assert.deepEqual(approved, []);
+    assert.equal(result.sent, true);
+    assert.match(sentBodies[0], /not open/i);
+    assert.match(sentBodies[0], /extra night/i);
+    assert.equal(/blocked those dates/i.test(sentBodies[0]), false);
+    assert.equal(/I just sent you a pre-approval/i.test(sentBodies[0]), false);
+    assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
+  });
+
+  it('extra-night ask while still pre-approved does not ask for an Airbnb alteration', async () => {
+    const approved = [];
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: katieExtraNight,
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95201321',
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-02',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+          conversationHistory: [
+            {
+              sender_type: 'guest',
+              content: 'We’re completely fine with the cleaning fee!',
+            },
+            { sender_type: 'host', content: priorPreapproval },
+          ],
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [
+            { date: '2026-10-29', status: { available: false } },
+            { date: '2026-10-30', status: { available: false } },
+            { date: '2026-10-31', status: { available: false } },
+            { date: '2026-11-01', status: { available: false } },
+            { date: '2026-11-02', status: { available: true } },
+          ];
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar() {
+          throw new Error('must not reblock while still approved');
+        },
+      },
+      ddbClient: { async send() { return { Item: { price: 120 } }; } },
+      homeExchangeClient: {
+        async listMessages() {
+          return [{ content: priorPreapproval }];
+        },
+        async getHomeCalendar() {
+          return heOpenRange('2026-10-25', '2026-11-05');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127348833,
+                status: 1,
+                approved_at: '2026-08-17T16:57:00+0000',
+                start_on: '2026-10-29',
+                end_on: '2026-11-02',
+                home: { id: 3285044 },
+              },
+            ],
+          };
+        },
+        async approveConversation() {
+          approved.push('nope');
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      blockStore: { async put() { return {}; } },
+      notifyOwner: async () => ({ ok: true }),
+    });
+    assert.equal(result.preapprove.ok, false);
+    assert.deepEqual(approved, []);
+    assert.equal(result.sent, true);
+    assert.match(sentBodies[0], /extra night/i);
+    assert.match(sentBodies[0], /is open/i);
+    assert.match(sentBodies[0], /HomeExchange/i);
+    assert.equal(/alteration/i.test(sentBodies[0]), false);
+    assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
   });
 });

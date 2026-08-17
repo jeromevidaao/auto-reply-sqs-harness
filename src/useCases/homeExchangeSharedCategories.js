@@ -74,11 +74,42 @@ export function isAirbnbOnlyHeCategory(value) {
   return categoryListOf(value).some((c) => HE_AIRBNB_ONLY_CATEGORIES.has(c));
 }
 
-export function thisTurnWantsHePreapprove(text) {
+export function guestAskedToAddNights(text) {
+  const raw = normalizeHeGuestText(text);
+  if (!raw.trim()) return false;
+  return (
+    /one more night|another night|extra night|additional night/i.test(raw) ||
+    /add(?:ed)? (?:one |an |1 )?(?:more |extra )?night/i.test(raw) ||
+    /extend(?:ing)? (?:our |the |my )?stay/i.test(raw) ||
+    /check(?:ed)? out on\b/i.test(raw)
+  );
+}
+
+export function threadHasCancelledPreapproval(history = []) {
+  return (history || []).some((m) =>
+    /cancell?ed the pre-approval/i.test(String(m?.content || m?.body || m?.text || ''))
+  );
+}
+
+export function guestResubmittedAfterHeCancel(text, history = []) {
+  if (!threadHasCancelledPreapproval(history)) return false;
+  const raw = normalizeHeGuestText(text);
+  return (
+    /just submitted|submitted/i.test(raw) ||
+    /thank you|thanks|thx/i.test(raw) ||
+    /modified the (start|end) date/i.test(raw) ||
+    guestAskedToAddNights(raw)
+  );
+}
+
+export function thisTurnWantsHePreapprove(text, extras = {}) {
   const raw = normalizeHeGuestText(text);
   // HE system line after the guest already finalized — not a request to pre-approve.
   if (/has finalized the exchange/i.test(raw)) return false;
-  return guestAcceptedCleaningFeeText(raw) || /\bpre-?approv|\bfinalize\b/i.test(raw);
+  if (guestAcceptedCleaningFeeText(raw) || /\bpre-?approv|\bfinalize\b/i.test(raw)) return true;
+  if (guestAskedToAddNights(raw)) return true;
+  if (guestResubmittedAfterHeCancel(raw, extras.conversationHistory)) return true;
+  return false;
 }
 
 /** Pure / short courtesy thanks with no operational question. */

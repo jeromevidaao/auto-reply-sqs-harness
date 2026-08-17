@@ -20,6 +20,17 @@
  *   4) Extra-date replies may still send. Confirmation is pre-approve + block
  *      + "I just sent you a pre-approval and blocked those dates" (never "you're booked").
  *
+ * Extra night after a cancelled pre-approval (Katie 2026-08-17 Apt #2):
+ *   Guest cancels the HE pre-approval, adds a night, and resubmits.
+ *   1) Prefer live HE exchange dates (after they modified the request).
+ *   2) Check Hospitable for the additional night. Prior nights we already
+ *      blocked for the cancelled stay have no Airbnb reservation — treat
+ *      those leftover USER blocks as open for this guest.
+ *   3) Call out whether the extra night is free. Never ask for an Airbnb
+ *      alteration request.
+ *   4) If the extra night is free, pre-approve the new stay and block the
+ *      full range on Hospitable again.
+ *
  * Confirmation (fee accepted + original exchange dates available on Hospitable
  * AND on the HomeExchange home calendar):
  *   1) GET /v1/exchanges/{conversationId}/get-exchanges then
@@ -52,6 +63,9 @@ import {
   shouldRunSharedHeCategories,
   thisTurnWantsHePreapprove,
   guestAcceptedCleaningFeeText,
+  guestAskedToAddNights,
+  threadHasCancelledPreapproval,
+  guestResubmittedAfterHeCancel,
 } from './homeExchangeSharedCategories.js';
 import {
   applyHeFirstAckWriter,
@@ -292,7 +306,7 @@ function buildAskedRange(month1, day1, month2, day2, explicitYear, now) {
  * Pull a check-in/out range from follow-up text.
  * "September 30- October 3" on 2026-08-14 → 2026-09-30 / 2026-10-03.
  */
-export function extractAskedStayDates(text, { now = new Date() } = {}) {
+export function extractAskedStayDates(text, { now = new Date(), originalCheckIn = null, originalCheckOut = null } = {}) {
   const raw = String(text || '');
   if (!raw.trim()) return null;
 
@@ -330,7 +344,130 @@ export function extractAskedStayDates(text, { now = new Date() } = {}) {
     return buildAskedRange(month1, day1, month2, day2, year2 || year1, now);
   }
 
+  const formatted = extractFormattedStayRange(raw);
+  if (formatted) return formatted;
+
+  const checkoutOnly = raw.match(
+    new RegExp(
+      `\\bcheck(?:ed|ing)?\\s+out(?:\\s+on|\\s+the)?\\s+(${MONTH_NAME_ALT})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*,?\\s*(\\d{4}))?`,
+      'i'
+    )
+  );
+  if (checkoutOnly && originalCheckIn) {
+    const month = MONTH_NAME_TO_NUM[checkoutOnly[1].toLowerCase()];
+    const day = Number(checkoutOnly[2]);
+    const year = checkoutOnly[3]
+      ? Number(checkoutOnly[3])
+      : inferYearForMonthDay(month, day, now);
+    const checkOut = ymd(year, month, day);
+    if (checkOut > originalCheckIn) {
+      return { checkIn: originalCheckIn, checkOut, yearSource: checkoutOnly[3] ? 'explicit' : 'inferred' };
+    }
+  }
+
+  if (
+    guestAskedToAddNights(raw) &&
+    originalCheckIn &&
+    originalCheckOut
+  ) {
+    return {
+      checkIn: originalCheckIn,
+      checkOut: addDaysYmd(originalCheckOut, 1),
+      yearSource: 'plus_one_night',
+    };
+  }
+
   return null;
+}
+
+export function extractFormattedStayRange(text) {
+  const raw = String(text || '');
+  const named = raw.match(
+    new RegExp(
+      `\\b(${MONTH_NAME_ALT})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:-|–|—)\\s*(?:(${MONTH_NAME_ALT})\\s+)?(\\d{1,2})(?:st|nd|rd|th)?,\\s*(\\d{4})`,
+      'i'
+    )
+  );
+  if (!named) return null;
+  return buildAskedRange(
+    MONTH_NAME_TO_NUM[named[1].toLowerCase()],
+    Number(named[2]),
+    named[3] ? MONTH_NAME_TO_NUM[named[3].toLowerCase()] : MONTH_NAME_TO_NUM[named[1].toLowerCase()],
+    Number(named[4]),
+    Number(named[5]),
+    new Date(`${named[5]}-01-01T12:00:00Z`)
+  );
+}
+
+export function extraNightsOf(previousCheckIn, previousCheckOut, nextCheckIn, nextCheckOut) {
+  const prev = new Set(stayNights(previousCheckIn, previousCheckOut));
+  return stayNights(nextCheckIn, nextCheckOut).filter((night) => !prev.has(night));
+}
+
+export function isStayExtensionOf(previousCheckIn, previousCheckOut, nextCheckIn, nextCheckOut) {
+  const prevIn = dateOnly(previousCheckIn);
+  const prevOut = dateOnly(previousCheckOut);
+  const nextIn = dateOnly(nextCheckIn);
+  const nextOut = dateOnly(nextCheckOut);
+  if (!prevIn || !prevOut || !nextIn || !nextOut) return false;
+  if (nextIn === prevIn && nextOut === prevOut) return false;
+  if (nextIn === prevIn && nextOut > prevOut) return true;
+  if (nextOut === prevOut && nextIn < prevIn) return true;
+  return false;
+}
+
+export function extractPriorPreapprovalStay(conversationHistory = []) {
+  for (const m of conversationHistory || []) {
+    const text = messageText(m);
+    if (!/pre-approval/i.test(text) || !/blocked those dates/i.test(text)) continue;
+    const range = extractFormattedStayRange(text) || extractAskedStayDates(text);
+    if (range?.checkIn && range?.checkOut) return range;
+  }
+  return null;
+}
+
+export function formatNightList(nights = []) {
+  if (!nights.length) return null;
+  if (nights.length === 1) {
+    const dt = new Date(`${nights[0]}T12:00:00Z`);
+    return dt.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+  }
+  return formatStayRange(nights[0], addDaysYmd(nights[nights.length - 1], 1));
+}
+
+export function resolveHeStayWindows({
+  contextCheckIn,
+  contextCheckOut,
+  exchangeCheckIn,
+  exchangeCheckOut,
+  askedDates,
+  priorPreapprovalStay,
+} = {}) {
+  const ctxIn = dateOnly(contextCheckIn);
+  const ctxOut = dateOnly(contextCheckOut);
+  const exIn = dateOnly(exchangeCheckIn);
+  const exOut = dateOnly(exchangeCheckOut);
+  const askedIn = askedDates?.checkIn || null;
+  const askedOut = askedDates?.checkOut || null;
+  const priorIn = priorPreapprovalStay?.checkIn || null;
+  const priorOut = priorPreapprovalStay?.checkOut || null;
+
+  const previousCheckIn = priorIn || ctxIn;
+  const previousCheckOut = priorOut || ctxOut;
+  const targetCheckIn = exIn || askedIn || ctxIn;
+  const targetCheckOut = exOut || askedOut || ctxOut;
+
+  return {
+    previousCheckIn,
+    previousCheckOut,
+    targetCheckIn,
+    targetCheckOut,
+  };
 }
 
 export function guestAcceptedCleaningFee(text) {
@@ -532,8 +669,9 @@ export function heNightOpen(ranges, night) {
  * HE home calendar: a night is available if it falls in an open HE range
  * (NON_RECIPROCAL / RECIPROCAL). RESERVED or uncovered nights are not available.
  */
-export function analyzeHeCalendarOpen({ ranges = [], checkIn, checkOut } = {}) {
+export function analyzeHeCalendarOpen({ ranges = [], checkIn, checkOut, leftoverNights = [] } = {}) {
   const nights = stayNights(checkIn, checkOut);
+  const leftover = new Set(leftoverNights || []);
   if (!nights.length) {
     return {
       checked: false,
@@ -541,6 +679,7 @@ export function analyzeHeCalendarOpen({ ranges = [], checkIn, checkOut } = {}) {
       nights,
       available: [],
       unavailable: nights,
+      leftoverNights: [...leftover],
       reason: 'missing_dates',
     };
   }
@@ -552,13 +691,14 @@ export function analyzeHeCalendarOpen({ ranges = [], checkIn, checkOut } = {}) {
       nights,
       available: [],
       unavailable: nights,
+      leftoverNights: [...leftover],
       reason: 'he_calendar_not_fetched',
     };
   }
   const available = [];
   const unavailable = [];
   for (const night of nights) {
-    if (heNightOpen(ranges, night)) available.push(night);
+    if (heNightOpen(ranges, night) || leftover.has(night)) available.push(night);
     else unavailable.push(night);
   }
   return {
@@ -567,6 +707,7 @@ export function analyzeHeCalendarOpen({ ranges = [], checkIn, checkOut } = {}) {
     nights,
     available,
     unavailable,
+    leftoverNights: [...leftover],
     reason: unavailable.length === 0 ? 'he_calendar_open' : 'he_calendar_not_open',
   };
 }
@@ -585,8 +726,15 @@ export function mergeStayCalendars(hospitable, heCalendar) {
   };
 }
 
-export function analyzeCalendarOpen({ calendarDays = [], reservations = [], checkIn, checkOut } = {}) {
+export function analyzeCalendarOpen({
+  calendarDays = [],
+  reservations = [],
+  checkIn,
+  checkOut,
+  leftoverNights = [],
+} = {}) {
   const nights = stayNights(checkIn, checkOut);
+  const leftover = new Set(leftoverNights || []);
   if (!nights.length) {
     return {
       checked: false,
@@ -594,6 +742,7 @@ export function analyzeCalendarOpen({ calendarDays = [], reservations = [], chec
       nights,
       available: [],
       unavailable: nights,
+      leftoverNights: [...leftover],
       reason: 'missing_dates',
     };
   }
@@ -611,13 +760,15 @@ export function analyzeCalendarOpen({ calendarDays = [], reservations = [], chec
   for (const night of nights) {
     const calOk = calendarDayAvailable(byDate[night]);
     const blockers = (reservations || []).filter((r) => reservationOccupiesNight(r, night));
-    if (calOk && blockers.length === 0) {
+    const leftoverOk = leftover.has(night) && blockers.length === 0;
+    if ((calOk || leftoverOk) && blockers.length === 0) {
       available.push(night);
     } else {
       unavailable.push(night);
       reasons[night] = {
         calendarOpen: calOk,
         reservationBlocked: blockers.length > 0,
+        leftoverBlock: leftover.has(night),
       };
     }
   }
@@ -629,6 +780,7 @@ export function analyzeCalendarOpen({ calendarDays = [], reservations = [], chec
     nights,
     available,
     unavailable,
+    leftoverNights: [...leftover],
     reasons,
   };
 }
@@ -861,11 +1013,13 @@ function buildPreapproveGuestMessage({
   feeThanks,
   originalRange,
   extraParagraph,
+  extraNightNote,
 } = {}) {
   const name = (guestName || 'there').split(/\s+/)[0];
   let text = `Hi ${name}`;
   if (feeThanks) text += ` — ${feeThanks}.`;
   else text += '.';
+  if (extraNightNote) text += ` ${extraNightNote}`;
   text +=
     ` I just sent you a pre-approval` +
     (originalRange ? ` for ${originalRange}` : '') +
@@ -874,9 +1028,63 @@ function buildPreapproveGuestMessage({
   return text;
 }
 
+export function buildHeExtraNightDraft({
+  guestName,
+  extraNights = [],
+  extraNightsOpen,
+  stayRange,
+  extraNightChecked,
+} = {}) {
+  const name = (guestName || 'there').split(/\s+/)[0];
+  const extraLabel = formatNightList(extraNights) || 'that extra night';
+  const nightWord = extraNights.length === 1 ? 'night' : 'nights';
+  if (!extraNightChecked) {
+    return {
+      typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+      shouldReply: true,
+      proposedResponse:
+        `Hi ${name} — I'm checking the extra ${nightWord} of ${extraLabel} and will follow up shortly.`,
+      reason: 'homeexchange_extra_night_calendar_not_checked',
+    };
+  }
+  if (extraNightsOpen === false) {
+    return {
+      typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+      shouldReply: true,
+      proposedResponse:
+        `Hi ${name} — I checked the extra ${nightWord} of ${extraLabel} and ` +
+        `that ${nightWord} ${extraNights.length === 1 ? 'is' : 'are'} not open on our calendar, ` +
+        `so I can't hold the longer stay.`,
+      reason: 'homeexchange_extra_night_not_open',
+    };
+  }
+  return {
+    typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+    shouldReply: true,
+    proposedResponse:
+      `Hi ${name} — I checked the extra ${nightWord} of ${extraLabel} and ` +
+      `that ${nightWord} ${extraNights.length === 1 ? 'is' : 'are'} open. ` +
+      (stayRange
+        ? `Update the request on HomeExchange to ${stayRange} and I'll send a new pre-approval.`
+        : `Update the request on HomeExchange for those dates and I'll send a new pre-approval.`),
+    reason: 'homeexchange_extra_night_open',
+  };
+}
+
+export function extraNightNoteText(extraNights = [], extraNightsOpen) {
+  if (!extraNights.length || extraNightsOpen !== true) return null;
+  const extraLabel = formatNightList(extraNights);
+  const nightWord = extraNights.length === 1 ? 'night' : 'nights';
+  const verb = extraNights.length === 1 ? 'is' : 'are';
+  return extraLabel
+    ? `I checked the extra ${nightWord} of ${extraLabel} and that ${nightWord} ${verb} open.`
+    : `I checked the extra ${nightWord} and ${verb} open.`;
+}
+
 const HE_DRAFT_NO_SEND = new Set([
   'calendar_not_checked',
   'homeexchange_followup_calendar_not_checked',
+  'homeexchange_extra_night_calendar_not_checked',
   // Only send the pre-approval note after we actually pre-approved + blocked.
   'homeexchange_followup_fee_accepted',
   'homeexchange_preapprove_already_approved',
@@ -898,14 +1106,25 @@ export function shouldAttemptPreapprove({
   originalCheckIn,
   originalCheckOut,
   originalCalendar,
+  checkIn,
+  checkOut,
+  calendar,
   thisTurnWantsPreapprove,
+  extraNights,
+  extraNightsOpen,
 } = {}) {
   if (isFirst) return false;
   if (!feeAccepted) return false;
   // Thank-you / wifi / checkout after a prior fee-accept must not re-run pre-approve.
   if (thisTurnWantsPreapprove === false) return false;
-  if (!originalCheckIn || !originalCheckOut) return false;
-  return !!(originalCalendar?.checked && originalCalendar?.open);
+  const stayIn = checkIn || originalCheckIn;
+  const stayOut = checkOut || originalCheckOut;
+  const cal = calendar || originalCalendar;
+  if (!stayIn || !stayOut) return false;
+  if (Array.isArray(extraNights) && extraNights.length > 0 && extraNightsOpen === false) {
+    return false;
+  }
+  return !!(cal?.checked && cal?.open);
 }
 
 async function loadHospitableWindow(hospitableClient, propertyId, checkIn, checkOut) {
@@ -985,30 +1204,110 @@ export async function handleHomeExchangeMessage({
       conversationHistory = [];
     }
   }
-  const originalCheckIn = dateOnly(context.checkIn || context.check_in);
-  const originalCheckOut = dateOnly(context.checkOut || context.check_out);
-  const askedDates = extractAskedStayDates(message, { now });
+  const contextCheckIn = dateOnly(context.checkIn || context.check_in);
+  const contextCheckOut = dateOnly(context.checkOut || context.check_out);
   const isFirst = isFirstHomeExchangeMessage(context, conversationHistory);
-  const checkIn = !isFirst && askedDates?.checkIn ? askedDates.checkIn : originalCheckIn;
-  const checkOut = !isFirst && askedDates?.checkOut ? askedDates.checkOut : originalCheckOut;
   const homeId = extractHeHomeId(context) || HE_HOME_ID;
   const unit = resolveHeUnit(homeId);
   const propertyId = unit.propertyId;
   const airbnbListingId = unit.airbnbListingId;
   const guestName = context.guestName || context.sender?.first_name || null;
   const feeAccepted = guestAcceptedCleaningFeeInThread(message, conversationHistory, guestName);
+  const thisTurnWantsPreapprove = thisTurnWantsHePreapprove(message, { conversationHistory });
+  const cancelledPreapproval = threadHasCancelledPreapproval(conversationHistory);
+  const resubmittedAfterCancel = guestResubmittedAfterHeCancel(message, conversationHistory);
+  const priorPreapprovalStay = extractPriorPreapprovalStay(conversationHistory);
+
+  let liveConversation = null;
+  let liveExchange = null;
+  if (!isFirst && conversationId && homeExchangeClient?.getConversation) {
+    try {
+      liveConversation = await homeExchangeClient.getConversation(conversationId);
+      liveExchange = pickExchangeFromConversation(liveConversation, homeId);
+    } catch {
+      liveConversation = null;
+      liveExchange = null;
+    }
+  }
+  const exchangeCheckIn = dateOnly(liveExchange?.start_on || liveExchange?.startOn);
+  const exchangeCheckOut = dateOnly(liveExchange?.end_on || liveExchange?.endOn);
+  const askedDates = extractAskedStayDates(message, {
+    now,
+    originalCheckIn: priorPreapprovalStay?.checkIn || contextCheckIn,
+    originalCheckOut: priorPreapprovalStay?.checkOut || contextCheckOut,
+  });
+  const stayWindows = resolveHeStayWindows({
+    contextCheckIn,
+    contextCheckOut,
+    exchangeCheckIn,
+    exchangeCheckOut,
+    askedDates,
+    priorPreapprovalStay,
+  });
+  const askedIsExtension = !!(
+    askedDates &&
+    isStayExtensionOf(
+      stayWindows.previousCheckIn,
+      stayWindows.previousCheckOut,
+      askedDates.checkIn,
+      askedDates.checkOut
+    )
+  );
+  const exchangeIsExtension = isStayExtensionOf(
+    stayWindows.previousCheckIn,
+    stayWindows.previousCheckOut,
+    exchangeCheckIn,
+    exchangeCheckOut
+  );
+  const isExtension = askedIsExtension || exchangeIsExtension;
+  const leftoverNights =
+    isExtension || cancelledPreapproval
+      ? stayNights(stayWindows.previousCheckIn, stayWindows.previousCheckOut)
+      : [];
+
+  const originalCheckIn = contextCheckIn;
+  const originalCheckOut = contextCheckOut;
+  let checkIn = originalCheckIn;
+  let checkOut = originalCheckOut;
+  if (!isFirst) {
+    if (isExtension) {
+      checkIn = exchangeIsExtension
+        ? exchangeCheckIn
+        : askedDates?.checkIn || stayWindows.targetCheckIn;
+      checkOut = exchangeIsExtension
+        ? exchangeCheckOut
+        : askedDates?.checkOut || stayWindows.targetCheckOut;
+    } else if (askedDates?.checkIn) {
+      checkIn = askedDates.checkIn;
+      checkOut = askedDates.checkOut;
+    } else if (resubmittedAfterCancel && stayWindows.targetCheckIn) {
+      checkIn = stayWindows.targetCheckIn;
+      checkOut = stayWindows.targetCheckOut;
+    }
+  }
+  const extraNights =
+    isExtension || resubmittedAfterCancel
+      ? extraNightsOf(
+          stayWindows.previousCheckIn,
+          stayWindows.previousCheckOut,
+          checkIn,
+          checkOut
+        )
+      : [];
+  const approveCheckIn = isExtension || resubmittedAfterCancel ? checkIn : originalCheckIn;
+  const approveCheckOut = isExtension || resubmittedAfterCancel ? checkOut : originalCheckOut;
 
   const shouldCheckCalendar = !!(
     checkIn &&
     checkOut &&
     hospitableClient &&
-    (isFirst || askedDates || feeAccepted)
+    (isFirst || askedDates || feeAccepted || thisTurnWantsPreapprove || isExtension || cancelledPreapproval)
   );
   const hospitableWindow = shouldCheckCalendar
     ? await loadHospitableWindow(hospitableClient, propertyId, checkIn, checkOut)
     : { calendarDays: [], reservations: [], calendarError: null, reservationsError: null };
 
-  const heCalRaw = (isFirst || askedDates || feeAccepted)
+  const heCalRaw = (isFirst || askedDates || feeAccepted || thisTurnWantsPreapprove || isExtension || cancelledPreapproval)
     ? await loadHeCalendar(homeExchangeClient, homeId)
     : { ranges: null, error: null, fetched: false };
 
@@ -1017,13 +1316,21 @@ export async function handleHomeExchangeMessage({
     reservations: hospitableWindow.reservations,
     checkIn,
     checkOut,
+    leftoverNights,
   });
   const heForDraft = heCalRaw.fetched
-    ? analyzeHeCalendarOpen({ ranges: heCalRaw.ranges, checkIn, checkOut })
+    ? analyzeHeCalendarOpen({ ranges: heCalRaw.ranges, checkIn, checkOut, leftoverNights })
     : { checked: false, open: false, unavailable: [], reason: 'he_calendar_not_fetched' };
   const calendar = shouldCheckCalendar
     ? mergeStayCalendars(hospitable, heForDraft)
     : hospitable;
+
+  const extraNightsOpen =
+    extraNights.length > 0 && calendar?.checked
+      ? extraNights.every((night) => (calendar.available || []).includes(night))
+      : extraNights.length === 0
+        ? null
+        : false;
 
   let originalHospitable = hospitable;
   let originalHe = heForDraft;
@@ -1031,7 +1338,7 @@ export async function handleHomeExchangeMessage({
   const originalDiffers =
     !!(originalCheckIn && originalCheckOut) &&
     (originalCheckIn !== checkIn || originalCheckOut !== checkOut);
-  if (feeAccepted && originalDiffers && hospitableClient) {
+  if (feeAccepted && originalDiffers && hospitableClient && !isExtension && !resubmittedAfterCancel) {
     const origWin = await loadHospitableWindow(
       hospitableClient,
       propertyId,
@@ -1052,6 +1359,8 @@ export async function handleHomeExchangeMessage({
         })
       : { checked: false, open: false, unavailable: [], reason: 'he_calendar_not_fetched' };
     originalCalendar = mergeStayCalendars(originalHospitable, originalHe);
+  } else if (isExtension || resubmittedAfterCancel) {
+    originalCalendar = calendar;
   }
 
   let cleaningFee = {
@@ -1090,20 +1399,47 @@ export async function handleHomeExchangeMessage({
     ok: false,
     reason: null,
     exchangeId: null,
-    nights: stayNights(originalCheckIn, originalCheckOut),
+    nights: stayNights(approveCheckIn, approveCheckOut),
   };
 
-  const thisTurnWantsPreapprove = thisTurnWantsHePreapprove(message);
+  if ((isExtension || resubmittedAfterCancel) && extraNights.length > 0) {
+    draft = buildHeExtraNightDraft({
+      guestName,
+      extraNights,
+      extraNightsOpen,
+      stayRange: formatStayRange(checkIn, checkOut),
+      extraNightChecked: calendar?.checked === true,
+    });
+  }
+
+  const exchangeMatchesApprove =
+    !!approveCheckIn &&
+    !!approveCheckOut &&
+    exchangeCheckIn === approveCheckIn &&
+    exchangeCheckOut === approveCheckOut;
+  const alreadyApproved = !!(liveExchange && exchangeAlreadyApproved(liveExchange, liveConversation));
+  const canApproveExtendedStay =
+    (isExtension || resubmittedAfterCancel) &&
+    extraNightsOpen !== false &&
+    calendar?.open &&
+    exchangeMatchesApprove &&
+    !alreadyApproved;
 
   if (
     shouldAttemptPreapprove({
       isFirst,
       feeAccepted,
-      originalCheckIn,
-      originalCheckOut,
-      originalCalendar,
+      originalCheckIn: approveCheckIn,
+      originalCheckOut: approveCheckOut,
+      originalCalendar: isExtension || resubmittedAfterCancel ? calendar : originalCalendar,
+      checkIn: approveCheckIn,
+      checkOut: approveCheckOut,
+      calendar: isExtension || resubmittedAfterCancel ? calendar : originalCalendar,
       thisTurnWantsPreapprove,
-    })
+      extraNights,
+      extraNightsOpen,
+    }) &&
+    (!(isExtension || resubmittedAfterCancel) || canApproveExtendedStay)
   ) {
     preapprove = await runHomeExchangePreapprove({
       homeExchangeClient,
@@ -1114,21 +1450,23 @@ export async function handleHomeExchangeMessage({
       homeId,
       propertyId,
       guestName,
-      checkIn: originalCheckIn,
-      checkOut: originalCheckOut,
+      propertyName: unit.propertyName,
+      airbnbListingId,
+      checkIn: approveCheckIn,
+      checkOut: approveCheckOut,
       now,
     });
   }
 
   if (preapprove.ok) {
-    const originalRange = formatStayRange(originalCheckIn, originalCheckOut);
+    const approvedRange = formatStayRange(approveCheckIn, approveCheckOut);
     const feeText = feeAmountText(cleaningFee);
     const feeThanks = feeAccepted
       ? `thanks for confirming the ${feeText} cleaning fee is fine` +
-        (originalRange ? ` for ${originalRange}` : '')
+        (approvedRange ? ` for ${approvedRange}` : '')
       : null;
     let extraParagraph = null;
-    if (askedDates && calendar?.checked) {
+    if (askedDates && calendar?.checked && !isExtension && !resubmittedAfterCancel) {
       const askedRange = formatStayRange(askedDates.checkIn, askedDates.checkOut);
       extraParagraph = calendar.open
         ? `I checked ${askedRange}: those dates are also open. The same ${feeText} cleaning fee after you leave would apply to that stay as well. Would you like us to hold that one too?`
@@ -1139,8 +1477,9 @@ export async function handleHomeExchangeMessage({
     draft.proposedResponse = buildPreapproveGuestMessage({
       guestName,
       feeThanks,
-      originalRange,
+      originalRange: approvedRange,
       extraParagraph,
+      extraNightNote: extraNightNoteText(extraNights, extraNightsOpen),
     });
   }
 
@@ -1210,13 +1549,16 @@ export async function handleHomeExchangeMessage({
 
   const notifyPayload = {
     guestName,
-    checkIn: originalCheckIn || checkIn,
-    checkOut: originalCheckOut || checkOut,
+    checkIn: approveCheckIn || originalCheckIn || checkIn,
+    checkOut: approveCheckOut || originalCheckOut || checkOut,
     conversationId,
     exchangeId: preapprove.exchangeId,
     proposedResponse: draft.proposedResponse,
     reason: draft.reason,
     preapproved: !!preapprove.ok,
+    propertyName: unit.propertyName,
+    listingId: airbnbListingId,
+    homeId,
   };
   if (sent) {
     try {
@@ -1251,6 +1593,11 @@ export async function handleHomeExchangeMessage({
     originalCheckIn,
     originalCheckOut,
     askedDates,
+    extraNights,
+    extraNightsOpen,
+    leftoverNights,
+    isExtension,
+    cancelledPreapproval,
     feeAccepted,
     propertyId,
     airbnbListingId,
@@ -1279,6 +1626,8 @@ export async function runHomeExchangePreapprove({
   homeId,
   propertyId,
   guestName,
+  propertyName,
+  airbnbListingId,
   checkIn,
   checkOut,
   now = new Date(),
@@ -1291,6 +1640,15 @@ export async function runHomeExchangePreapprove({
     exchangeId: null,
     nights,
   };
+  const unitNotify = {
+    guestName,
+    checkIn,
+    checkOut,
+    conversationId,
+    propertyName,
+    listingId: airbnbListingId,
+    homeId,
+  };
 
   const canApprove =
     typeof homeExchangeClient?.approveConversation === 'function' ||
@@ -1298,10 +1656,7 @@ export async function runHomeExchangePreapprove({
   if (!conversationId || !homeExchangeClient?.getConversation || !canApprove) {
     await notifyHePreapproval(notifyOwner, {
       kind: 'error',
-      guestName,
-      checkIn,
-      checkOut,
-      conversationId,
+      ...unitNotify,
       error: 'Missing HomeExchange client or conversation id — did not pre-approve.',
     });
     return base;
@@ -1316,10 +1671,7 @@ export async function runHomeExchangePreapprove({
     base.reason = 'he_conversation_failed';
     await notifyHePreapproval(notifyOwner, {
       kind: 'error',
-      guestName,
-      checkIn,
-      checkOut,
-      conversationId,
+      ...unitNotify,
       error: `Could not load HE conversation: ${err?.message || err}`,
     });
     return base;
@@ -1329,10 +1681,7 @@ export async function runHomeExchangePreapprove({
     base.reason = 'missing_exchange';
     await notifyHePreapproval(notifyOwner, {
       kind: 'error',
-      guestName,
-      checkIn,
-      checkOut,
-      conversationId,
+      ...unitNotify,
       error: 'No HE exchange on the conversation — did not pre-approve.',
     });
     return base;
@@ -1343,10 +1692,7 @@ export async function runHomeExchangePreapprove({
     base.reason = 'already_approved';
     await notifyHePreapproval(notifyOwner, {
       kind: 'error',
-      guestName,
-      checkIn,
-      checkOut,
-      conversationId,
+      ...unitNotify,
       exchangeId: exchange.id,
       error: 'HE exchange already finalized — did not proceed.',
     });
@@ -1365,10 +1711,7 @@ export async function runHomeExchangePreapprove({
       base.reason = 'approve_failed';
       await notifyHePreapproval(notifyOwner, {
         kind: 'error',
-        guestName,
-        checkIn,
-        checkOut,
-        conversationId,
+        ...unitNotify,
         exchangeId: exchange.id,
         error: `HE pre-approve failed: ${err?.message || err}`,
       });
@@ -1388,10 +1731,7 @@ export async function runHomeExchangePreapprove({
     base.reason = 'block_failed';
     await notifyHePreapproval(notifyOwner, {
       kind: 'error',
-      guestName,
-      checkIn,
-      checkOut,
-      conversationId,
+      ...unitNotify,
       exchangeId: exchange.id,
       error: `Hospitable block failed after HE pre-approve: ${err?.message || err}`,
     });
@@ -1417,10 +1757,7 @@ export async function runHomeExchangePreapprove({
       base.reason = 'block_record_failed';
       await notifyHePreapproval(notifyOwner, {
         kind: 'error',
-        guestName,
-        checkIn,
-        checkOut,
-        conversationId,
+        ...unitNotify,
         exchangeId: exchange.id,
         error: `Blocked nights but failed to persist expire record: ${err?.message || err}`,
       });
@@ -1430,10 +1767,7 @@ export async function runHomeExchangePreapprove({
 
   await notifyHePreapproval(notifyOwner, {
     kind: 'ready',
-    guestName,
-    checkIn,
-    checkOut,
-    conversationId,
+    ...unitNotify,
     exchangeId: exchange.id,
     nights,
   });

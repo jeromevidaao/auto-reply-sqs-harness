@@ -15,8 +15,18 @@ function heRange(checkIn, checkOut) {
   return checkIn && checkOut ? `${checkIn} → ${checkOut}` : 'unknown dates';
 }
 
-function heBaseData({ guestName, conversationId, exchangeId, checkIn, checkOut }) {
+function heBaseData({
+  guestName,
+  conversationId,
+  exchangeId,
+  checkIn,
+  checkOut,
+  propertyName,
+  listingId,
+  homeId,
+}) {
   const name = guestName || 'Guest';
+  const unit = propertyName || '';
   return {
     guestName: String(name),
     peerName: String(name),
@@ -24,6 +34,10 @@ function heBaseData({ guestName, conversationId, exchangeId, checkIn, checkOut }
     exchangeId: String(exchangeId || ''),
     checkIn: String(checkIn || ''),
     checkOut: String(checkOut || ''),
+    propertyName: String(unit),
+    listingName: String(unit),
+    listingId: String(listingId || ''),
+    homeId: String(homeId || ''),
   };
 }
 
@@ -36,18 +50,31 @@ export function buildHePreapprovalNotify({
   exchangeId,
   error,
   nights,
+  propertyName,
+  listingId,
+  homeId,
 } = {}) {
   const name = guestName || 'Guest';
   const range = heRange(checkIn, checkOut);
+  const unit = propertyName || 'Pine';
   const nightList = Array.isArray(nights) && nights.length ? nights.join(', ') : range;
-  const base = heBaseData({ guestName: name, conversationId, exchangeId, checkIn, checkOut });
+  const base = heBaseData({
+    guestName: name,
+    conversationId,
+    exchangeId,
+    checkIn,
+    checkOut,
+    propertyName: unit,
+    listingId,
+    homeId,
+  });
 
   if (kind === 'ready') {
     return {
       type: HE_NOTIFY_READY,
       title: `HE pre-approved — ${name}`,
       body: clip(
-        `Pine #3 ${range}. Pre-approved on Home Exchange. Hospitable nights blocked (checkout day left open).`,
+        `${unit} ${range}. Pre-approved on Home Exchange and invited to book. Hospitable nights blocked (checkout day left open).`,
         900
       ),
       data: {
@@ -62,7 +89,7 @@ export function buildHePreapprovalNotify({
     return {
       type: HE_NOTIFY_EXPIRED,
       title: `HE pre-approval expired — ${name}`,
-      body: clip(`Unblocked Hospitable nights for ${range}. Guest did not finalize.`, 900),
+      body: clip(`${unit} ${range}. Unblocked Hospitable nights. Guest did not finalize.`, 900),
       data: {
         type: HE_NOTIFY_EXPIRED,
         ...base,
@@ -74,7 +101,7 @@ export function buildHePreapprovalNotify({
   return {
     type: HE_NOTIFY_ERROR,
     title: `HE pre-approve stopped — ${name}`,
-    body: clip(`${range}. Did not proceed. ${err}`, 900),
+    body: clip(`${unit} ${range}. Did not proceed. ${err}`, 900),
     data: {
       type: HE_NOTIFY_ERROR,
       ...base,
@@ -94,10 +121,24 @@ export function buildHeAutoReplyNotify({
   reason,
   preapproved,
   error,
+  propertyName,
+  listingId,
+  homeId,
 } = {}) {
   const name = guestName || 'Guest';
   const range = heRange(checkIn, checkOut);
-  const base = heBaseData({ guestName: name, conversationId, exchangeId, checkIn, checkOut });
+  const unit = propertyName || '';
+  const unitBit = unit ? `${unit} ` : '';
+  const base = heBaseData({
+    guestName: name,
+    conversationId,
+    exchangeId,
+    checkIn,
+    checkOut,
+    propertyName: unit,
+    listingId,
+    homeId,
+  });
   const reasonBit = reason ? ` (${reason})` : '';
 
   if (kind === 'send_failed') {
@@ -105,7 +146,7 @@ export function buildHeAutoReplyNotify({
     return {
       type: HE_NOTIFY_SEND_FAILED,
       title: `HE auto-reply failed — ${name}`,
-      body: clip(`${range}. Guest message not sent${reasonBit}. ${err}`, 900),
+      body: clip(`${unitBit}${range}. Guest message not sent${reasonBit}. ${err}`, 900),
       data: {
         type: HE_NOTIFY_SEND_FAILED,
         ...base,
@@ -115,11 +156,27 @@ export function buildHeAutoReplyNotify({
     };
   }
 
-  const prefix = preapproved ? 'Pre-approval note sent. ' : 'Auto-reply sent. ';
+  if (preapproved) {
+    return {
+      type: HE_NOTIFY_SENT,
+      title: `HE pre-approved — ${name}`,
+      body: clip(
+        `${unitBit}${range}. Pre-approval note sent and invited to book${reasonBit}.\n\n${proposedResponse || ''}`,
+        900
+      ),
+      data: {
+        type: HE_NOTIFY_SENT,
+        ...base,
+        reason: clip(reason || '', 200),
+        proposedResponse: clip(proposedResponse || '', 1800),
+      },
+    };
+  }
+
   return {
     type: HE_NOTIFY_SENT,
     title: `HE auto-reply sent — ${name}`,
-    body: clip(`${prefix}${range}${reasonBit}.\n\n${proposedResponse || ''}`, 900),
+    body: clip(`Auto-reply sent. ${unitBit}${range}${reasonBit}.\n\n${proposedResponse || ''}`, 900),
     data: {
       type: HE_NOTIFY_SENT,
       ...base,
