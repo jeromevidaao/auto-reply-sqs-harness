@@ -1,0 +1,38 @@
+{
+  "unitKey": "apt-1b",
+  "homeId": "3285159",
+  "propertyName": "Pine Apt #1B",
+  "airbnbListingId": "20904545",
+  "propertyId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+  "mustInclude": [
+    "53 Pine Street, Apt 1B",
+    "BACK entrance",
+    "214 Brackett",
+    "1B",
+    "Pineland",
+    "lobsterbake",
+    "4PM",
+    "10AM"
+  ],
+  "mustNotInclude": [
+    "9751",
+    "lock box",
+    "lockbox",
+    "Apt 3",
+    "APT 2",
+    "third floor"
+  ],
+  "critical": {
+    "address": "53 Pine Street, Apt 1B, Portland ME 04102",
+    "entrance": "BACK entrance",
+    "parkingSign": "1B",
+    "gps": "214 Brackett street",
+    "wifiNetwork": "Pineland",
+    "wifiPassword": "lobsterbake",
+    "checkIn": "4PM",
+    "checkOut": "10AM",
+    "keypad": "last 4 digits of your phone number for both the outside and inside door",
+    "pets": "pet is not allowed on sofa, beds, and bean bags"
+  },
+  "template": "Hi {FirstName},\n\nIt's almost time for your trip to Portland, ME! Please see below for essential information such as direction, parking & self check-in instruction, and WIFI password. Check in time is 4PM and check out time is 10AM.\n\nI really strive to provide the best experience possible, and earning a 5 star review from you.\nPlease let me know what I can do to make your stay the perfect stay.\n\nThe address is 53 Pine Street, Apt 1B, Portland ME 04102, right next to Cumberland Farm gas station. Your unit is in the back of the building and accessible through the BACK entrance. If you get here by car, there is one DESIGNATED parking spot for you behind the house. To get to the parking spot and your unit entrance (in the back of the building), enter in your GPS \"214 Brackett street\" and turn into the driveway between that address and the gas station. Continue until you past the trees/plants on the left and see the house also on your left. Your parking spot has the signs saying 1B. The 3 spots on the right of the building belong to our neighbor at 55 Pine, so please do not park there.\n\nYour unit entrance is right off the backstairs (7 steps). The code for the key pad is the last 4 digits of your phone number {last4} for both the outside and inside door. There is also a step by step picture guide on AirBnb mobile app.\n\nThe Wifi network is Pineland and the password is lobsterbake.\n\nPS: Please note that pet is not allowed on sofa, beds, and bean bags, woof!\n\nI hope that you will feel like home at my place!\n\nWarm regards,\n\nJerome\n"
+}

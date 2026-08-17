@@ -143,9 +143,12 @@ export function buildHeAutoReplyNotify({
 
   if (kind === 'send_failed') {
     const err = error || 'unknown error';
+    const checkinFail = reason === 'homeexchange_checkin_instructions';
     return {
       type: HE_NOTIFY_SEND_FAILED,
-      title: `HE auto-reply failed — ${name}`,
+      title: checkinFail
+        ? `HE check-in instructions failed — ${name}`
+        : `HE auto-reply failed — ${name}`,
       body: clip(`${unitBit}${range}. Guest message not sent${reasonBit}. ${err}`, 900),
       data: {
         type: HE_NOTIFY_SEND_FAILED,
@@ -162,6 +165,23 @@ export function buildHeAutoReplyNotify({
       title: `HE pre-approved — ${name}`,
       body: clip(
         `${unitBit}${range}. Pre-approval note sent and invited to book${reasonBit}.\n\n${proposedResponse || ''}`,
+        900
+      ),
+      data: {
+        type: HE_NOTIFY_SENT,
+        ...base,
+        reason: clip(reason || '', 200),
+        proposedResponse: clip(proposedResponse || '', 1800),
+      },
+    };
+  }
+
+  if (reason === 'homeexchange_checkin_instructions') {
+    return {
+      type: HE_NOTIFY_SENT,
+      title: `HE check-in instructions sent — ${name}`,
+      body: clip(
+        `Check-in instructions sent. ${unitBit}${range}.\n\n${proposedResponse || ''}`,
         900
       ),
       data: {

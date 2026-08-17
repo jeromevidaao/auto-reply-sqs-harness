@@ -84,6 +84,8 @@ export function alreadySentEquivalent(messages, proposedResponse) {
   const proposedIsPreapprove = /blocked those dates/.test(proposed);
   const proposedIsFinalizeThanks =
     /thank you for confirming/.test(proposed) && /looking forward to hosting you/.test(proposed);
+  const proposedIsCheckinInstructions =
+    /almost time for your trip/.test(proposed) && /wifi network is pineland/.test(proposed);
   const proposedRange = stayRangeFingerprint(proposed);
   return list.some((m) => {
     const text = String(m.content || m.body || m.text || '').trim().toLowerCase();
@@ -99,6 +101,13 @@ export function alreadySentEquivalent(messages, proposedResponse) {
       proposedIsFinalizeThanks &&
       /thank you for confirming/.test(text) &&
       /looking forward to hosting you/.test(text)
+    ) {
+      return true;
+    }
+    if (
+      proposedIsCheckinInstructions &&
+      /almost time for your trip/.test(text) &&
+      /wifi network is pineland/.test(text)
     ) {
       return true;
     }

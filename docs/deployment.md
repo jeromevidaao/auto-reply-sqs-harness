@@ -180,7 +180,7 @@ Full agent diagnostics remain in **CloudWatch**. The legacy SNS email topic (`SN
 
 Urgent access lockouts still use SNS SMS / `URGENT_ACCESS_*` (unchanged). Cleaning-issue SNS emails are unchanged.
 
-HomeExchange pre-approve / Hospitable-block: guest gets “I just sent you a pre-approval and blocked those dates for you” (never “you’re booked”). FCM `homeexchange_preapproval_ready` / `_error`. Expired pre-approvals that we unblock use `homeexchange_preapproval_expired`. **Every HE guest auto-reply** (fee ask, date follow-up, pre-approval note) also FCM `homeexchange_auto_reply_sent` to the owner phone; send failure after retries is `homeexchange_auto_reply_failed`. Airbnb auto-replies are not notified this way.
+HomeExchange pre-approve / Hospitable-block: guest gets “I just sent you a pre-approval and blocked those dates for you” (never “you’re booked”). FCM `homeexchange_preapproval_ready` / `_error`. Expired pre-approvals that we unblock use `homeexchange_preapproval_expired`. **Every HE guest auto-reply** (fee ask, date follow-up, pre-approval note, 3-day check-in instructions) also FCM `homeexchange_auto_reply_sent` to the owner phone; send failure after retries is `homeexchange_auto_reply_failed`. Check-in templates: `s3://cleaningbutton-ai-context-us-east-1/data/checkin-templates/apt-{1b,2,3}.json`. Airbnb auto-replies are not notified this way.
 
 EventBridge rule `he-preapproval-expire` (`rate(12 hours)`) invokes this Lambda with `act=homeexchange_expire_blocks`. Table: `homeexchangePreapprovalBlocks` (IAM `HomeExchangePreapprovalBlocks` on the same role).
 

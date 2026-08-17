@@ -91,6 +91,7 @@ import {
 export const HOMEEXCHANGE_PLATFORM = 'homeexchange';
 export const HOMEEXCHANGE_ACT = 'homeexchange_message';
 export const HOMEEXCHANGE_APPROVAL_ACT = 'homeexchange_approval_status';
+export const HOMEEXCHANGE_CHECKIN_ACT = 'homeexchange_checkin_instructions';
 
 /** Pine HE home → Hospitable / Airbnb. Default only when the home id is missing. */
 export const HE_HOME_ID = '3202475';
@@ -196,7 +197,13 @@ export function isHomeExchangePayload(event) {
   for (const p of candidates) {
     if (!p || typeof p !== 'object') continue;
     const act = p?.queryStringParameters?.act || p?.act || null;
-    if (act === HOMEEXCHANGE_ACT || act === HOMEEXCHANGE_APPROVAL_ACT) return true;
+    if (
+      act === HOMEEXCHANGE_ACT ||
+      act === HOMEEXCHANGE_APPROVAL_ACT ||
+      act === HOMEEXCHANGE_CHECKIN_ACT
+    ) {
+      return true;
+    }
     // Reservation calendar-sync act is a different product path — never treat as HE chat.
     if (act === 'new_reservation_home_exchange') continue;
 
@@ -684,6 +691,7 @@ export function extractHomeExchangeMessage(event) {
       platform !== HOMEEXCHANGE_PLATFORM &&
       act !== HOMEEXCHANGE_ACT &&
       act !== HOMEEXCHANGE_APPROVAL_ACT &&
+      act !== HOMEEXCHANGE_CHECKIN_ACT &&
       source !== HOMEEXCHANGE_PLATFORM
     ) {
       continue;
@@ -696,6 +704,12 @@ export function extractHomeExchangeMessage(event) {
         ...src,
         conversation_id: src.conversation_id || src.conversationId || null,
         guestName: src.guestName || src.sender?.first_name || src.sender?.full_name || null,
+        guestPhone: src.guestPhone || src.phoneNumber || src.phone || src.guest?.phone || null,
+        guestPhoneLast4: src.guestPhoneLast4 || src.phoneLast4 || src.last4 || null,
+        phoneNumber: src.phoneNumber || src.guestPhone || src.phone || null,
+        eventType: src.eventType || p.eventType || null,
+        action: src.action || p.action || null,
+        act: act || src.act || null,
         checkIn: src.checkIn || src.check_in || null,
         checkOut: src.checkOut || src.check_out || null,
         isFirstMessage: src.isFirstMessage === true || src.is_first_message === true,

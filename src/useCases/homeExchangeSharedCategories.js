@@ -119,6 +119,14 @@ export function guestFinalizedHeExchange(text, extras = {}) {
   const eventType = String(
     extras.eventType || extras.action || extras.heEventType || extras.act || ''
   ).toLowerCase();
+  // Check-in instruction jobs must never be treated as a finalize thank-you.
+  if (
+    eventType === 'homeexchange_checkin_instructions' ||
+    eventType === 'homeexchange.checkin_instructions' ||
+    eventType === 'checkin_instructions'
+  ) {
+    return false;
+  }
   return (
     eventType === 'exchange_finalized' ||
     eventType === 'homeexchange.exchange.finalized' ||

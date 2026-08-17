@@ -14,6 +14,9 @@
  * - HomeExchange approval status change (act=homeexchange_approval_status):
  *     Guest finalized the HE exchange. Thank-you-for-confirming only — never
  *     pre-approve, never shared "You're welcome".
+ * - HomeExchange check-in instructions (act=homeexchange_checkin_instructions):
+ *     3 days before arrival (or immediately when the stay is accepted ≤3 days
+ *     out). Unit-strict template + guest phone last-4. Owner FCM always.
  * - Real SQS traffic from grok_reservation (reservation.created / reservation.changed):
  *     API Gateway envelope with act=reservation and Hospitable reservation payload.
  *     Pending→just-accepted (request-to-book) triggers a welcome that opens with
@@ -41,7 +44,12 @@ import {
   shouldProcessAcceptWelcome,
 } from '../src/utils/reservationAccept.js';
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
-import { isHomeExchangePayload, handleHomeExchangeMessage } from '../src/useCases/homeExchange.js';
+import { S3Client } from '@aws-sdk/client-s3';
+import { isHomeExchangePayload, handleHomeExchangeMessage, extractHomeExchangeMessage } from '../src/useCases/homeExchange.js';
+import {
+  isHeCheckinInstructionsTurn,
+  handleHeCheckinInstructions,
+} from '../src/useCases/homeExchangeCheckin.js';
 import { createHeFirstAckWriter } from '../src/useCases/homeExchangeFirstAck.js';
 import { expireHomeExchangeBlocks } from '../src/useCases/homeExchangeExpire.js';
 import { createDdbBlockStore } from '../src/useCases/homeExchangeBlocks.js';
@@ -169,14 +177,60 @@ export const handler = async (event, context) => {
   if (
     isHomeExchangePayload(event) ||
     act === 'homeexchange_message' ||
-    act === 'homeexchange_approval_status'
+    act === 'homeexchange_approval_status' ||
+    act === 'homeexchange_checkin_instructions'
   ) {
     console.log('[Handler] HomeExchange use case — isolated path (fee/pre-approve + shared categories via HE send)');
     const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
     const hospitableClient = new HospitableClient();
     const homeExchangeClient = new HomeExchangeClient();
+    const s3Client = new S3Client({ region: 'us-east-1' });
     await getGrokApiKey();
     await loadHostContacts();
+    const extractedHe = extractHomeExchangeMessage(event);
+    if (isHeCheckinInstructionsTurn(extractedHe.context, extractedHe.message, event)) {
+      console.log('[Handler] HomeExchange check-in instructions — isolated path (no pre-approve)');
+      const checkinResult = await handleHeCheckinInstructions({
+        event,
+        extracted: extractedHe,
+        homeExchangeClient,
+        notifyOwner: notifyOwnerAndroid,
+        s3Client,
+      });
+      const duration = Date.now() - startTime;
+      console.log('[Handler] HomeExchange check-in result:', {
+        typeOfMessageReceived: checkinResult.typeOfMessageReceived,
+        sent: checkinResult.sent,
+        sendSkipReason: checkinResult.sendSkipReason || null,
+        sendError: checkinResult.sendError || null,
+        homeId: checkinResult.homeId || null,
+        propertyName: checkinResult.propertyName || null,
+        reason: checkinResult.reason,
+      });
+      if (checkinResult.sendError) {
+        console.error('[Handler] HomeExchange check-in send failed:', checkinResult.sendError);
+        throw new Error(`Failed to deliver HomeExchange check-in instructions: ${checkinResult.sendError}`);
+      }
+      console.log('\n⏱️  Total handler duration:', duration, 'ms (homeexchange-checkin)');
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          requestId,
+          homeExchange: true,
+          checkinInstructions: true,
+          sendDisabled: checkinResult.sendDisabled,
+          sent: checkinResult.sent,
+          decision: {
+            typeOfMessageReceived: checkinResult.typeOfMessageReceived,
+            proposedResponse: checkinResult.proposedResponse,
+            shouldReply: checkinResult.shouldReply,
+            escalated: false,
+          },
+          homeExchangeResult: checkinResult,
+        }),
+      };
+    }
     const sharedCategoryAgent = process.env.GROK_API_KEY
       ? new GuestMessagingAgent({
           llm: 'auto',

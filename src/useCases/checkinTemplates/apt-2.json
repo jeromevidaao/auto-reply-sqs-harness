@@ -1,0 +1,38 @@
+{
+  "unitKey": "apt-2",
+  "homeId": "3285044",
+  "propertyName": "Pine Apt #2",
+  "airbnbListingId": "20150380",
+  "propertyId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "mustInclude": [
+    "53 Pine Street",
+    "APT 2",
+    "rear of the building",
+    "214 Brackett",
+    "Pineland",
+    "lobsterbake",
+    "4 PM",
+    "10 AM"
+  ],
+  "mustNotInclude": [
+    "9751",
+    "lock box",
+    "lockbox",
+    "Apt 1B",
+    "Apt 3",
+    "third floor",
+    "FRONT entrance"
+  ],
+  "critical": {
+    "address": "53 Pine Street, Portland ME 04102",
+    "entrance": "rear of the building",
+    "parkingSign": "APT 2",
+    "gps": "214 Brackett Street",
+    "wifiNetwork": "Pineland",
+    "wifiPassword": "lobsterbake",
+    "checkIn": "4 PM",
+    "checkOut": "10 AM",
+    "keypad": "last 4 digits of your phone number on the outside door and the same code on the unit door"
+  },
+  "template": "Hi {FirstName},\n\nIt's almost time for your trip to Portland, ME! Please see below for essential information such as directions, parking & self check-in instruction, and WiFi password. Check-in time is 4 PM and check out time is 10 AM.\n\nRuby and I strive to provide the best experience possible, and earning a 5 star review from you.\nPlease let me know what I can do to make your stay exemplary.\n\nHere are directions to our place:\n\nThe address is 53 Pine Street, Portland ME 04102 (right next to Cumberland Farm gas station). Both building entrance/ unit entrance and car parking are behind the building. Helpful navigation tip: To get there by car, put in \"214 Brackett Street\" and turn into the driveway between that address and the gas station. Continue until you pass the trees/ plants on the left and see the house also on your left. Park where the sign says APT 2. NOTE: The three spots on the right belong to our neighbor at 55 Pine, so please do not park there.\n\nYour unit entrance is through the rear of the building. The outside door's code is the last 4 digits of your phone number {last4}. Once you enter, continue to follow the stairs on your right to your unit entrance, opening it using the same code {last4}.\n\nThe Wifi network is Pineland and the password is lobsterbake.\n\nI hope that you will feel like home at our place!\n\nWarm regards,\n\nJerome & Ruby\n"
+}

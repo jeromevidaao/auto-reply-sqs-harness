@@ -1,0 +1,37 @@
+{
+  "unitKey": "apt-3",
+  "homeId": "3202475",
+  "propertyName": "Pine Apt #3",
+  "airbnbListingId": "24259977",
+  "propertyId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+  "mustInclude": [
+    "53 Pine Street, Apt 3",
+    "FRONT entrance",
+    "9751",
+    "214 Brackett",
+    "Apt 3",
+    "Pineland",
+    "lobsterbake",
+    "4PM",
+    "10AM"
+  ],
+  "mustNotInclude": [
+    "Apt 1B",
+    "APT 2",
+    "BACK entrance",
+    "backstairs"
+  ],
+  "critical": {
+    "address": "53 Pine Street, Apt 3, Portland ME 04102",
+    "entrance": "FRONT entrance",
+    "parkingSign": "Apt 3",
+    "gps": "214 Brackett street",
+    "wifiNetwork": "Pineland",
+    "wifiPassword": "lobsterbake",
+    "checkIn": "4PM",
+    "checkOut": "10AM",
+    "lockbox": "9751",
+    "keypad": "last 4 digits of your phone number on the 3rd floor door"
+  },
+  "template": "Hi {FirstName},\n\nIt's almost time for your trip to Portland, ME! Please see below for essential information such as direction, parking & self check-in instruction, and WIFI password. Check-in time is 4PM and check-out time is 10AM.\n\nRuby and I strive to provide the best experience possible, and earning a 5 star review from you.\nPlease let me know what I can do to make your stay the perfect stay.\n\nThe address is 53 Pine Street, Apt 3, Portland ME 04102, right next to Cumberland Farm gas station. Your unit is on the third floor and accessible through the FRONT entrance. If you get here by car, there is one DESIGNATED parking spot for you behind the house. To get to the parking spot, put in your GPS \"214 Brackett street\" and turn into the driveway between that address and the gas station. Continue until you past the trees/plants on the left and see the house also on your left. Your parking spot has the signs saying Apt 3. The 3 spots on the right of the building belong to our neighbor at 55 Pine, so please do not park there.\n\nYour unit entrance is through the front of the building. The front-door key is in the bottom lock box labeled Unit 3, top open the lock box:\n1. Rotate dials to the combination 9751\n2.Press down on the black release button to open the door\n3. Pull the door of the lock box fully open and grab the key inside\n4. Use the key to open the front-door (put the keys back into the lock-box after your checkout)\n\nThis key is for entrance only. Once you arrive in front of the door on the 3rd floor, you will find a key pad on the door opening enter the code, the last 4 digits of your phone number {last4}. There is also a step by step picture guide on AirBnb mobile application.\n\nThe Wifi network is Pineland and the password is lobsterbake.\n\nI hope that you will feel like home at my place!\n\nWarm regards,\n\nJerome & Ruby\n"
+}
