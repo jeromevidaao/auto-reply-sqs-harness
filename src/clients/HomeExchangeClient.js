@@ -234,6 +234,23 @@ export class HomeExchangeClient {
   }
 
   /**
+   * Inbox list (same endpoint as cleaningbutton-api HE poll).
+   * Used to find the current finalized Pine stay for lockout notices.
+   */
+  async listConversations({ limit = 50 } = {}) {
+    const token = await this.getToken();
+    const n = Math.min(50, Math.max(1, Number(limit) || 50));
+    return this._withRetry('heListConversations', async () => {
+      const response = await this._http.get(`${HE_API_BASE}/v3/conversations/me`, {
+        headers: this._headers(token),
+        params: { limit: n },
+        timeout: HE_TIMEOUT_MS,
+      });
+      return response.data || {};
+    });
+  }
+
+  /**
    * Home calendar as [start_on, end_on) ranges.
    * Live types: NON_RECIPROCAL (open for GP stays), RESERVED (blocked / booked).
    * Nights not covered by any range are closed (owner long-block).

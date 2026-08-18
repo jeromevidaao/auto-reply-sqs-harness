@@ -14,6 +14,10 @@
  * - HomeExchange approval status change (act=homeexchange_approval_status):
  *     Guest finalized the HE exchange. Thank-you-for-confirming only — never
  *     pre-approve, never shared "You're welcome".
+ * - Keypad lockout guest notice (act=keypad_lockout_notice):
+ *     guestCheckInDetect saw Schlage "Keypad disabled invalid code". Occupancy
+ *     from Hospitable + HE; unit locks message that guest; backdoor only if
+ *     exactly one of 1B / Apt #2 is occupied. simulate=true never sends.
  * - HomeExchange check-in instructions (act=homeexchange_checkin_instructions):
  *     3 days before arrival (or immediately when the stay is accepted ≤3 days
  *     out). Unit-strict template + guest phone last-4. Owner FCM always.
@@ -50,6 +54,10 @@ import {
   isHeCheckinInstructionsTurn,
   handleHeCheckinInstructions,
 } from '../src/useCases/homeExchangeCheckin.js';
+import {
+  handleKeypadLockoutNotice,
+  isKeypadLockoutNoticeTurn,
+} from '../src/useCases/keypadLockoutNotice.js';
 import { createHeFirstAckWriter } from '../src/useCases/homeExchangeFirstAck.js';
 import { expireHomeExchangeBlocks } from '../src/useCases/homeExchangeExpire.js';
 import { createDdbBlockStore } from '../src/useCases/homeExchangeBlocks.js';
@@ -169,6 +177,53 @@ export const handler = async (event, context) => {
     return {
       statusCode: 200,
       body: JSON.stringify({ success: true, act, queueName, queueUrl: QueueUrl }),
+    };
+  }
+
+  // Isolated keypad-lockout guest notice. Must run before Airbnb / HE chat so
+  // we never Grok-rewrite the template or send via the wrong platform.
+  if (act === 'keypad_lockout_notice' || isKeypadLockoutNoticeTurn(event)) {
+    console.log('[Handler] Keypad lockout guest notice — isolated path');
+    const hospitableClient = new HospitableClient();
+    const homeExchangeClient = new HomeExchangeClient();
+    const lockoutResult = await handleKeypadLockoutNotice({
+      event,
+      hospitableClient,
+      homeExchangeClient,
+      notifyOwner: notifyOwnerAndroid,
+    });
+    const duration = Date.now() - startTime;
+    console.log('[Handler] Keypad lockout notice result:', {
+      sent: lockoutResult.sent,
+      simulate: lockoutResult.simulate,
+      sendSkipReason: lockoutResult.sendSkipReason || null,
+      sendError: lockoutResult.sendError || null,
+      reason: lockoutResult.decision?.reason || null,
+      guest: lockoutResult.recipient?.firstName || null,
+      lockName: lockoutResult.lockName || null,
+    });
+    if (lockoutResult.sendError && !lockoutResult.simulate) {
+      console.error('[Handler] Keypad lockout guest send failed:', lockoutResult.sendError);
+      throw new Error(`Failed keypad lockout guest notice: ${lockoutResult.sendError}`);
+    }
+    console.log('\n⏱️  Total handler duration:', duration, 'ms (keypad-lockout-notice)');
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        success: true,
+        requestId,
+        keypadLockoutNotice: true,
+        sent: lockoutResult.sent,
+        simulate: lockoutResult.simulate,
+        sendDisabled: !lockoutResult.sent,
+        decision: {
+          typeOfMessageReceived: lockoutResult.typeOfMessageReceived,
+          proposedResponse: lockoutResult.proposedResponse,
+          shouldReply: !!lockoutResult.sent,
+          escalated: false,
+        },
+        lockoutResult,
+      }),
     };
   }
 

@@ -206,6 +206,7 @@ export function isHomeExchangePayload(event) {
     }
     // Reservation calendar-sync act is a different product path — never treat as HE chat.
     if (act === 'new_reservation_home_exchange') continue;
+    if (act === 'keypad_lockout_notice') continue;
 
     const data = p.data && typeof p.data === 'object' ? p.data : {};
     const ctx = p.context && typeof p.context === 'object' ? p.context : {};
