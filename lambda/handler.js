@@ -18,6 +18,10 @@
  *     guestCheckInDetect saw Schlage "Keypad disabled invalid code". Occupancy
  *     from Hospitable + HE; unit locks message that guest; backdoor only if
  *     exactly one of 1B / Apt #2 is occupied. simulate=true never sends.
+ * - Ring smoke / CO guest notice (act=ring_smoke_notice):
+ *     API ring_smoke_poll saw a Kidde × Ring Apt #2 detector go active.
+ *     Isolated path — no Grok. Messages every current Apt #2 guest on
+ *     Airbnb (Hospitable) and/or HomeExchange. simulate=true never sends.
  * - HomeExchange check-in instructions (act=homeexchange_checkin_instructions):
  *     3 days before arrival (or immediately when the stay is accepted ≤3 days
  *     out). Unit-strict template + guest phone last-4. Owner FCM always.
@@ -58,6 +62,10 @@ import {
   handleKeypadLockoutNotice,
   isKeypadLockoutNoticeTurn,
 } from '../src/useCases/keypadLockoutNotice.js';
+import {
+  handleRingSmokeNotice,
+  isRingSmokeNoticeTurn,
+} from '../src/useCases/ringSmokeNotice.js';
 import { createHeFirstAckWriter } from '../src/useCases/homeExchangeFirstAck.js';
 import { expireHomeExchangeBlocks } from '../src/useCases/homeExchangeExpire.js';
 import { createDdbBlockStore } from '../src/useCases/homeExchangeBlocks.js';
@@ -182,6 +190,53 @@ export const handler = async (event, context) => {
 
   // Isolated keypad-lockout guest notice. Must run before Airbnb / HE chat so
   // we never Grok-rewrite the template or send via the wrong platform.
+  if (act === 'ring_smoke_notice' || isRingSmokeNoticeTurn(event)) {
+    console.log('[Handler] Ring smoke guest notice — isolated path');
+    const hospitableClient = new HospitableClient();
+    const homeExchangeClient = new HomeExchangeClient();
+    const smokeResult = await handleRingSmokeNotice({
+      event,
+      hospitableClient,
+      homeExchangeClient,
+      notifyOwner: notifyOwnerAndroid,
+    });
+    const duration = Date.now() - startTime;
+    console.log('[Handler] Ring smoke notice result:', {
+      sent: smokeResult.sent,
+      sentCount: smokeResult.sentCount || 0,
+      simulate: smokeResult.simulate,
+      sendSkipReason: smokeResult.sendSkipReason || null,
+      sendError: smokeResult.sendError || null,
+      reason: smokeResult.decision?.reason || null,
+      guests: (smokeResult.recipients || []).map((r) => r.firstName).filter(Boolean),
+      detectorName: smokeResult.detectorName || null,
+    });
+    if (smokeResult.sendError && !smokeResult.simulate) {
+      console.error('[Handler] Ring smoke guest send failed:', smokeResult.sendError);
+      throw new Error(`Failed ring smoke guest notice: ${smokeResult.sendError}`);
+    }
+    console.log('\n⏱️  Total handler duration:', duration, 'ms (ring-smoke-notice)');
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        success: true,
+        requestId,
+        ringSmokeNotice: true,
+        sent: smokeResult.sent,
+        sentCount: smokeResult.sentCount || 0,
+        simulate: smokeResult.simulate,
+        sendDisabled: !smokeResult.sent,
+        decision: {
+          typeOfMessageReceived: smokeResult.typeOfMessageReceived,
+          proposedResponse: smokeResult.proposedResponse,
+          shouldReply: !!smokeResult.sent,
+          escalated: false,
+        },
+        smokeResult,
+      }),
+    };
+  }
+
   if (act === 'keypad_lockout_notice' || isKeypadLockoutNoticeTurn(event)) {
     console.log('[Handler] Keypad lockout guest notice — isolated path');
     const hospitableClient = new HospitableClient();
