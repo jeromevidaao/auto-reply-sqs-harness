@@ -25,13 +25,10 @@ export const PROPERTY_NAME = 'Pine Apt #2';
 export const SMOKE_GUEST_TEMPLATE = [
   'Hi {FirstName},',
   '',
-  'A quick heads-up: the {detectorName} {alarmKind} detector just went off in Pine Apt #2. Please check the apartment now.',
+  'The {detectorName} {alarmKind} detector just went off in Pine Apt #2. Please check now.',
   '',
-  'If there is a real fire or you smell gas / feel unwell: leave immediately, close the door behind you, and call 911. Do not go back inside until it is safe.',
+  'If it is a real fire: leave and call 911. If cooking or steam: open windows. Reply if you need help.',
   '',
-  'If this is cooking smoke or steam: open windows, turn on the fan, and the alarm should stop once the air clears. Reply here if you need help.',
-  '',
-  'Warm regards,',
   'Jerome',
   '',
 ].join('\n');

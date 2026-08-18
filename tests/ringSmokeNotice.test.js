@@ -92,8 +92,8 @@ describe('ring smoke occupancy routing', () => {
     assert.match(body, /Bedroom \(TT7A\) smoke detector/);
     assert.match(body, /Pine Apt #2/);
     assert.match(body, /call 911/);
-    assert.match(body, /cooking smoke or steam/);
-    assert.match(body, /Warm regards,\nJerome/);
+    assert.match(body, /cooking or steam/);
+    assert.match(body, /\nJerome\n/);
   });
 
   it('detects the isolated act and is not HE chat', () => {
