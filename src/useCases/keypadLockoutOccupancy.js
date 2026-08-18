@@ -58,6 +58,15 @@ export const LISTINGS_FOR_LOCK = {
   basement: [],
 };
 
+export const LOCK_KEYS = {
+  '1b': '1b',
+  apt3: 'apt3',
+  'apt 2 front': 'apt2front',
+  apt2back: 'apt2back',
+  backdoor: 'backdoor',
+  basement: 'basement',
+};
+
 export const GUEST_TEMPLATE = [
   'Hi {FirstName},',
   '',
@@ -109,6 +118,12 @@ export function lockPhraseFor(lockName) {
 
 export function listingsForLock(lockName) {
   return LISTINGS_FOR_LOCK[normalizeLockName(lockName)] || [];
+}
+
+export function lockKeyFor(lockName) {
+  const n = normalizeLockName(lockName);
+  if (LOCK_KEYS[n]) return LOCK_KEYS[n];
+  return n.replace(/\s+/g, '') || 'unknown';
 }
 
 export function isStayCurrent(checkIn, checkOut, today, hourNy) {
@@ -436,6 +451,7 @@ export function extractLockoutNoticeContext(event = null) {
   return {
     lockName: data.lockName || data.lock || '',
     lockLabel: data.lockLabel || data.lockName || '',
+    lockKey: data.lockKey || lockKeyFor(data.lockName || data.lock),
     listingId: data.listingId || '',
     eventAt: data.eventAt || '',
     lockoutKey: data.lockoutKey || data.id || '',
@@ -464,6 +480,7 @@ export function buildLockoutGuestNotify({
   const data = {
     type: FCM_TYPE_LOCKOUT_GUEST,
     lockName: String(lockName || ''),
+    lockKey: lockKeyFor(lockName),
     listingId: String(recipient?.listingId || ''),
     listingName: String(unit),
     guestName: String(name),
@@ -471,6 +488,7 @@ export function buildLockoutGuestNotify({
     reason: String(decision?.reason || sendSkipReason || ''),
     simulate: simulate ? 'true' : 'false',
     sent: sent ? 'true' : 'false',
+    color: '#DC2626',
   };
 
   if (sendError) {

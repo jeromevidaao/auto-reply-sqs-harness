@@ -385,6 +385,8 @@ describe('handleKeypadLockoutNotice', () => {
     });
     assert.match(n.title, /no guest message/);
     assert.match(n.body, /both occupied/);
+    assert.equal(n.data.lockKey, 'backdoor');
+    assert.equal(n.data.color, '#DC2626');
   });
 
   it('does not treat apt3 listing id as unused', () => {
