@@ -31,7 +31,7 @@
     "@aws-sdk/client-s3": "^3.1111.0",
     "@aws-sdk/client-ssm": "^3.1056.0",
     "@aws-sdk/lib-dynamodb": "^3.1056.0",
-    "axios": "^1.16.1",
+    "axios": "^1.19.0",
     "cheerio": "^1.2.0",
     "dotenv": "^16.4.5",
     "google-auth-library": "^9.15.1"
@@ -41,5 +41,10 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "overrides": {
+    "form-data": ">=4.0.6",
+    "uuid": "11.1.1",
+    "undici": ">=7.29.0"
   }
 }
