@@ -45,6 +45,8 @@
  *   OTHER_MESSAGE. Parse arrival/departing pairs, check Hospitable + HE
  *   for those nights, and reply open or not. Do not pre-approve a
  *   cancelled exchange. If open, tell them to send a new HE request.
+ *   If not open, say the HE calendar is up to date so they can check
+ *   alternative dates.
  *
  * Guest confirmed / finalized (Katie 2026-08-17 Apt #2, status 3):
  *   HE posts a type=1 / type_auto=2 system line
@@ -1101,7 +1103,8 @@ export function buildHomeExchangeReplacementDraft({
         `Hi ${name},\n\nI checked` +
         (askedRange ? ` ${askedRange}` : '') +
         ` and those dates are not open on our calendar.` +
-        (blocked ? ` Unavailable night(s): ${blocked}.` : ''),
+        (blocked ? ` Unavailable night(s): ${blocked}.` : '') +
+        ` Our Home Exchange calendar is up to date — you can check it for alternative dates.`,
       reason: 'homeexchange_replacement_calendar_not_open',
     };
   }

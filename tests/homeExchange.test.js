@@ -2575,6 +2575,8 @@ describe('HomeExchange cancelled stay + new dates (Mark & Lora)', () => {
     assert.match(result.proposedResponse, /October 12–15, 2026/);
     assert.match(result.proposedResponse, /not open/i);
     assert.match(result.proposedResponse, /October 13, 2026/);
+    assert.match(result.proposedResponse, /Home Exchange calendar is up to date/i);
+    assert.match(result.proposedResponse, /alternative dates/i);
     assert.equal(/also open/i.test(result.proposedResponse), false);
     assert.equal(/hold that one too/i.test(result.proposedResponse), false);
     assert.equal(/you.?re welcome/i.test(result.proposedResponse), false);
@@ -2690,5 +2692,7 @@ describe('HomeExchange cancelled stay + new dates (Mark & Lora)', () => {
     assert.equal(draft.reason, 'homeexchange_replacement_calendar_not_open');
     assert.match(draft.proposedResponse, /October 13, 2026/);
     assert.match(draft.proposedResponse, /October 14, 2026/);
+    assert.match(draft.proposedResponse, /Home Exchange calendar is up to date/i);
+    assert.match(draft.proposedResponse, /alternative dates/i);
   });
 });
