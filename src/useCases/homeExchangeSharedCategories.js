@@ -91,6 +91,18 @@ export function threadHasCancelledPreapproval(history = []) {
   );
 }
 
+/** Finalized stay later cancelled (Mark & Lora) — not the Katie pre-approval cancel. */
+export function threadHasCancelledExchange(history = []) {
+  return (history || []).some((m) => {
+    const t = String(m?.content || m?.body || m?.text || '');
+    return (
+      /cancell?ed the exchange/i.test(t) ||
+      /sorry to cancel this exchange/i.test(t) ||
+      /has cancell?ed the exchange/i.test(t)
+    );
+  });
+}
+
 export function guestResubmittedAfterHeCancel(text, history = []) {
   if (!threadHasCancelledPreapproval(history)) return false;
   const raw = normalizeHeGuestText(text);
@@ -215,12 +227,16 @@ export function shouldRunSharedHeCategories({
   heDraftSendable,
   preapproveOk,
   thisTurnWantsPreapprove,
+  askedDates = null,
+  replacementAfterCancel = false,
 } = {}) {
   if (isFirst) return false;
   if (preapproveOk) return false;
   if (heDraftSendable) return false;
   // Katie incident: fee-agree must never fall through to shared "You're welcome".
   if (thisTurnWantsPreapprove) return false;
+  // Mark & Lora: a date-availability ask must not fall through to OTHER_MESSAGE.
+  if (askedDates || replacementAfterCancel) return false;
   return true;
 }
 

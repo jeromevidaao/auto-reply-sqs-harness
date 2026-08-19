@@ -111,7 +111,11 @@ export function alreadySentEquivalent(messages, proposedResponse) {
     ) {
       return true;
     }
-    if (text.includes(preview) || proposed.includes(text.slice(0, 80))) return true;
+    if (text.length >= 24 && text.includes(preview)) return true;
+    const existingPrefix = text.slice(0, 80);
+    // Short host lines ("Ok") must not suppress a later calendar/fee reply
+    // just because the draft contains "okay".
+    if (existingPrefix.length >= 24 && proposed.includes(existingPrefix)) return true;
     // Only the first-message fee-after-stay ask is equivalent to another fee ask.
     // A later "fee is fine + extra dates" reply must still send.
     if (proposedIsFeeAsk && /cleaning fee/.test(text) && /after your stay/.test(text)) {

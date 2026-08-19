@@ -38,6 +38,14 @@
  *   4) If the extra night is free, pre-approve the new stay and block the
  *      full range on Hospitable again.
  *
+ * Cancelled stay + new dates (Mark & Lora 2026-08-19 Apt #3):
+ *   They cancelled a finalized stay, then asked if a new window is free
+ *   ("arrival October 12, departing October 15"). That is a replacement
+ *   date-check, not extra-night / not leftover USER blocks / not shared
+ *   OTHER_MESSAGE. Parse arrival/departing pairs, check Hospitable + HE
+ *   for those nights, and reply open or not. Do not pre-approve a
+ *   cancelled exchange. If open, tell them to send a new HE request.
+ *
  * Guest confirmed / finalized (Katie 2026-08-17 Apt #2, status 3):
  *   HE posts a type=1 / type_auto=2 system line
  *   ("{{firstname}} has finalized the exchange") and sets finalized_at.
@@ -79,6 +87,7 @@ import {
   guestAcceptedCleaningFeeText,
   guestAskedToAddNights,
   threadHasCancelledPreapproval,
+  threadHasCancelledExchange,
   guestResubmittedAfterHeCancel,
   guestFinalizedHeExchange,
 } from './homeExchangeSharedCategories.js';
@@ -352,6 +361,46 @@ export function extractAskedStayDates(text, { now = new Date(), originalCheckIn 
     );
   }
 
+  // Mark & Lora: "arrival October 12, departing October 15"
+  const arrivalDepart = raw.match(
+    new RegExp(
+      `(?:arrival|arriving|arrive|check[-\\s]?in)\\s+(${MONTH_NAME_ALT})\\s+(\\d{1,2})(?:st|nd|rd|th)?` +
+        `[\\s\\S]{0,48}?` +
+        `(?:departing|departure|depart|leaving|leave|check[-\\s]?out)\\s+(${MONTH_NAME_ALT})\\s+(\\d{1,2})(?:st|nd|rd|th)?` +
+        `(?:\\s*,?\\s*(\\d{4}))?`,
+      'i'
+    )
+  );
+  if (arrivalDepart) {
+    return buildAskedRange(
+      MONTH_NAME_TO_NUM[arrivalDepart[1].toLowerCase()],
+      Number(arrivalDepart[2]),
+      MONTH_NAME_TO_NUM[arrivalDepart[3].toLowerCase()],
+      Number(arrivalDepart[4]),
+      arrivalDepart[5] ? Number(arrivalDepart[5]) : null,
+      now
+    );
+  }
+
+  const commaDepart = raw.match(
+    new RegExp(
+      `\\b(${MONTH_NAME_ALT})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*,\\s*` +
+        `(?:departing|departure|leaving|check[-\\s]?out)\\s+(${MONTH_NAME_ALT})\\s+(\\d{1,2})(?:st|nd|rd|th)?` +
+        `(?:\\s*,?\\s*(\\d{4}))?`,
+      'i'
+    )
+  );
+  if (commaDepart) {
+    return buildAskedRange(
+      MONTH_NAME_TO_NUM[commaDepart[1].toLowerCase()],
+      Number(commaDepart[2]),
+      MONTH_NAME_TO_NUM[commaDepart[3].toLowerCase()],
+      Number(commaDepart[4]),
+      commaDepart[5] ? Number(commaDepart[5]) : null,
+      now
+    );
+  }
+
   const numeric = raw.match(
     /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s*(?:-|–|—|to|through|thru)\s*(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/
   );
@@ -439,6 +488,30 @@ export function isStayExtensionOf(previousCheckIn, previousCheckOut, nextCheckIn
   if (nextIn === prevIn && nextOut > prevOut) return true;
   if (nextOut === prevOut && nextIn < prevIn) return true;
   return false;
+}
+
+/** Cancelled stay + a new (non-extension) window — Mark & Lora reschedule. */
+export function isReplacementStayAfterCancel({
+  cancelledExchange,
+  askedDates,
+  previousCheckIn,
+  previousCheckOut,
+} = {}) {
+  if (!cancelledExchange || !askedDates?.checkIn || !askedDates?.checkOut) return false;
+  if (
+    isStayExtensionOf(
+      previousCheckIn,
+      previousCheckOut,
+      askedDates.checkIn,
+      askedDates.checkOut
+    )
+  ) {
+    return false;
+  }
+  return (
+    askedDates.checkIn !== dateOnly(previousCheckIn) ||
+    askedDates.checkOut !== dateOnly(previousCheckOut)
+  );
 }
 
 export function extractPriorPreapprovalStay(conversationHistory = []) {
@@ -983,6 +1056,69 @@ export function buildHeFeeThanksLine(cleaningFee, stayRange) {
   );
 }
 
+export function buildHomeExchangeReplacementDraft({
+  guestName,
+  askedDates,
+  calendar,
+  cleaningFee,
+} = {}) {
+  const name = (guestName || 'there').split(/\s+/)[0];
+  const askedRange = askedDates
+    ? formatStayRange(askedDates.checkIn, askedDates.checkOut)
+    : null;
+  const feeText = feeAmountText(cleaningFee);
+
+  if (!askedDates) {
+    return {
+      typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+      shouldReply: false,
+      proposedResponse: null,
+      reason: 'homeexchange_followup_no_dates',
+    };
+  }
+
+  if (!calendar?.checked) {
+    return {
+      typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+      shouldReply: true,
+      proposedResponse:
+        `Hi ${name},\n\nI'm checking` +
+        (askedRange ? ` ${askedRange}` : ' those dates') +
+        ` and will follow up shortly on whether that window is open.`,
+      reason: 'homeexchange_followup_calendar_not_checked',
+    };
+  }
+
+  if (!calendar.open) {
+    const blocked = (calendar.unavailable || [])
+      .map((night) => formatNightList([night]))
+      .filter(Boolean)
+      .join(', ');
+    return {
+      typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+      shouldReply: true,
+      proposedResponse:
+        `Hi ${name},\n\nI checked` +
+        (askedRange ? ` ${askedRange}` : '') +
+        ` and those dates are not open on our calendar.` +
+        (blocked ? ` Unavailable night(s): ${blocked}.` : ''),
+      reason: 'homeexchange_replacement_calendar_not_open',
+    };
+  }
+
+  return {
+    typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+    shouldReply: true,
+    proposedResponse:
+      `Hi ${name},\n\nI checked` +
+      (askedRange ? ` ${askedRange}` : '') +
+      `: those dates are open on our calendar. ` +
+      `Send a new request for those dates on HomeExchange and I'll pre-approve. ` +
+      `The cleaning fee after you leave is ${feeText}. Would you be okay paying that after this stay?`,
+    reason: 'homeexchange_replacement_calendar_open',
+  };
+}
+
 export function buildHomeExchangeFollowupDraft({
   guestName,
   checkIn,
@@ -994,7 +1130,16 @@ export function buildHomeExchangeFollowupDraft({
   feeAccepted,
   askedDates,
   shouldThankForFee,
+  replacementAfterCancel,
 } = {}) {
+  if (replacementAfterCancel) {
+    return buildHomeExchangeReplacementDraft({
+      guestName,
+      askedDates,
+      calendar,
+      cleaningFee,
+    });
+  }
   const name = (guestName || 'there').split(/\s+/)[0];
   const askedRange = askedDates ? formatStayRange(askedDates.checkIn, askedDates.checkOut) : formatStayRange(checkIn, checkOut);
   const originalRange = formatStayRange(originalCheckIn, originalCheckOut);
@@ -1104,6 +1249,7 @@ export function buildHomeExchangeDraft({
   feeAccepted,
   askedDates,
   shouldThankForFee,
+  replacementAfterCancel,
 } = {}) {
   const range = formatStayRange(checkIn, checkOut);
 
@@ -1119,6 +1265,7 @@ export function buildHomeExchangeDraft({
       feeAccepted,
       askedDates,
       shouldThankForFee,
+      replacementAfterCancel,
     });
   }
 
@@ -1390,6 +1537,7 @@ export async function handleHomeExchangeMessage({
     act: context.act,
   });
   const cancelledPreapproval = threadHasCancelledPreapproval(conversationHistory);
+  const cancelledExchange = threadHasCancelledExchange(conversationHistory);
   const resubmittedAfterCancel = guestResubmittedAfterHeCancel(message, conversationHistory);
   const priorPreapprovalStay = extractPriorPreapprovalStay(conversationHistory);
 
@@ -1435,8 +1583,14 @@ export async function handleHomeExchangeMessage({
     exchangeCheckOut
   );
   const isExtension = askedIsExtension || exchangeIsExtension;
+  const replacementAfterCancel = isReplacementStayAfterCancel({
+    cancelledExchange,
+    askedDates,
+    previousCheckIn: stayWindows.previousCheckIn,
+    previousCheckOut: stayWindows.previousCheckOut,
+  });
   const leftoverNights =
-    isExtension || cancelledPreapproval
+    !replacementAfterCancel && (isExtension || cancelledPreapproval)
       ? stayNights(stayWindows.previousCheckIn, stayWindows.previousCheckOut)
       : [];
 
@@ -1561,6 +1715,7 @@ export async function handleHomeExchangeMessage({
     feeAccepted,
     askedDates,
     shouldThankForFee: thankForFee,
+    replacementAfterCancel,
   });
   if (isFirst) {
     draft = await applyHeFirstAckWriter(draft, {
@@ -1579,7 +1734,14 @@ export async function handleHomeExchangeMessage({
     nights: stayNights(approveCheckIn, approveCheckOut),
   };
 
-  if ((isExtension || resubmittedAfterCancel) && extraNights.length > 0) {
+  if (replacementAfterCancel) {
+    draft = buildHomeExchangeReplacementDraft({
+      guestName,
+      askedDates,
+      calendar,
+      cleaningFee,
+    });
+  } else if ((isExtension || resubmittedAfterCancel) && extraNights.length > 0) {
     draft = buildHeExtraNightDraft({
       guestName,
       extraNights,
@@ -1603,6 +1765,7 @@ export async function handleHomeExchangeMessage({
     !alreadyApproved;
 
   if (
+    !replacementAfterCancel &&
     shouldAttemptPreapprove({
       isFirst,
       feeAccepted,
@@ -1690,6 +1853,8 @@ export async function handleHomeExchangeMessage({
       heDraftSendable: sendEnabled,
       preapproveOk: !!preapprove.ok,
       thisTurnWantsPreapprove,
+      askedDates,
+      replacementAfterCancel,
     })
   ) {
     try {
@@ -1801,6 +1966,8 @@ export async function handleHomeExchangeMessage({
     leftoverNights,
     isExtension,
     cancelledPreapproval,
+    cancelledExchange,
+    replacementAfterCancel,
     feeAccepted,
     alreadyThankedFee,
     heReservation,
