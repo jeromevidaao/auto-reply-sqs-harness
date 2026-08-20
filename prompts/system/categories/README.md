@@ -24,6 +24,7 @@ Each file corresponds to one or more `typeOfMessageReceived` categories used by 
 - `directions.md`
 - `door-code-issues.md`
 - `apt2-street-door-lockout.md` (Apt 2 only: bolted parking door + street exit lockout; SNS urgent SMS)
+- `not-checkin-day-access.md` (guest at the door / can't get in **before** check-in day — Michael 2026-08-20)
 - `early-checkin.md`
 - `ev-charger.md`
 - `event-request.md`

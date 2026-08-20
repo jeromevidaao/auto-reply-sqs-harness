@@ -18,6 +18,8 @@
   - `{{APT3_LOCKBOX_CODE}}` — Apt 3 lockbox dials
   - `{{APT2_STREET_LOCKBOX_CODE}}` — Apt 2 street top lockbox only
 
+**Before check-in day** (`NOT_CHECKIN_DAY_ACCESS` — Michael 2026-08-20 Apt 2): If the guest cannot get in / asks apt # / is at the door **and** today is before their check-in date, do **not** use this file. See `not-checkin-day-access.md`. Door PINs are not on the lock until 5:00 AM ET on check-in day.
+
 **General door code problem** (`DOOR_CODE_ISSUE` — pin not working, not a bolted-from-inside lockout):
 - Apologize.
 - Give backup code: **`{{BACKUP_DOOR_CODE}}`**

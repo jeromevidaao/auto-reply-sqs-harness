@@ -506,6 +506,15 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
+    const notCheckinDayAccessPolicy = this._applyNotCheckinDayAccessPolicy(parsed, context, guestMessage);
+    if (notCheckinDayAccessPolicy.applied) {
+      parsed.typeOfMessageReceived = notCheckinDayAccessPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = notCheckinDayAccessPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.notCheckinDayAccess = true;
+    }
+
     const apt2StreetLockoutPolicy = this._applyApt2StreetDoorLockoutPolicy(parsed, context, guestMessage);
     if (apt2StreetLockoutPolicy.applied) {
       parsed.typeOfMessageReceived = apt2StreetLockoutPolicy.typeOfMessageReceived || 'APT2_STREET_DOOR_LOCKOUT';
@@ -641,6 +650,21 @@ export class GuestMessagingAgent {
       );
     }
 
+    // After first-host welcome so a day-before "what's our apt # / can't get in"
+    // is not replaced by a full welcome that implies they can enter today.
+    const notCheckinDayAccessFinalPm = this._applyNotCheckinDayAccessPolicy(
+      parsed,
+      context,
+      guestMessage
+    );
+    if (notCheckinDayAccessFinalPm.applied) {
+      parsed.typeOfMessageReceived = notCheckinDayAccessFinalPm.typeOfMessageReceived;
+      parsed.proposedResponse = notCheckinDayAccessFinalPm.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.notCheckinDayAccess = true;
+    }
+
     // Cassidy / production-miss hardening: high conf + sendable draft → always auto-reply.
     // Also forces operational multi-intent asks (thanks + checkout/wifi/parking questions).
     const force = applyHighConfidenceForceReply({
@@ -668,6 +692,7 @@ export class GuestMessagingAgent {
       shouldReply,
       confidence,
       postCheckoutParkingInfo: context.postCheckoutParkingInfo || null,
+      notCheckinDayAccess: !!parsed.notCheckinDayAccess,
       rawModelOutput: raw,
       replyForceReason: force.reason || null,
     };
@@ -780,6 +805,7 @@ export class GuestMessagingAgent {
       'LAUNDRY_QUESTION',
       'DIRECTIONS',
       'WIFI',
+      'NOT_CHECKIN_DAY_ACCESS',
       'CHECKOUT',
       'THANKS',
       'TRANSPORT_QUESTION',
@@ -825,6 +851,7 @@ export class GuestMessagingAgent {
         'HVAC_REMOTE_PER_UNIT',
         'THERMOSTAT_HEATPUMP',
         'APT2_STREET_DOOR_LOCKOUT',
+        'NOT_CHECKIN_DAY_ACCESS',
       ].includes(c);
     });
   }
@@ -1032,6 +1059,107 @@ export class GuestMessagingAgent {
     if (!checkIn) return false;
     const today = this._todayDateStr(context);
     return checkIn <= today && (!checkOut || checkOut > today);
+  }
+
+  _daysUntilCheckIn(context = {}) {
+    const checkIn = (context.checkIn || context.check_in || '').toString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn)) return null;
+    const today = this._todayDateStr(context);
+    const todayD = new Date(`${today}T00:00:00`);
+    const ci = new Date(`${checkIn}T00:00:00`);
+    return Math.round((ci - todayD) / (1000 * 3600 * 24));
+  }
+
+  _isBeforeCheckInDay(context = {}) {
+    const days = this._daysUntilCheckIn(context);
+    return days != null && days >= 1;
+  }
+
+  _formatCheckInDateForReply(context = {}) {
+    const iso = (context.checkIn || context.check_in || '').toString().trim();
+    if (!iso) return '';
+    try {
+      const d = new Date(iso.slice(0, 10) + 'T12:00:00');
+      if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+      return d.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'America/New_York',
+      });
+    } catch {
+      return iso.slice(0, 10);
+    }
+  }
+
+  _pineUnitLabel(context = {}) {
+    const id = String(context.listingId || context.listing_id || '');
+    if (id === 'c899481f-2e5b-402d-80c4-3167fd824d96') return 'Apt 1B';
+    if (id === '114663c5-0709-4eff-a868-fa9ebd6ed42d') return 'Apt 2';
+    if (id === '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd') return 'Apt 3';
+    const name = String(context.propertyName || '');
+    if (/\b1B\b/i.test(name)) return 'Apt 1B';
+    if (/\bApt\s*2\b|#2|Sunny Downtown 2/i.test(name)) return 'Apt 2';
+    if (/\bApt\s*3\b|#3/i.test(name)) return 'Apt 3';
+    return '';
+  }
+
+  /**
+   * Michael 2026-08-20 Apt 2: guest at the building a day before check-in
+   * (apt #, door code, can't get in). Door PIN is not on Schlage until 5AM ET
+   * on check-in day.
+   */
+  _looksLikePreCheckinAccessAttempt(guestMessage = '') {
+    const lower = String(guestMessage || '').toLowerCase();
+    if (!lower.trim()) return false;
+    if (
+      /can(?:not|'t)\s+get\s+(?:in|into)|unable to get (?:in|into)|won'?t (?:let us |let me )?in|code (?:is )?(?:not working|doesn'?t work)|door (?:code|won'?t|will not|isn'?t)|locked out|keypad|won'?t unlock|does(?: not|n'?t) work/.test(
+        lower
+      )
+    ) {
+      return true;
+    }
+    if (
+      /we(?:'re| are) (?:here|outside|at the door|at the building|at the apartment|at the unit)|just arrived|trying to (?:get in|check in|enter|find)|at the (?:door|entrance|building)/.test(
+        lower
+      )
+    ) {
+      return true;
+    }
+    if (
+      /apt\s*#|apartment\s*#|which (?:apt|apartment|unit)|confirm what our apt|what(?:'s| is) (?:our |the )?(?:apt|apartment|unit)/.test(
+        lower
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  _notCheckinDayAccessDraft(context = {}) {
+    const greeting = getTimeBasedGreeting(resolveNowForGreeting(context)).greeting || 'Hi';
+    const name = this._guestDisplayFirstName(context);
+    const ciPretty = this._formatCheckInDateForReply(context) || 'your check-in date';
+    const unit = this._pineUnitLabel(context);
+    const unitBit = unit ? ` You're in ${unit} at 53 Pine Street starting then.` : '';
+    return (
+      `${greeting}, ${name}, today is not your check-in day — check-in is ${ciPretty} at 4pm. ` +
+      `The door code is not on the lock until the morning of your arrival, which is why you can't get in.` +
+      `${unitBit} See you then!`
+    );
+  }
+
+  _applyNotCheckinDayAccessPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._isBeforeCheckInDay(context)) return { applied: false };
+    if (!this._looksLikePreCheckinAccessAttempt(guestMessage)) return { applied: false };
+    return {
+      applied: true,
+      typeOfMessageReceived: 'NOT_CHECKIN_DAY_ACCESS',
+      proposedResponse: this._notCheckinDayAccessDraft(context),
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+    };
   }
 
   /**
@@ -2023,6 +2151,9 @@ export class GuestMessagingAgent {
    */
   _applyFirstHostNewBookingWelcomePolicy(parsed = {}, context = {}, guestMessage = '') {
     if (!this._isFirstHostOnConfirmedReservation(context)) {
+      return { applied: false };
+    }
+    if (this._isBeforeCheckInDay(context) && this._looksLikePreCheckinAccessAttempt(guestMessage)) {
       return { applied: false };
     }
     // Do not override post-welcome thanks / in-stay pure acks when host already welcomed
@@ -3020,6 +3151,9 @@ export class GuestMessagingAgent {
    * + prior-thread history used to re-fire this after checkout thanks — Henry review incident).
    */
   _applyApt2StreetDoorLockoutPolicy(parsed, context = {}, guestMessage = '') {
+    if (this._isBeforeCheckInDay(context)) {
+      return { applied: false };
+    }
     const detected = this._isApt2StreetDoorLockout(guestMessage, context);
 
     // Require live detection on this message (or short lockout follow-up). Category alone is not enough.
@@ -3207,6 +3341,13 @@ export class GuestMessagingAgent {
     }
     if (daysUntilCheckIn !== null) lines.push(`- Days until check-in: ${daysUntilCheckIn}`);
     lines.push(`- Stay timing: ${stayTiming} (current = check-in day or in-stay; future = upcoming)`);
+
+    if (this._isBeforeCheckInDay(context) && this._looksLikePreCheckinAccessAttempt(message)) {
+      const ciPretty = this._formatCheckInDateForReply(context) || 'the reservation check-in date';
+      lines.push(
+        `- CRITICAL NOT-CHECK-IN-DAY ACCESS (Michael incident 2026-08-20 Apt 2): Guest is asking apt # / door / cannot get in BEFORE check-in day. Classify as NOT_CHECKIN_DAY_ACCESS. proposedResponse MUST say "today is not your check-in day", that check-in is ${ciPretty} at 4pm, and "The door code is not on the lock until the morning of your arrival". MUST NOT give backup door codes, lockbox codes, or lockout recovery. MUST NOT imply they can enter today.`
+      );
+    }
 
     if (this._isTemporaryDepartureDuringStay(message, context)) {
       lines.push('- CRITICAL IN-STAY TEMPORARY DEPARTURE (Amie incident): Guest is currently IN their stay (check-in day or mid-stay, NOT checkout day). They said they "left the apartment/unit" temporarily (e.g. stepped out so a property manager could knock, deliver a blanket, or leave an item by the door). This is NOT checkout and they are returning tonight. Classify as THANK_YOU_MESSAGE. proposedResponse MUST be a brief warm "You\'re welcome, [Name]!" only. MUST NOT say "safe travels", "hope you enjoyed your stay", "have a great trip", or any end-of-stay farewell.');
@@ -4485,6 +4626,21 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = true;
     }
 
+    const notCheckinDayAccessFinal = this._applyNotCheckinDayAccessPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (notCheckinDayAccessFinal.applied) {
+      console.log('[Agent] → Not-check-in-day access policy applied (door code not on lock yet)');
+      finalResult.typeOfMessageReceived = notCheckinDayAccessFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = notCheckinDayAccessFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+      finalResult.notCheckinDayAccess = true;
+    }
+
     const apt2StreetLockoutPolicyFinal = this._applyApt2StreetDoorLockoutPolicy(
       finalResult,
       enrichedContext,
@@ -4754,6 +4910,21 @@ export class GuestMessagingAgent {
       }
     }
 
+    const notCheckinDayAccessLast = this._applyNotCheckinDayAccessPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (notCheckinDayAccessLast.applied) {
+      console.log('[Agent] → Not-check-in-day access policy applied (final)');
+      finalResult.typeOfMessageReceived = notCheckinDayAccessLast.typeOfMessageReceived;
+      finalResult.proposedResponse = notCheckinDayAccessLast.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+      finalResult.notCheckinDayAccess = true;
+    }
+
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);
 
     // === Urgent Access Escalation (SMS via SNS) — post-final policies ===
@@ -4771,8 +4942,9 @@ export class GuestMessagingAgent {
       ? finalResult.typeOfMessageReceived
       : [finalResult.typeOfMessageReceived];
     const isAccessIssue =
-      finalCategories.some((c) => accessIssueCategories.includes(c)) ||
-      this._isApt2StreetDoorLockout(guestMessage, enrichedContext);
+      !finalResult.notCheckinDayAccess &&
+      (finalCategories.some((c) => accessIssueCategories.includes(c)) ||
+        this._isApt2StreetDoorLockout(guestMessage, enrichedContext));
 
     if (isAccessIssue) {
       console.log('[Agent] → Urgent access issue detected — sending SMS alert via SNS');
