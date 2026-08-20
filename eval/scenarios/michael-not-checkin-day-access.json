@@ -1,6 +1,6 @@
 {
   "id": "michael-not-checkin-day-access",
-  "description": "Michael (Apt 2) is at the building the evening before check-in, cannot get in, and asks for the apt number. Production auto named Apt 2 as if he could enter today (Jeffrey still in the unit). Must tell him today is not check-in day, check-in is August 21 at 4pm, and the door code is not on the lock yet. Do not send lockout/backup codes. Do not call live Hospitable.",
+  "description": "Michael (Apt 2) is at the building the evening before check-in, cannot get in, and asks for the apt number. Production auto named Apt 2 as if he could enter today (Jeffrey still in the unit). Must tell him today is not check-in day, check-in is tomorrow at 4pm, and the door code is not on the lock yet. Do not send lockout/backup codes. Do not call live Hospitable.",
   "guestMessage": "The door code is not working, we can't get in. Can you please confirm what our apt # is?",
   "guestName": "Michael",
   "checkIn": "2026-08-21T16:00:00-04:00",
@@ -13,7 +13,7 @@
     "nowForGreeting": "2026-08-20T18:04:00-04:00",
     "reservationId": "680feb40-0b25-49a6-a68d-45d5c6a52f18",
     "conversationHistory": [],
-    "suggestedResponseSnippet": "Good afternoon, Michael, today is not your check-in day — check-in is August 21, 2026 at 4pm. The door code is not on the lock until the morning of your arrival, which is why you can't get in. You're in Apt 2 at 53 Pine Street starting then. See you then!"
+    "suggestedResponseSnippet": "Good afternoon, Michael, today is not your check-in day — check-in is tomorrow at 4pm. The door code is not on the lock until the morning of your arrival, which is why you can't get in. You're in Apt 2 at 53 Pine Street starting then. See you then!"
   },
   "rubric": {
     "expectedCategory": "NOT_CHECKIN_DAY_ACCESS",
@@ -26,11 +26,12 @@
       "backup",
       "lock box",
       "lockbox",
-      "have a great stay"
+      "have a great stay",
+      "August 21, 2026"
     ],
     "requiredPhrases": [
       "not your check-in day",
-      "August 21, 2026",
+      "tomorrow",
       "4pm",
       "door code is not on the lock"
     ]

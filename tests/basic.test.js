@@ -2882,7 +2882,8 @@ describe('Not-check-in-day access (Michael, no LLM)', () => {
     assert.equal(applied.typeOfMessageReceived, 'NOT_CHECKIN_DAY_ACCESS');
     assert.equal(applied.shouldReply, true);
     assert.match(applied.proposedResponse, /not your check-in day/i);
-    assert.match(applied.proposedResponse, /August 21, 2026/);
+    assert.match(applied.proposedResponse, /tomorrow/i);
+    assert.doesNotMatch(applied.proposedResponse, /August 21/);
     assert.match(applied.proposedResponse, /4pm/i);
     assert.match(applied.proposedResponse, /door code is not on the lock/i);
     assert.match(applied.proposedResponse, /Apt 2/);
@@ -2904,6 +2905,22 @@ describe('Not-check-in-day access (Michael, no LLM)', () => {
       cantGetIn
     );
     assert.equal(applied.applied, false);
+  });
+
+  it('says on Friday when check-in is several days out', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyNotCheckinDayAccessPolicy(
+      {},
+      { ...michaelCtx, asOfDate: '2026-08-17' },
+      cantGetIn
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /on Friday/i);
+    assert.doesNotMatch(applied.proposedResponse, /tomorrow/i);
+    assert.doesNotMatch(applied.proposedResponse, /August 21/);
   });
 });
 
@@ -3246,7 +3263,8 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
     assert.equal(result.typeOfMessageReceived, 'NOT_CHECKIN_DAY_ACCESS');
     assert.ok(result.proposedResponse && result.proposedResponse !== 'none');
     assert.match(result.proposedResponse, /not your check-in day/i);
-    assert.match(result.proposedResponse, /August 21, 2026/);
+    assert.match(result.proposedResponse, /tomorrow/i);
+    assert.doesNotMatch(result.proposedResponse, /August 21/);
     assert.match(result.proposedResponse, /4pm/i);
     assert.match(result.proposedResponse, /door code is not on the lock/i);
     assert.doesNotMatch(result.proposedResponse, /backup/i);

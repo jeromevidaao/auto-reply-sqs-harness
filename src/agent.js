@@ -1092,6 +1092,28 @@ export class GuestMessagingAgent {
     }
   }
 
+  /** "tomorrow" / "on Monday" — not "August 21, 2026". */
+  _friendlyCheckInWhen(context = {}) {
+    const days = this._daysUntilCheckIn(context);
+    const iso = (context.checkIn || context.check_in || '').toString().trim();
+    let weekday = '';
+    try {
+      const d = new Date(iso.slice(0, 10) + 'T12:00:00');
+      if (!Number.isNaN(d.getTime())) {
+        weekday = d.toLocaleDateString('en-US', {
+          weekday: 'long',
+          timeZone: 'America/New_York',
+        });
+      }
+    } catch {
+      // ignore
+    }
+    if (days === 1) return 'tomorrow';
+    if (days != null && days >= 2 && weekday) return `on ${weekday}`;
+    if (weekday) return `on ${weekday}`;
+    return this._formatCheckInDateForReply(context) || 'your check-in date';
+  }
+
   _pineUnitLabel(context = {}) {
     const id = String(context.listingId || context.listing_id || '');
     if (id === 'c899481f-2e5b-402d-80c4-3167fd824d96') return 'Apt 1B';
@@ -1139,11 +1161,11 @@ export class GuestMessagingAgent {
   _notCheckinDayAccessDraft(context = {}) {
     const greeting = getTimeBasedGreeting(resolveNowForGreeting(context)).greeting || 'Hi';
     const name = this._guestDisplayFirstName(context);
-    const ciPretty = this._formatCheckInDateForReply(context) || 'your check-in date';
+    const when = this._friendlyCheckInWhen(context);
     const unit = this._pineUnitLabel(context);
     const unitBit = unit ? ` You're in ${unit} at 53 Pine Street starting then.` : '';
     return (
-      `${greeting}, ${name}, today is not your check-in day — check-in is ${ciPretty} at 4pm. ` +
+      `${greeting}, ${name}, today is not your check-in day — check-in is ${when} at 4pm. ` +
       `The door code is not on the lock until the morning of your arrival, which is why you can't get in.` +
       `${unitBit} See you then!`
     );
@@ -3343,9 +3365,9 @@ export class GuestMessagingAgent {
     lines.push(`- Stay timing: ${stayTiming} (current = check-in day or in-stay; future = upcoming)`);
 
     if (this._isBeforeCheckInDay(context) && this._looksLikePreCheckinAccessAttempt(message)) {
-      const ciPretty = this._formatCheckInDateForReply(context) || 'the reservation check-in date';
+      const when = this._friendlyCheckInWhen(context);
       lines.push(
-        `- CRITICAL NOT-CHECK-IN-DAY ACCESS (Michael incident 2026-08-20 Apt 2): Guest is asking apt # / door / cannot get in BEFORE check-in day. Classify as NOT_CHECKIN_DAY_ACCESS. proposedResponse MUST say "today is not your check-in day", that check-in is ${ciPretty} at 4pm, and "The door code is not on the lock until the morning of your arrival". MUST NOT give backup door codes, lockbox codes, or lockout recovery. MUST NOT imply they can enter today.`
+        `- CRITICAL NOT-CHECK-IN-DAY ACCESS (Michael incident 2026-08-20 Apt 2): Guest is asking apt # / door / cannot get in BEFORE check-in day. Classify as NOT_CHECKIN_DAY_ACCESS. proposedResponse MUST say "today is not your check-in day", that check-in is ${when} at 4pm (use "tomorrow" or "on Monday" — never a calendar date like August 21, 2026), and "The door code is not on the lock until the morning of your arrival". MUST NOT give backup door codes, lockbox codes, or lockout recovery. MUST NOT imply they can enter today.`
       );
     }
 

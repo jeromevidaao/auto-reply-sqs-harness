@@ -7,7 +7,7 @@
 **Rule**: If today (America/New_York) is **before** the reservation check-in date **and** the guest is asking about access (can't get in, door code, apt #, at the door / arrived):
 
 - Tell them **today is not your check-in day**.
-- State the check-in **date** and **4pm**.
+- State check-in with a **human day**: **tomorrow** if it is the next calendar day, otherwise **on Monday** (weekday of check-in). Then **4pm**. Never "August 21, 2026".
 - Say the **door code is not on the lock until the morning of your arrival**.
 - You may name the unit for when they return. Do **not** give backup door codes, lockbox codes, or lockout recovery.
 - Do **not** treat this as `DOOR_CODE_ISSUE` or `APT2_STREET_DOOR_LOCKOUT`.
