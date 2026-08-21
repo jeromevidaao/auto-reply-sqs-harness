@@ -3037,6 +3037,64 @@ describe('In-stay crib location (Michael Apt 2, no LLM)', () => {
   });
 });
 
+describe('In-stay see-you-soon strip (Michael, no LLM)', () => {
+  const michaelInUnit = {
+    guestName: 'Michael',
+    listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+    propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+    checkIn: '2026-08-21T16:00:00-04:00',
+    checkOut: '2026-08-24T10:00:00-04:00',
+    asOfDate: '2026-08-21',
+    guestArrived: true,
+    guestArrivedAt: '2026-08-21T20:12:00.000Z',
+  };
+
+  it('strips see you soon when the guest is already in the unit', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    assert.equal(agent._alreadyInUnit(michaelInUnit, 'Thanks'), true);
+    const applied = agent._applyInStaySeeYouSoonPolicy(
+      {
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: "You're welcome, Michael! See you soon.",
+      },
+      michaelInUnit,
+      'Thanks'
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /you're welcome, michael/i);
+    assert.doesNotMatch(applied.proposedResponse, /see you soon/i);
+  });
+
+  it('does not strip Taylor arriving-in-an-hour see you', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const taylor = {
+      guestName: 'Taylor',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      checkIn: '2026-06-04',
+      checkOut: '2026-06-06',
+      asOfDate: '2026-06-04',
+      guestArrived: false,
+    };
+    const msg = 'Ahh that’s perfect!! We will be arriving in about an hour! Thank you';
+    assert.equal(agent._alreadyInUnit(taylor, msg), false);
+    const applied = agent._applyInStaySeeYouSoonPolicy(
+      {
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: "You're welcome, Taylor! Perfect — we'll see you in about an hour.",
+      },
+      taylor,
+      msg
+    );
+    assert.equal(applied.applied, false);
+  });
+});
+
 describe('Post-stay access (day after checkout, no LLM)', () => {
   const alexCtx = {
     guestName: 'Alex',
@@ -3593,5 +3651,47 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
     assert.doesNotMatch(result.proposedResponse, /upon request/i);
     assert.equal(result.guestArrived, true);
     console.log('[michael-in-stay-crib] proposedResponse:\n', result.proposedResponse);
+  });
+
+  it('Michael in-stay thanks: no see you soon (mock Hospitable, live Grok, PIN arrived)', async () => {
+    const mockHospitable = {
+      async hasGuestsOnDate() { return true; },
+      async getConversationMessages() { return []; },
+      async getReservationMessages() { return []; },
+      async getInquiryMessages() { return []; },
+      async getThreadMessages() { return []; },
+    };
+    const agent = new GuestMessagingAgent({
+      llm: 'auto',
+      projectRoot: projectRootForTests,
+      hospitableClient: mockHospitable,
+      requireLiveConversationHistory: false,
+      guestCheckInsLookup: async () => ({
+        guestArrived: true,
+        checkedInAt: '2026-08-21T20:12:00.000Z',
+        checkInKey: '20150380_2026-08-21',
+      }),
+    });
+    const result = await agent.processMessage('Thanks', {
+      guestName: 'Michael',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+      checkIn: '2026-08-21T16:00:00-04:00',
+      checkOut: '2026-08-24T10:00:00-04:00',
+      asOfDate: '2026-08-21',
+      asOfInstant: '2026-08-21T14:40:00-04:00',
+      nowForGreeting: new Date('2026-08-21T14:40:00-04:00'),
+      reservationId: 'test-michael-thanks-not-sent',
+      conversation_id: 'test-michael-thanks-not-sent',
+      conversationHistory: [
+        { sender_type: 'guest', body: 'All set' },
+        { sender_type: 'guest', body: 'Richard popped in and helped' },
+      ],
+    });
+    assert.equal(result.shouldReply, true);
+    assert.match(result.proposedResponse, /you're welcome/i);
+    assert.doesNotMatch(result.proposedResponse, /see you soon/i);
+    assert.doesNotMatch(result.proposedResponse, /see you then/i);
+    console.log('[michael-in-stay-thanks] proposedResponse:\n', result.proposedResponse);
   });
 });

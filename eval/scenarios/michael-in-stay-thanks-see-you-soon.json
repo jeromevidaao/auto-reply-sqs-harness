@@ -1,0 +1,58 @@
+{
+  "id": "michael-in-stay-thanks-see-you-soon",
+  "description": "Michael (Apt 2) is already in the unit (PIN used). After sofa-bed help he says Thanks. Production auto replied You're welcome, Michael! See you soon. Must NOT say see you soon — he is already checked in. Short You're welcome only.",
+  "guestMessage": "Thanks",
+  "guestName": "Michael",
+  "checkIn": "2026-08-21T16:00:00-04:00",
+  "checkOut": "2026-08-24T10:00:00-04:00",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "Sunny Downtown 2 Bed Apt, Parking",
+  "context": {
+    "asOfDate": "2026-08-21",
+    "asOfInstant": "2026-08-21T14:40:00-04:00",
+    "nowForGreeting": "2026-08-21T14:40:00-04:00",
+    "guestArrived": true,
+    "guestArrivedAt": "2026-08-21T20:12:00.000Z",
+    "reservationId": "680feb40-0b25-49a6-a68d-45d5c6a52f18",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "And do you have any sheet for the pullout couch?"
+      },
+      {
+        "sender_type": "host",
+        "body": "Michael, yes — lift up the long part of the sofa to reveal the sheets and extra towels stored right underneath. If you can't find them, just let me know."
+      },
+      {
+        "sender_type": "host",
+        "body": "Did you check in the sofabed?"
+      },
+      {
+        "sender_type": "guest",
+        "body": "All set"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Richard popped in and helped"
+      }
+    ],
+    "suggestedResponseSnippet": "You're welcome, Michael!"
+  },
+  "rubric": {
+    "expectedCategory": ["THANK_YOU_MESSAGE", "GENERAL_ACKNOWLEDGMENT", "FYI_STATEMENT"],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.9,
+    "productionMiss": true,
+    "forbiddenPhrases": [
+      "see you soon",
+      "see you then",
+      "looking forward to hosting you",
+      "4pm"
+    ],
+    "requiredPhrases": [
+      "You're welcome"
+    ]
+  },
+  "notes": "Michael 2026-08-21 2:40pm ET Apt 2. Same reservation as crib/not-check-in-day. Deterministic _applyInStaySeeYouSoonPolicy. Taylor arriving-in-an-hour may still say see you."
+}

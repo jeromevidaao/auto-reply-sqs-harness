@@ -52,6 +52,7 @@ import {
   shouldProcessAcceptWelcome,
 } from '../src/utils/reservationAccept.js';
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
+import { runPreSendThreadRefresh } from '../src/utils/preSendThreadRefresh.js';
 import { S3Client } from '@aws-sdk/client-s3';
 import { isHomeExchangePayload, handleHomeExchangeMessage, extractHomeExchangeMessage } from '../src/useCases/homeExchange.js';
 import {
@@ -1200,55 +1201,63 @@ export const handler = async (event, context) => {
       const targetType = (reservationId && !msgContext.isInquiry) ? 'reservation' : 'conversation';
 
       if (targetId) {
-        const sentPreview = result.proposedResponse.substring(0, 80);
-
-        // === Pre-send guard: prevent sending duplicate short replies for non-thank-you categories ===
-        // THANK_YOU_MESSAGE ("You are welcome") may repeat — guests often thank us more than once.
+        // === Pre-send: fetch live thread, reprocess if guest sent more, skip duplicate you're-welcome ===
+        // Michael 2026-08-21: drafted "You're welcome, Michael! See you soon." on "All set";
+        // while Grok ran the guest sent "Richard popped in and helped" + "Thanks"; a second
+        // Lambda then sent another "You're welcome!". Fetch immediately before POST.
         try {
-          const skipDuplicateGuard = result.typeOfMessageReceived === 'THANK_YOU_MESSAGE';
-          let recentForGuard = null;
-          if (reservationId && !msgContext.isInquiry) {
-            recentForGuard = await hospitableClient.getThreadMessages({ reservationId }, 4);
-          } else {
-            const verifyConvForGuard = convId || (reservationId ? await hospitableClient.getConversationIdForReservation(reservationId).catch(() => null) : null);
-            if (verifyConvForGuard) {
-              recentForGuard = await hospitableClient.getThreadMessages({ conversationId: verifyConvForGuard }, 4);
-            }
-          }
-
-          if (recentForGuard && !skipDuplicateGuard) {
-            const veryRecentHostReplies = recentForGuard
-              .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
-              .slice(0, 3)
-              .map(m => (m.body || '').trim().toLowerCase());
-
-            const proposedLower = result.proposedResponse.trim().toLowerCase();
-            const isBareWelcomeAck = (text) =>
-              text.length < 60 &&
-              /you're welcome|you are welcome/i.test(text) &&
-              !/heads up|sofa bed|note that|lovely stay|for the team/i.test(text);
-            const isDuplicateShortReply = veryRecentHostReplies.some(r =>
-              r === proposedLower ||
-              (isBareWelcomeAck(proposedLower) && isBareWelcomeAck(r)) ||
-              (proposedLower.length < 40 && r === proposedLower)
+          const preSend = await runPreSendThreadRefresh({
+            hospitableClient,
+            reservationId: reservationId && !msgContext.isInquiry ? reservationId : null,
+            conversationId: convId,
+            isInquiry: !!msgContext.isInquiry,
+            originalGuestMessage: guestMessage,
+            originalResult: result,
+            context: msgContext,
+            alreadyReprocessed: !!msgContext._preSendReprocessed,
+            reprocess: async (latestMessage, ctx) => agent.handleMessage(latestMessage, ctx),
+          });
+          if (preSend.reprocessed) {
+            result = preSend.result;
+            console.log(
+              `[Handler] Pre-send reprocess: category=${result.typeOfMessageReceived} shouldReply=${result.shouldReply}`
             );
-            const alreadyDelivered =
-              hostAlreadySentEquivalent(recentForGuard, result.proposedResponse) ||
-              looksLikeExistingWelcome(recentForGuard, result.proposedResponse);
-
-            if (isDuplicateShortReply || alreadyDelivered) {
-              console.log(`[Handler] ⛔ PRE-SEND GUARD: Skipping send — reply already on the thread (duplicate or prior timeout that actually landed).`);
-              console.log('   Recent host replies:', veryRecentHostReplies);
-              return {
-                statusCode: 200,
-                body: JSON.stringify({ success: true, skipped: true, reason: 'Pre-send duplicate guard' })
-              };
-            }
+          }
+          if (preSend.skipSend) {
+            console.log(`[Handler] ⛔ PRE-SEND GUARD: Skipping send — ${preSend.reason}`);
+            return {
+              statusCode: 200,
+              body: JSON.stringify({
+                success: true,
+                skipped: true,
+                reason: `Pre-send guard: ${preSend.reason}`,
+                reprocessed: !!preSend.reprocessed,
+              }),
+            };
+          }
+          if (
+            preSend.reprocessed &&
+            (!result.shouldReply ||
+              !result.proposedResponse ||
+              result.proposedResponse === 'none' ||
+              result.escalated)
+          ) {
+            console.log('[Handler] Pre-send reprocess decided not to send.');
+            return {
+              statusCode: 200,
+              body: JSON.stringify({
+                success: true,
+                skipped: true,
+                reason: 'Pre-send reprocess withheld reply',
+                reprocessed: true,
+              }),
+            };
           }
         } catch (guardErr) {
-          console.warn('[Handler] Pre-send duplicate guard non-fatal error (proceeding with send):', guardErr.message);
+          console.warn('[Handler] Pre-send thread refresh non-fatal (proceeding with send):', guardErr.message);
         }
 
+        const sentPreview = result.proposedResponse.substring(0, 80);
         console.log(`📤 SENDING REPLY → ${targetType}:`, targetId, '| preview:', sentPreview);
 
         try {

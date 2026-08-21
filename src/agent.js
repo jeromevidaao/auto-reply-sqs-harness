@@ -665,6 +665,14 @@ export class GuestMessagingAgent {
       );
     }
 
+    const inStaySeeYouSoonPolicy = this._applyInStaySeeYouSoonPolicy(parsed, context, guestMessage);
+    if (inStaySeeYouSoonPolicy.applied) {
+      parsed.typeOfMessageReceived = inStaySeeYouSoonPolicy.typeOfMessageReceived || parsed.typeOfMessageReceived;
+      parsed.proposedResponse = inStaySeeYouSoonPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
     // After first-host welcome so a day-before / day-after "can't get in"
     // is not replaced by a welcome or lockout script.
     const stayWindowAccessFinalPm = this._applyStayWindowAccessPolicy(
@@ -1627,6 +1635,99 @@ export class GuestMessagingAgent {
       .trim();
   }
 
+  /**
+   * Guest is physically in the unit (PIN unlock, mid-stay, or they said they entered).
+   * Distinct from check-in-day Taylor "arriving in about an hour" — those are not in yet.
+   */
+  _alreadyInUnit(context = {}, guestMessage = '') {
+    if (this._guestPhysicallyArrived(context)) return true;
+    const checkIn = (context.checkIn || '').slice(0, 10);
+    const today = this._todayDateStr(context);
+    if (checkIn && today && checkIn < today && this._isCurrentStay(context)) return true;
+    const lower = String(guestMessage || '').toLowerCase();
+    if (/\barriv(?:e|ing|al)\b/.test(lower) && /\b(?:hour|minute|soon|on (?:our|my) way)\b/.test(lower)) {
+      return false;
+    }
+    return /\b(just entered|entered the (?:unit|apartment)|we(?:'re| are) (?:in|inside)|already (?:here|in)|checked in|in the (?:unit|apartment)|all set|found it|richard popped in)\b/i.test(
+      lower
+    );
+  }
+
+  _hasFutureArrivalFarewell(text = '') {
+    return /see you soon|see you then|we'll see you|we will see you|looking forward to hosting you|looking forward to seeing you|can'?t wait to host/i.test(
+      String(text || '')
+    );
+  }
+
+  _stripFutureArrivalFarewell(text = '') {
+    return String(text || '')
+      .replace(/\s*[-—,]?\s*(?:we(?:'ll| will) )?see you soon[!.]*/gi, '')
+      .replace(/\s*[-—,]?\s*(?:we(?:'ll| will) )?see you then[!.]*/gi, '')
+      .replace(/\s*[-—,]?\s*looking forward to hosting you[^!.]*[!.]*/gi, '')
+      .replace(/\s*[-—,]?\s*looking forward to seeing you[^!.]*[!.]*/gi, '')
+      .replace(/\s*[-—,]?\s*can'?t wait to host[^!.]*[!.]*/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s+([!,?.])/g, '$1')
+      .trim();
+  }
+
+  /**
+   * Short in-stay ack ("Thanks" / "All set") — not a question.
+   */
+  _isInStayPureAck(guestMessage = '', context = {}) {
+    if (!this._alreadyInUnit(context, guestMessage)) return false;
+    const lower = String(guestMessage || '').trim().toLowerCase();
+    if (!lower || /\?/.test(lower)) return false;
+    if (this._looksLikeCribAmenityAsk(lower)) return false;
+    if (typeof this._isLaundryFacilitiesQuestion === 'function' && this._isLaundryFacilitiesQuestion(lower)) {
+      return false;
+    }
+    if (/^(?:thanks|thank you|thx|all set|got it|perfect)(?:[!.,\s]+(?:thanks|thank you|thx))?[\s!.]*$/i.test(lower)) {
+      return true;
+    }
+    return /thank(?:s| you)/i.test(lower) && lower.length < 60;
+  }
+
+  /**
+   * Michael 2026-08-21: "You're welcome, Michael! See you soon." after he was
+   * already in Apt 2. Future-arrival farewell is only for guests not yet here.
+   * Also rewrite a mistaken first-welcome draft on a short in-stay thanks.
+   */
+  _applyInStaySeeYouSoonPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._alreadyInUnit(context, guestMessage)) return { applied: false };
+    const draft = (parsed.proposedResponse || '').trim();
+    const pureAck = this._isInStayPureAck(guestMessage, context);
+    const hasFarewell = this._hasFutureArrivalFarewell(draft);
+    const looksLikeWelcome = /4\s*pm|self-check-in|check-in starts|looking forward to hosting/i.test(draft);
+    if (!pureAck && !hasFarewell && !looksLikeWelcome) return { applied: false };
+
+    const name = this._guestDisplayFirstName(context);
+    const fallback = name && name !== 'there' ? `You're welcome, ${name}!` : "You're welcome!";
+
+    if (pureAck || looksLikeWelcome) {
+      return {
+        applied: true,
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: fallback,
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
+    let proposedResponse = this._stripFutureArrivalFarewell(draft);
+    if (!proposedResponse || proposedResponse === 'none') {
+      proposedResponse = fallback;
+    } else if (!/[!.]$/.test(proposedResponse)) {
+      proposedResponse += '!';
+    }
+    return {
+      applied: true,
+      typeOfMessageReceived: parsed.typeOfMessageReceived || 'THANK_YOU_MESSAGE',
+      proposedResponse,
+      shouldReply: true,
+    };
+  }
+
   _applyInStayDepartureThankYouPolicy(parsed, context = {}, guestMessage = '') {
     if (!this._isTemporaryDepartureDuringStay(guestMessage, context)) {
       return { applied: false };
@@ -2312,6 +2413,10 @@ export class GuestMessagingAgent {
    */
   _applyFirstHostNewBookingWelcomePolicy(parsed = {}, context = {}, guestMessage = '') {
     if (!this._isFirstHostOnConfirmedReservation(context)) {
+      return { applied: false };
+    }
+    // Already in the unit (PIN / mid-stay) — not a first welcome (Michael in-stay thanks).
+    if (this._alreadyInUnit(context, guestMessage)) {
       return { applied: false };
     }
     if (
@@ -3605,6 +3710,12 @@ export class GuestMessagingAgent {
         : 'It should already be in the unit.';
       lines.push(
         `- CRITICAL IN-STAY CRIB LOCATION (Michael 2026-08-21 Apt 2): Guest is CURRENTLY in the unit (check-in day / mid-stay, or they said they just entered) and is asking WHERE the crib / Pack and Play is — not a future guest asking whether we have one. Classify as PACK_AND_PLAY_BRAND. proposedResponse MUST tell them the storage location: "${loc}" Then MUST add "Let us know if you cannot find it." MUST NOT answer with only the availability line ("the Graco Pack and Play is already set up and ready in the unit") with no location.`
+      );
+    }
+
+    if (this._alreadyInUnit(context, message)) {
+      lines.push(
+        '- CRITICAL IN-STAY (already checked in): Guest is physically IN the unit (Schlage PIN used, mid-stay, or they said they entered / all set / found it). proposedResponse MUST NOT say "see you soon", "see you then", or "looking forward to hosting you" — they are already here (Michael 2026-08-21 thanks after sofa/crib help). Short "You\'re welcome, [Name]!" is enough. "See you soon" is only for guests who have not arrived yet (Taylor arriving in an hour).'
       );
     }
 
@@ -4997,6 +5108,18 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = inStayDeparturePolicyFinal.shouldReply;
       finalResult.confidence = inStayDeparturePolicyFinal.confidence;
       finalResult.escalated = inStayDeparturePolicyFinal.escalated;
+    }
+
+    const inStaySeeYouSoonFinal = this._applyInStaySeeYouSoonPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (inStaySeeYouSoonFinal.applied) {
+      console.log('[Agent] → In-stay farewell strip (no see-you-soon — guest already checked in)');
+      finalResult.typeOfMessageReceived = inStaySeeYouSoonFinal.typeOfMessageReceived || finalResult.typeOfMessageReceived;
+      finalResult.proposedResponse = inStaySeeYouSoonFinal.proposedResponse;
+      finalResult.shouldReply = true;
     }
 
     const cancellationCategoryFinal = this._applyCancellationCategoryPolicy(finalResult, guestMessage);
