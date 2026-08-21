@@ -24,3 +24,4 @@
 **Why this golden exists**:
 - Locks the "all units have one pre-placed" fact (no misleading "upon request / prepare" language).
 - Locks the smart first-host-message greeting behavior for non-welcome categories (the old system did this well via checkRecentGreetings + dynamic instructions; harness now re-uses the pattern via ConversationContextTool + traces + injected instructions).
+- This is the **future-guest availability** case. If the guest is already in the unit asking *where* the crib is, see `michael-in-stay-crib-location` instead (Apt 2: closet of the smaller bedroom).

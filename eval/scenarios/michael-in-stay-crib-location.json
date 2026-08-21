@@ -1,0 +1,52 @@
+{
+  "id": "michael-in-stay-crib-location",
+  "description": "Michael (Apt 2) has just entered the unit on check-in day and asks where the crib is. Production auto used the future-guest availability line (Graco Pack and Play already set up and ready). Current guests asking where are looking for it — Apt 2 closet of the smaller bedroom + let us know if you cannot find it.",
+  "guestMessage": "Just entered the unit. Can you please remind me where the crib is located?",
+  "guestName": "Michael",
+  "checkIn": "2026-08-21T16:00:00-04:00",
+  "checkOut": "2026-08-24T10:00:00-04:00",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "Sunny Downtown 2 Bed Apt, Parking",
+  "context": {
+    "asOfDate": "2026-08-21",
+    "asOfInstant": "2026-08-21T16:30:00-04:00",
+    "nowForGreeting": "2026-08-21T16:30:00-04:00",
+    "guestArrived": true,
+    "guestArrivedAt": "2026-08-21T20:12:00.000Z",
+    "guestArrivedLockName": "Apt 2 parking-side",
+    "reservationId": "680feb40-0b25-49a6-a68d-45d5c6a52f18",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hello! Can you please confirm what our apt # is?"
+      },
+      {
+        "sender_type": "host",
+        "body": "Good afternoon, Michael, today is not your check-in day — check-in is tomorrow at 4pm. The door code is not on the lock until the morning of your arrival, which is why you can't get in. You're in Apt 2 at 53 Pine Street starting then. See you then!"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Looks our reservation isn't until tomorrow, whoops!"
+      }
+    ],
+    "suggestedResponseSnippet": "Michael, it should be in the closet of the smaller bedroom. Let us know if you cannot find it."
+  },
+  "rubric": {
+    "expectedCategory": "PACK_AND_PLAY_BRAND",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "forbiddenPhrases": [
+      "already set up",
+      "upon request",
+      "happy to have one ready",
+      "we can get one ready"
+    ],
+    "requiredPhrases": [
+      "closet of the smaller bedroom",
+      "let us know if you cannot find"
+    ]
+  },
+  "notes": "Michael 2026-08-21 Apt 2, same thread as michael-not-checkin-day-access. Check-in day, already in the unit. Deterministic _applyInStayCribLocationPolicy. Do not use Kyrie-style availability copy."
+}

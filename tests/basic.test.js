@@ -2925,6 +2925,118 @@ describe('Not-check-in-day access (Michael, no LLM)', () => {
   });
 });
 
+describe('In-stay crib location (Michael Apt 2, no LLM)', () => {
+  const michaelCtx = {
+    guestName: 'Michael',
+    listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+    propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+    checkIn: '2026-08-21T16:00:00-04:00',
+    checkOut: '2026-08-24T10:00:00-04:00',
+    asOfDate: '2026-08-21',
+    asOfInstant: '2026-08-21T16:30:00-04:00',
+  };
+  const whereIsIt =
+    'Just entered the unit. Can you please remind me where the crib is located?';
+  const kyrieAvailability =
+    'Would it be possible to have a crib available? We see that one is available upon request.';
+
+  it('detects current-guest crib location asks on check-in day', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    assert.equal(agent._isCurrentStay(michaelCtx), true);
+    assert.equal(agent._looksLikeInStayCribLocationAsk(whereIsIt, michaelCtx), true);
+    assert.equal(agent._looksLikeInStayCribLocationAsk(kyrieAvailability, michaelCtx), false);
+  });
+
+  it('rewrites availability copy to Apt 2 closet location + cannot-find follow-up', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyInStayCribLocationPolicy(
+      {
+        typeOfMessageReceived: 'PACK_AND_PLAY_BRAND',
+        proposedResponse:
+          'Michael, the Graco Pack and Play is already set up and ready in the unit for you.',
+      },
+      michaelCtx,
+      whereIsIt
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'PACK_AND_PLAY_BRAND');
+    assert.equal(applied.shouldReply, true);
+    assert.match(applied.proposedResponse, /closet of the smaller bedroom/i);
+    assert.match(applied.proposedResponse, /let us know if you cannot find/i);
+    assert.match(applied.proposedResponse, /^Michael,/);
+    assert.doesNotMatch(applied.proposedResponse, /already set up/i);
+  });
+
+  it('does not apply to future-guest crib availability asks (Kyrie)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const kyrieCtx = {
+      guestName: 'Kyrie',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      propertyName: 'Sunny Apt 2',
+      checkIn: '2026-07-10',
+      checkOut: '2026-07-13',
+      asOfDate: '2026-06-20',
+    };
+    const applied = agent._applyInStayCribLocationPolicy(
+      {
+        typeOfMessageReceived: 'PACK_AND_PLAY_BRAND',
+        proposedResponse:
+          "Good afternoon Kyrie, yes we use the Graco Pack and Play and it's already set up and ready in the unit for you.",
+      },
+      kyrieCtx,
+      kyrieAvailability
+    );
+    assert.equal(applied.applied, false);
+    assert.equal(agent._looksLikeInStayCribLocationAsk(kyrieAvailability, kyrieCtx), false);
+  });
+
+  it('still locates from "just entered" language even if stay dates are missing', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyInStayCribLocationPolicy(
+      { proposedResponse: 'none' },
+      { guestName: 'Michael', listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d' },
+      whereIsIt
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /closet of the smaller bedroom/i);
+  });
+
+  it('does not invent the Apt 2 closet for other units', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyInStayCribLocationPolicy(
+      {},
+      {
+        guestName: 'Sam',
+        listingId: 'c899481f-2e5b-402d-80c4-3167fd824d96',
+        propertyName: 'Downtown Studio 1B',
+        checkIn: '2026-08-21',
+        checkOut: '2026-08-24',
+        asOfDate: '2026-08-21',
+      },
+      whereIsIt
+    );
+    assert.equal(applied.applied, true);
+    assert.doesNotMatch(applied.proposedResponse, /closet of the smaller bedroom/i);
+    assert.match(applied.proposedResponse, /already be in the unit/i);
+    assert.match(applied.proposedResponse, /let us know if you cannot find/i);
+  });
+});
+
 describe('Post-stay access (day after checkout, no LLM)', () => {
   const alexCtx = {
     guestName: 'Alex',
@@ -3426,5 +3538,60 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
     assert.doesNotMatch(result.proposedResponse, /backup/i);
     assert.doesNotMatch(result.proposedResponse, /lock\s*box/i);
     console.log('[post-stay-late-access] proposedResponse:\n', result.proposedResponse);
+  });
+
+  it('Michael in-stay crib location: closet of smaller bedroom (mock Hospitable, live Grok, PIN arrived)', async () => {
+    const mockHospitable = {
+      async hasGuestsOnDate() { return true; },
+      async getConversationMessages() { return []; },
+      async getReservationMessages() { return []; },
+      async getInquiryMessages() { return []; },
+      async getThreadMessages() { return []; },
+    };
+    const agent = new GuestMessagingAgent({
+      llm: 'auto',
+      projectRoot: projectRootForTests,
+      hospitableClient: mockHospitable,
+      requireLiveConversationHistory: false,
+      guestCheckInsLookup: async () => ({
+        guestArrived: true,
+        checkedInAt: '2026-08-21T20:12:00.000Z',
+        lockName: 'Apt 2 parking-side',
+        checkInKey: '20150380_2026-08-21',
+      }),
+    });
+    const msg = 'Just entered the unit. Can you please remind me where the crib is located?';
+    const result = await agent.processMessage(msg, {
+      guestName: 'Michael',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+      checkIn: '2026-08-21T16:00:00-04:00',
+      checkOut: '2026-08-24T10:00:00-04:00',
+      asOfDate: '2026-08-21',
+      asOfInstant: '2026-08-21T16:30:00-04:00',
+      nowForGreeting: new Date('2026-08-21T16:30:00-04:00'),
+      reservationId: 'test-michael-crib-not-sent',
+      conversation_id: 'test-michael-crib-not-sent',
+      conversationHistory: [
+        {
+          sender_type: 'guest',
+          body: 'Hello! Can you please confirm what our apt # is?',
+        },
+        {
+          sender_type: 'host',
+          body: 'Good afternoon, Michael, today is not your check-in day — check-in is tomorrow at 4pm.',
+        },
+      ],
+    });
+
+    assert.equal(result.shouldReply, true, 'Must auto-reply with crib location');
+    assert.equal(result.typeOfMessageReceived, 'PACK_AND_PLAY_BRAND');
+    assert.ok(result.proposedResponse && result.proposedResponse !== 'none');
+    assert.match(result.proposedResponse, /closet of the smaller bedroom/i);
+    assert.match(result.proposedResponse, /let us know if you cannot find/i);
+    assert.doesNotMatch(result.proposedResponse, /already set up/i);
+    assert.doesNotMatch(result.proposedResponse, /upon request/i);
+    assert.equal(result.guestArrived, true);
+    console.log('[michael-in-stay-crib] proposedResponse:\n', result.proposedResponse);
   });
 });

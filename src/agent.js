@@ -33,6 +33,7 @@ import {
   stripLeadingFormalTimeGreeting,
   alignLeadingTimeGreeting,
 } from './utils/timeGreeting.js';
+import { lookupGuestCheckIn } from './utils/guestCheckIns.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -54,6 +55,10 @@ const APT2_LISTING_ID = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
 
 const EXTRA_LINENS_TOWELS_FOLLOW_UP =
   'If you cannot find them, feel free to let us know.';
+
+const IN_STAY_CRIB_LOCATION_FOLLOW_UP = 'Let us know if you cannot find it.';
+const APT2_CRIB_LOCATION_BODY = 'it should be in the closet of the smaller bedroom.';
+const GENERIC_CRIB_LOCATION_BODY = 'it should already be in the unit.';
 
 export class GuestMessagingAgent {
   constructor(options = {}) {
@@ -98,6 +103,9 @@ export class GuestMessagingAgent {
     // Eval/simulator pass requireLiveConversationHistory: false to use scenario-provided history.
     this.hospitableClient = options.hospitableClient || null;
     this.requireLiveConversationHistory = options.requireLiveConversationHistory;
+
+    // Optional Dynamo `guestCheckIns` GetItem mock (tests). Default: live table lookup, fail-open.
+    this.guestCheckInsLookup = options.guestCheckInsLookup || null;
 
     this.systemPrompt = null;
     /** @type {import('./config/hostContacts.js').loadHostContacts extends Function ? any : any} */
@@ -275,6 +283,7 @@ export class GuestMessagingAgent {
    */
   async processMessage(guestMessage, context = {}) {
     await this.ensureHostContacts();
+    await this._enrichGuestCheckInFromSchlage(context);
     // Cheap event detection — eval runner calls processMessage directly (not handleMessage),
     // so we must run this here too, not only in _enrichTracesEarly.
     if (!context.earlyEventDetection) {
@@ -545,6 +554,14 @@ export class GuestMessagingAgent {
       shouldReply = true;
     }
 
+    const inStayCribLocationPolicy = this._applyInStayCribLocationPolicy(parsed, context, guestMessage);
+    if (inStayCribLocationPolicy.applied) {
+      parsed.typeOfMessageReceived = inStayCribLocationPolicy.typeOfMessageReceived || 'PACK_AND_PLAY_BRAND';
+      parsed.proposedResponse = inStayCribLocationPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
     this._applyCancellationCategoryPolicy(parsed, guestMessage);
 
     // Julia incident: eval runner uses processMessage directly — apply already-cancelled rewrite here too.
@@ -690,6 +707,8 @@ export class GuestMessagingAgent {
       postCheckoutParkingInfo: context.postCheckoutParkingInfo || null,
       notCheckinDayAccess: !!parsed.notCheckinDayAccess,
       postStayAccess: !!parsed.postStayAccess,
+      guestArrived: context.guestArrived === true,
+      guestArrivedAt: context.guestArrivedAt || null,
       rawModelOutput: raw,
       replyForceReason: force.reason || null,
     };
@@ -1058,6 +1077,49 @@ export class GuestMessagingAgent {
     if (!checkIn) return false;
     const today = this._todayDateStr(context);
     return checkIn <= today && (!checkOut || checkOut > today);
+  }
+
+  /**
+   * Schlage first PIN unlock on the unit door (DynamoDB guestCheckIns).
+   * Stronger than calendar: they are physically in the unit.
+   */
+  _guestPhysicallyArrived(context = {}) {
+    return context.guestArrived === true;
+  }
+
+  async _enrichGuestCheckInFromSchlage(context = {}) {
+    if (context.guestCheckInLookedUp) return context;
+    if (context.guestArrived === true || context.guestArrived === false) {
+      context.guestCheckInLookedUp = true;
+      return context;
+    }
+    const canLookup =
+      typeof this.guestCheckInsLookup === 'function' || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+    if (!canLookup) {
+      context.guestCheckInLookedUp = true;
+      return context;
+    }
+    try {
+      const row = this.guestCheckInsLookup
+        ? await this.guestCheckInsLookup(context)
+        : await lookupGuestCheckIn({ context });
+      context.guestCheckInLookedUp = true;
+      if (!row) return context;
+      context.guestArrived = !!row.guestArrived;
+      if (row.checkedInAt) context.guestArrivedAt = row.checkedInAt;
+      if (row.lockName) context.guestArrivedLockName = row.lockName;
+      if (row.checkInKey) context.guestCheckInKey = row.checkInKey;
+      if (context.guestArrived) {
+        console.log(
+          `[Agent] → Schlage PIN check-in: guestArrived at ${row.checkedInAt || 'unknown'}` +
+            (row.lockName ? ` (${row.lockName})` : '')
+        );
+      }
+    } catch (err) {
+      console.warn('[Agent] guestCheckIns enrich failed (non-fatal):', err?.message || err);
+      context.guestCheckInLookedUp = true;
+    }
+    return context;
   }
 
   _daysUntilCheckIn(context = {}) {
@@ -2675,6 +2737,66 @@ export class GuestMessagingAgent {
     };
   }
 
+  _looksLikeCribAmenityAsk(guestMessage = '') {
+    return /\b(cribs?|pack[\s-]*n['’]?[\s-]*play|pack[\s-]*and[\s-]*play|baby\s*beds?|porta(?:ble)?\s*cribs?)\b/i.test(
+      guestMessage || ''
+    );
+  }
+
+  /**
+   * Current guest (check-in day / mid-stay, or they said they just entered) asking
+   * WHERE the crib is — not a future guest asking if we have one (Kyrie).
+   * Michael 2026-08-21 Apt 2: "Just entered the unit. Can you please remind me where the crib is located?"
+   */
+  _looksLikeInStayCribLocationAsk(guestMessage = '', context = {}) {
+    if (!this._looksLikeCribAmenityAsk(guestMessage)) return false;
+    const lower = String(guestMessage || '').toLowerCase();
+    const locationCue =
+      /\bwhere\b/.test(lower) ||
+      /\blocated\b/.test(lower) ||
+      /\blocation\b/.test(lower) ||
+      /\bremind me where\b/.test(lower) ||
+      /\bcan(?:not|'t| not) find\b/.test(lower) ||
+      (/\blooking for\b/.test(lower) && this._isCurrentStay(context));
+    if (!locationCue) return false;
+    // "Can you find us a crib?" is availability, not in-unit location.
+    if (
+      /\b(?:can you|could you|please)\s+find\s+(?:us\s+)?(?:a |the )?(?:crib|pack)/i.test(lower) &&
+      !/\bwhere\b/.test(lower) &&
+      !/\blocated\b/.test(lower)
+    ) {
+      return false;
+    }
+    if (this._isCurrentStay(context) || this._guestPhysicallyArrived(context)) return true;
+    return /\b(just entered|entered the (?:unit|apartment)|we(?:'re| are) (?:in|inside)|checked in|in the (?:unit|apartment))\b/i.test(
+      lower
+    );
+  }
+
+  _inStayCribLocationDraft(context = {}) {
+    const name = this._guestDisplayFirstName(context);
+    const body = this._isApt2Listing(context) ? APT2_CRIB_LOCATION_BODY : GENERIC_CRIB_LOCATION_BODY;
+    const prefix = name && name !== 'there' ? `${name}, ` : '';
+    return `${prefix}${body} ${IN_STAY_CRIB_LOCATION_FOLLOW_UP}`;
+  }
+
+  /**
+   * In-stay crib location: tell them where it is, plus offer help if they cannot find it.
+   * Do not use the future-guest "already set up and ready" availability line.
+   */
+  _applyInStayCribLocationPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._looksLikeInStayCribLocationAsk(guestMessage, context)) {
+      return { applied: false };
+    }
+    return {
+      applied: true,
+      typeOfMessageReceived: 'PACK_AND_PLAY_BRAND',
+      proposedResponse: this._inStayCribLocationDraft(context),
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
   _isHvacRemotePerUnitQuestion(guestMessage = '') {
     const lower = (guestMessage || '').toLowerCase();
     if (!/\bremote/.test(lower)) {
@@ -3447,6 +3569,13 @@ export class GuestMessagingAgent {
     }
     if (daysUntilCheckIn !== null) lines.push(`- Days until check-in: ${daysUntilCheckIn}`);
     lines.push(`- Stay timing: ${stayTiming} (current = check-in day or in-stay; future = upcoming)`);
+    if (this._guestPhysicallyArrived(context)) {
+      const at = context.guestArrivedAt || 'unknown time';
+      const lock = context.guestArrivedLockName ? ` on ${context.guestArrivedLockName}` : '';
+      lines.push(
+        `- Guest PIN / Schlage: physically checked in (first unit-door keypad unlock at ${at}${lock}). They are IN the unit — treat as CURRENT stay, not a future guest asking whether an amenity exists.`
+      );
+    }
 
     if (this._isBeforeCheckInDay(context) && this._looksLikePreCheckinAccessAttempt(message)) {
       const when = this._friendlyCheckInWhen(context);
@@ -3468,6 +3597,15 @@ export class GuestMessagingAgent {
 
     if (this._isTemporaryDepartureDuringStay(message, context)) {
       lines.push('- CRITICAL IN-STAY TEMPORARY DEPARTURE (Amie incident): Guest is currently IN their stay (check-in day or mid-stay, NOT checkout day). They said they "left the apartment/unit" temporarily (e.g. stepped out so a property manager could knock, deliver a blanket, or leave an item by the door). This is NOT checkout and they are returning tonight. Classify as THANK_YOU_MESSAGE. proposedResponse MUST be a brief warm "You\'re welcome, [Name]!" only. MUST NOT say "safe travels", "hope you enjoyed your stay", "have a great trip", or any end-of-stay farewell.');
+    }
+
+    if (this._looksLikeInStayCribLocationAsk(message, context)) {
+      const loc = this._isApt2Listing(context)
+        ? 'It should be in the closet of the smaller bedroom.'
+        : 'It should already be in the unit.';
+      lines.push(
+        `- CRITICAL IN-STAY CRIB LOCATION (Michael 2026-08-21 Apt 2): Guest is CURRENTLY in the unit (check-in day / mid-stay, or they said they just entered) and is asking WHERE the crib / Pack and Play is — not a future guest asking whether we have one. Classify as PACK_AND_PLAY_BRAND. proposedResponse MUST tell them the storage location: "${loc}" Then MUST add "Let us know if you cannot find it." MUST NOT answer with only the availability line ("the Graco Pack and Play is already set up and ready in the unit") with no location.`
+      );
     }
 
     // Multi-intent: thanks/excitement + laundry facilities (Henry incident). Soft single-category thank-you is wrong.
@@ -3498,7 +3636,7 @@ export class GuestMessagingAgent {
     // and ConversationContextTool (inquiry path). Rule lives in welcome-messages.md; this ensures the first-pass LLM sees it.
     const infantCountForPrompt = (context.infantCount != null ? context.infantCount : (context.conversationTraces?.infantCount || 0));
     if (infantCountForPrompt > 0) {
-      lines.push(`- CRITICAL FOR NEW_RESERVATION_WELCOME (INFANTS): infantCount=${infantCountForPrompt} (>0 from guests.infant_count). For pure first-post-booking welcomes (first host/auto message in thread, empty or minimal conversationHistory, no explicit crib/ "pack and play" / baby bed ask in the current guest message), naturally include in the logistics that we provide a Graco Pack and Play that is already set up and ready in the unit. Use phrasing consistent with the PACK_AND_PLAY_BRAND category: include "Graco Pack and Play", "already set up", "ready". Prefer integrating it gracefully (e.g. after self-check-in or parking). NEVER say "upon request", "happy to prepare one", "let us know if you need a crib", "we can get one ready for you", or anything implying the guest must ask or that it is not pre-placed. If the guest message has a clear specific crib request (even with birthday language), PACK_AND_PLAY_BRAND category takes precedence and uses its exact pre-placed language. Only surface this fact for the initial welcome when infantCount > 0; do not repeat on follow-ups.`);
+      lines.push(`- CRITICAL FOR NEW_RESERVATION_WELCOME (INFANTS): infantCount=${infantCountForPrompt} (>0 from guests.infant_count). For pure first-post-booking welcomes (first host/auto message in thread, empty or minimal conversationHistory, no explicit crib/ "pack and play" / baby bed ask in the current guest message), naturally include in the logistics that we provide a Graco Pack and Play that is already set up and ready in the unit. Use phrasing consistent with the PACK_AND_PLAY_BRAND category: include "Graco Pack and Play", "already set up", "ready". Prefer integrating it gracefully (e.g. after self-check-in or parking). NEVER say "upon request", "happy to prepare one", "let us know if you need a crib", "we can get one ready for you", or anything implying the guest must ask or that it is not pre-placed. If the guest message has a clear specific crib request (even with birthday language), PACK_AND_PLAY_BRAND category takes precedence and uses its exact pre-placed language. If the guest is already in the unit asking WHERE the crib is, skip this availability fact and use the in-stay location rule instead. Only surface this fact for the initial welcome when infantCount > 0; do not repeat on follow-ups.`);
     }
 
     if (context.conversationHistory?.length) {
@@ -4798,6 +4936,19 @@ export class GuestMessagingAgent {
       finalResult.typeOfMessageReceived = extraLinensTowelsPolicyFinal.typeOfMessageReceived || 'EXTRA_LINENS_TOWELS';
       finalResult.proposedResponse = extraLinensTowelsPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
+    }
+
+    const inStayCribLocationPolicyFinal = this._applyInStayCribLocationPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (inStayCribLocationPolicyFinal.applied) {
+      console.log('[Agent] → In-stay crib location policy applied (current guest looking for Pack and Play)');
+      finalResult.typeOfMessageReceived = inStayCribLocationPolicyFinal.typeOfMessageReceived || 'PACK_AND_PLAY_BRAND';
+      finalResult.proposedResponse = inStayCribLocationPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
     }
 
     const pureWelcomePolicyFinal = this._applyPureWelcomeReplyPolicy(finalResult, enrichedContext, guestMessage);

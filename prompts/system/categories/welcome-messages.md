@@ -26,7 +26,7 @@
   - NEVER use "upon request", "let us know if you need", "we can prepare/get one ready", "happy to have one ready", or imply the guest must ask or that it is optional to arrange.
   - All units have one pre-placed and ready — state it as a provided amenity when infants are declared.
   - Only include in the *initial* welcome message for the booking. Do not re-mention on follow-ups or thanks.
-  - If the current guest message contains a clear specific request about a crib / "pack and play" / baby bed (even mixed with birthday language), classify primarily as PACK_AND_PLAY_BRAND instead (see misc-questions.md) — the specific rule takes precedence and the greeting instructions still apply.
+  - If the current guest message contains a clear specific request about a crib / "pack and play" / baby bed (even mixed with birthday language), classify primarily as PACK_AND_PLAY_BRAND instead (see misc-questions.md) — the specific rule takes precedence and the greeting instructions still apply. If they are already in the unit asking **where** the crib is, use the in-stay location wording (Apt 2: closet of the smaller bedroom + "Let us know if you cannot find it"), not the availability "already set up and ready" line.
   - The count is populated via handler enrichment (webhook + /reservations + /inquiries) and ConversationContextTool traces so the first-pass LLM and judge see it reliably.
 - Use line breaks for readability.
 - Check-in / stay timing logic (derive "current" vs "future" from context.checkIn vs today in NY time; use provided context.checkIn, days until if available in traces/context):

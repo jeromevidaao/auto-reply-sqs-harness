@@ -9,7 +9,7 @@
 - **NOT GUEST_CHECKOUT**: Guest says they "left the apartment" on check-in day or mid-stay to let staff deliver something (blanket, maintenance knock, item by the door). They are still staying — use THANK_YOU_MESSAGE with brief "You're welcome, [Name]!" only, no safe travels (Amie incident).
 
 **PACK_AND_PLAY_BRAND**:
-- See the full definition and rules in misc-questions.md (use for any direct crib/Pack-and-Play ask, even on first post-booking messages; pre-placed fact only; never "upon request" language). When first-host greeting instructions apply, prefix with greeting + name but keep this as the primary category.
+- See the full definition and rules in misc-questions.md. Future-guest availability asks: pre-placed Graco Pack and Play, never "upon request". Current guest already in the unit asking **where** it is (Michael Apt 2): give the storage location (Apt 2 = closet of the smaller bedroom) + "Let us know if you cannot find it." When first-host greeting instructions apply on an availability ask, prefix with greeting + name but keep this as the primary category.
 
 **COOKING_UTENSILS**:
 - Yes, we provide cooking utensils, cookware, dishware, a dishwasher, and a stove.

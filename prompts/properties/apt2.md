@@ -34,3 +34,7 @@ This is **not** the same as Apt 3's unit lockbox for normal check-in. Normal Apt
 **Sofa bed**:
 - Queen sofa bed in the living room sleeps 2.
 - Sheets, blankets, pillows, and extra towels for the sofa bed are stored in the storage compartment under the sofa (lift up the long part of the sofa to access).
+
+**Crib / Pack and Play**:
+- Graco Pack and Play is pre-placed in the unit.
+- When a **current** guest (already checked in / just entered) asks **where** it is: it should be in the **closet of the smaller bedroom**. Tell them that, then "Let us know if you cannot find it." Do not answer as if they are asking whether we have one.
