@@ -167,6 +167,9 @@ export async function runPreSendThreadRefresh({
         ...context,
         conversationHistory: toHistory(chrono),
         _preSendReprocessed: true,
+        preSendOriginalGuestMessage: originalGuestMessage,
+        preSendNewerGuestMessages: newer.map(messageBody),
+        preSendStaleDraft: result0.proposedResponse || '',
       });
       reprocessed = true;
     } catch (err) {

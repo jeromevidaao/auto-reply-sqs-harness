@@ -3566,12 +3566,39 @@ export class GuestMessagingAgent {
     };
   }
 
+  _preSendUpdatePromptLines(context = {}) {
+    if (!context._preSendReprocessed) return [];
+    const orig = String(context.preSendOriginalGuestMessage || '').trim();
+    const newer = Array.isArray(context.preSendNewerGuestMessages)
+      ? context.preSendNewerGuestMessages.map((b) => String(b || '').trim()).filter(Boolean)
+      : [];
+    const stale = String(context.preSendStaleDraft || '').trim();
+    const lines = [
+      '- CRITICAL PRE-SEND UPDATE: A new guest message arrived WHILE you were drafting the previous reply. This is a second reasoning round (first pass + judge). The Current guest message is the NEWEST one — reason from that, plus any messages that arrived in between. Discard the stale draft; do not send it.',
+    ];
+    if (orig) {
+      lines.push(`- You were originally drafting a reply to: "${orig.slice(0, 240)}"`);
+    }
+    if (newer.length) {
+      lines.push('- Guest messages that arrived while drafting (oldest → newest):');
+      newer.forEach((body) => lines.push(`  Guest: ${body.slice(0, 240)}`));
+    }
+    if (stale && stale !== 'none') {
+      lines.push(`- Stale draft that must NOT be sent: "${stale.slice(0, 280)}"`);
+    }
+    return lines;
+  }
+
   _buildUserPrompt(message, context) {
     const lines = [
       `Current guest message: "${message}"`,
       '',
       'Context:'
     ];
+    const preSendLines = this._preSendUpdatePromptLines(context);
+    if (preSendLines.length) {
+      lines.push(...preSendLines);
+    }
 
     if (isHomeExchangeContext(context)) {
       lines.push('- Platform: Home Exchange (NOT Airbnb)');
@@ -5672,6 +5699,12 @@ export class GuestMessagingAgent {
     lines.push('=== ORIGINAL GUEST MESSAGE ===');
     lines.push(context.originalMessage || 'Not provided');
     lines.push('');
+    const preSendRewrite = this._preSendUpdatePromptLines(context);
+    if (preSendRewrite.length) {
+      lines.push('=== PRE-SEND UPDATE (new guest message arrived while drafting) ===');
+      preSendRewrite.forEach((l) => lines.push(l.replace(/^- /, '')));
+      lines.push('');
+    }
     lines.push('=== PRIOR DRAFT (to improve) ===');
     lines.push(JSON.stringify(firstDecision, null, 2));
     lines.push('');
@@ -5790,6 +5823,14 @@ export class GuestMessagingAgent {
     lines.push('=== ORIGINAL GUEST MESSAGE ===');
     lines.push(context.originalMessage || 'Not provided');
     lines.push('');
+
+    const preSendJudge = this._preSendUpdatePromptLines(context);
+    if (preSendJudge.length) {
+      lines.push('=== PRE-SEND UPDATE (new guest message arrived while drafting) ===');
+      preSendJudge.forEach((l) => lines.push(l.replace(/^- /, '')));
+      lines.push('Judge against the NEWEST guest message. Reject a stale draft that only answers the original message.');
+      lines.push('');
+    }
 
     lines.push(pass === 'verify' ? '=== CANDIDATE REPLY UNDER REVIEW ===' : '=== FIRST DRAFT DECISION ===');
     lines.push(JSON.stringify(firstDecision, null, 2));

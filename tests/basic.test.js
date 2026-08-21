@@ -3095,6 +3095,29 @@ describe('In-stay see-you-soon strip (Michael, no LLM)', () => {
   });
 });
 
+describe('Pre-send second reasoning round prompt (no LLM)', () => {
+  it('tells first-pass and judge that a new guest message just appeared', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const ctx = {
+      guestName: 'Michael',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      _preSendReprocessed: true,
+      preSendOriginalGuestMessage: 'All set',
+      preSendNewerGuestMessages: ['Richard popped in and helped', 'Thanks'],
+      preSendStaleDraft: "You're welcome, Michael! See you soon.",
+    };
+    const prompt = agent._buildUserPrompt('Thanks', ctx);
+    assert.match(prompt, /CRITICAL PRE-SEND UPDATE/);
+    assert.match(prompt, /second reasoning round/i);
+    assert.match(prompt, /All set/);
+    assert.match(prompt, /Richard popped in and helped/);
+    assert.match(prompt, /see you soon/i);
+  });
+});
+
 describe('Post-stay access (day after checkout, no LLM)', () => {
   const alexCtx = {
     guestName: 'Alex',

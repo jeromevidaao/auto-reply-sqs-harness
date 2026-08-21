@@ -88,6 +88,12 @@ describe('pre-send thread refresh (Michael double you-are-welcome)', () => {
         reprocessCalls += 1;
         assert.equal(latest, 'Thanks');
         assert.ok(ctx._preSendReprocessed);
+        assert.equal(ctx.preSendOriginalGuestMessage, 'All set');
+        assert.deepEqual(ctx.preSendNewerGuestMessages, [
+          'Richard popped in and helped',
+          'Thanks',
+        ]);
+        assert.match(ctx.preSendStaleDraft, /see you soon/i);
         assert.ok(ctx.conversationHistory.some((m) => /Richard popped in/i.test(m.body)));
         return {
           typeOfMessageReceived: 'THANK_YOU_MESSAGE',
