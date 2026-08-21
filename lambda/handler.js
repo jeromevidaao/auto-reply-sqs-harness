@@ -53,6 +53,7 @@ import {
 } from '../src/utils/reservationAccept.js';
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
 import { runPreSendThreadRefresh } from '../src/utils/preSendThreadRefresh.js';
+import { persistGuestMessagingRun } from '../src/utils/runMonitor.js';
 import { S3Client } from '@aws-sdk/client-s3';
 import { isHomeExchangePayload, handleHomeExchangeMessage, extractHomeExchangeMessage } from '../src/useCases/homeExchange.js';
 import {
@@ -151,6 +152,22 @@ export const handler = async (event, context) => {
   }
   const act = actPayload?.queryStringParameters?.act || event?.queryStringParameters?.act || event?.act;
 
+  async function persistAndReturn(httpResponse, fields = {}) {
+    if (fields.skipPersist) return httpResponse;
+    await persistGuestMessagingRun({
+      requestId,
+      startTime,
+      durationMs: Date.now() - startTime,
+      guestMessage: fields.guestMessage,
+      context: fields.context,
+      result: fields.result,
+      platform: fields.platform,
+      act: fields.act || act,
+      extra: fields.extra || {},
+    });
+    return httpResponse;
+  }
+
   if (act === 'homeexchange_expire_blocks') {
     console.log('[Handler] HomeExchange expire-unblock job');
     const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
@@ -217,25 +234,47 @@ export const handler = async (event, context) => {
       throw new Error(`Failed ring smoke guest notice: ${smokeResult.sendError}`);
     }
     console.log('\n⏱️  Total handler duration:', duration, 'ms (ring-smoke-notice)');
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        success: true,
-        requestId,
-        ringSmokeNotice: true,
-        sent: smokeResult.sent,
-        sentCount: smokeResult.sentCount || 0,
-        simulate: smokeResult.simulate,
-        sendDisabled: !smokeResult.sent,
-        decision: {
-          typeOfMessageReceived: smokeResult.typeOfMessageReceived,
+    return persistAndReturn(
+      {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          requestId,
+          ringSmokeNotice: true,
+          sent: smokeResult.sent,
+          sentCount: smokeResult.sentCount || 0,
+          simulate: smokeResult.simulate,
+          sendDisabled: !smokeResult.sent,
+          decision: {
+            typeOfMessageReceived: smokeResult.typeOfMessageReceived,
+            proposedResponse: smokeResult.proposedResponse,
+            shouldReply: !!smokeResult.sent,
+            escalated: false,
+          },
+          smokeResult,
+        }),
+      },
+      {
+        platform: 'airbnb',
+        act: 'ring_smoke_notice',
+        result: {
+          typeOfMessageReceived: smokeResult.typeOfMessageReceived || 'RING_SMOKE_NOTICE',
           proposedResponse: smokeResult.proposedResponse,
           shouldReply: !!smokeResult.sent,
-          escalated: false,
+          sent: !!smokeResult.sent,
         },
-        smokeResult,
-      }),
-    };
+        extra: {
+          sent: !!smokeResult.sent,
+          shouldReply: !!smokeResult.sent,
+          category: smokeResult.typeOfMessageReceived || 'RING_SMOKE_NOTICE',
+          platform: 'airbnb',
+          reason: smokeResult.decision?.reason || smokeResult.sendSkipReason || null,
+          guestName: (smokeResult.recipients || []).map((r) => r.firstName).filter(Boolean).join(', ') || null,
+          propertyName: 'Pine Apt #2',
+          proposedResponse: smokeResult.proposedResponse,
+        },
+      }
+    );
   }
 
   if (act === 'keypad_lockout_notice' || isKeypadLockoutNoticeTurn(event)) {
@@ -263,24 +302,46 @@ export const handler = async (event, context) => {
       throw new Error(`Failed keypad lockout guest notice: ${lockoutResult.sendError}`);
     }
     console.log('\n⏱️  Total handler duration:', duration, 'ms (keypad-lockout-notice)');
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        success: true,
-        requestId,
-        keypadLockoutNotice: true,
-        sent: lockoutResult.sent,
-        simulate: lockoutResult.simulate,
-        sendDisabled: !lockoutResult.sent,
-        decision: {
-          typeOfMessageReceived: lockoutResult.typeOfMessageReceived,
+    return persistAndReturn(
+      {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          requestId,
+          keypadLockoutNotice: true,
+          sent: lockoutResult.sent,
+          simulate: lockoutResult.simulate,
+          sendDisabled: !lockoutResult.sent,
+          decision: {
+            typeOfMessageReceived: lockoutResult.typeOfMessageReceived,
+            proposedResponse: lockoutResult.proposedResponse,
+            shouldReply: !!lockoutResult.sent,
+            escalated: false,
+          },
+          lockoutResult,
+        }),
+      },
+      {
+        platform: 'airbnb',
+        act: 'keypad_lockout_notice',
+        result: {
+          typeOfMessageReceived: lockoutResult.typeOfMessageReceived || 'KEYPAD_LOCKOUT_NOTICE',
           proposedResponse: lockoutResult.proposedResponse,
           shouldReply: !!lockoutResult.sent,
-          escalated: false,
+          sent: !!lockoutResult.sent,
         },
-        lockoutResult,
-      }),
-    };
+        extra: {
+          sent: !!lockoutResult.sent,
+          shouldReply: !!lockoutResult.sent,
+          category: lockoutResult.typeOfMessageReceived || 'KEYPAD_LOCKOUT_NOTICE',
+          platform: 'airbnb',
+          reason: lockoutResult.decision?.reason || lockoutResult.sendSkipReason || null,
+          guestName: lockoutResult.recipient?.firstName || null,
+          propertyName: lockoutResult.propertyName || lockoutResult.lockName || null,
+          proposedResponse: lockoutResult.proposedResponse,
+        },
+      }
+    );
   }
 
   // Isolated HomeExchange guest-chat path. Must run before the Airbnb agent so
@@ -323,24 +384,43 @@ export const handler = async (event, context) => {
         throw new Error(`Failed to deliver HomeExchange check-in instructions: ${checkinResult.sendError}`);
       }
       console.log('\n⏱️  Total handler duration:', duration, 'ms (homeexchange-checkin)');
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          success: true,
-          requestId,
-          homeExchange: true,
-          checkinInstructions: true,
-          sendDisabled: checkinResult.sendDisabled,
-          sent: checkinResult.sent,
-          decision: {
-            typeOfMessageReceived: checkinResult.typeOfMessageReceived,
+      return persistAndReturn(
+        {
+          statusCode: 200,
+          body: JSON.stringify({
+            success: true,
+            requestId,
+            homeExchange: true,
+            checkinInstructions: true,
+            sendDisabled: checkinResult.sendDisabled,
+            sent: checkinResult.sent,
+            decision: {
+              typeOfMessageReceived: checkinResult.typeOfMessageReceived,
+              proposedResponse: checkinResult.proposedResponse,
+              shouldReply: checkinResult.shouldReply,
+              escalated: false,
+            },
+            homeExchangeResult: checkinResult,
+          }),
+        },
+        {
+          platform: 'homeexchange',
+          act: 'homeexchange_checkin_instructions',
+          guestMessage: extractedHe.message,
+          context: extractedHe.context,
+          result: checkinResult,
+          extra: {
+            sent: !!checkinResult.sent,
+            shouldReply: !!checkinResult.shouldReply,
+            category: checkinResult.typeOfMessageReceived || 'HE_CHECKIN_INSTRUCTIONS',
+            platform: 'homeexchange',
+            reason: checkinResult.reason || checkinResult.sendSkipReason || null,
+            propertyName: checkinResult.propertyName || null,
             proposedResponse: checkinResult.proposedResponse,
-            shouldReply: checkinResult.shouldReply,
-            escalated: false,
+            conversationHistory: extractedHe.context?.conversationHistory,
           },
-          homeExchangeResult: checkinResult,
-        }),
-      };
+        }
+      );
     }
     const sharedCategoryAgent = process.env.GROK_API_KEY
       ? new GuestMessagingAgent({
@@ -384,23 +464,43 @@ export const handler = async (event, context) => {
       throw new Error(`Failed to deliver HomeExchange reply: ${heResult.sendError}`);
     }
     console.log('\n⏱️  Total handler duration:', duration, 'ms (homeexchange)');
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        success: true,
-        requestId,
-        homeExchange: true,
-        sendDisabled: heResult.sendDisabled,
-        sent: heResult.sent,
-        decision: {
-          typeOfMessageReceived: heResult.typeOfMessageReceived,
+    return persistAndReturn(
+      {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          requestId,
+          homeExchange: true,
+          sendDisabled: heResult.sendDisabled,
+          sent: heResult.sent,
+          decision: {
+            typeOfMessageReceived: heResult.typeOfMessageReceived,
+            proposedResponse: heResult.proposedResponse,
+            shouldReply: heResult.shouldReply,
+            escalated: false,
+          },
+          homeExchangeResult: heResult,
+        }),
+      },
+      {
+        platform: 'homeexchange',
+        act: act || 'homeexchange_message',
+        guestMessage: extractedHe.message,
+        context: extractedHe.context,
+        result: heResult,
+        extra: {
+          sent: !!heResult.sent,
+          shouldReply: !!heResult.shouldReply,
+          category: heResult.typeOfMessageReceived,
+          platform: 'homeexchange',
+          reason: heResult.reason || heResult.sendSkipReason || null,
+          propertyName: heResult.propertyName || extractedHe.context?.propertyName || null,
           proposedResponse: heResult.proposedResponse,
-          shouldReply: heResult.shouldReply,
-          escalated: false,
+          conversationHistory:
+            heResult.conversationHistory || extractedHe.context?.conversationHistory,
         },
-        homeExchangeResult: heResult,
-      }),
-    };
+      }
+    );
   }
 
   // Print the raw SQS message body explicitly for easy reference when debugging
@@ -1225,15 +1325,30 @@ export const handler = async (event, context) => {
           }
           if (preSend.skipSend) {
             console.log(`[Handler] ⛔ PRE-SEND GUARD: Skipping send — ${preSend.reason}`);
-            return {
-              statusCode: 200,
-              body: JSON.stringify({
-                success: true,
-                skipped: true,
-                reason: `Pre-send guard: ${preSend.reason}`,
-                reprocessed: !!preSend.reprocessed,
-              }),
-            };
+            return persistAndReturn(
+              {
+                statusCode: 200,
+                body: JSON.stringify({
+                  success: true,
+                  skipped: true,
+                  reason: `Pre-send guard: ${preSend.reason}`,
+                  reprocessed: !!preSend.reprocessed,
+                }),
+              },
+              {
+                platform: 'airbnb',
+                guestMessage,
+                context: msgContext,
+                result,
+                extra: {
+                  sent: false,
+                  shouldReply: false,
+                  skipReason: `Pre-send guard: ${preSend.reason}`,
+                  category: result.typeOfMessageReceived,
+                  platform: 'airbnb',
+                },
+              }
+            );
           }
           if (
             preSend.reprocessed &&
@@ -1243,15 +1358,30 @@ export const handler = async (event, context) => {
               result.escalated)
           ) {
             console.log('[Handler] Pre-send reprocess decided not to send.');
-            return {
-              statusCode: 200,
-              body: JSON.stringify({
-                success: true,
-                skipped: true,
-                reason: 'Pre-send reprocess withheld reply',
-                reprocessed: true,
-              }),
-            };
+            return persistAndReturn(
+              {
+                statusCode: 200,
+                body: JSON.stringify({
+                  success: true,
+                  skipped: true,
+                  reason: 'Pre-send reprocess withheld reply',
+                  reprocessed: true,
+                }),
+              },
+              {
+                platform: 'airbnb',
+                guestMessage,
+                context: msgContext,
+                result,
+                extra: {
+                  sent: false,
+                  shouldReply: !!result.shouldReply,
+                  skipReason: 'Pre-send reprocess withheld reply',
+                  category: result.typeOfMessageReceived,
+                  platform: 'airbnb',
+                },
+              }
+            );
           }
         } catch (guardErr) {
           console.warn('[Handler] Pre-send thread refresh non-fatal (proceeding with send):', guardErr.message);
@@ -1351,20 +1481,35 @@ export const handler = async (event, context) => {
               const duration = Date.now() - startTime;
               console.log('\n⏱️  Total handler duration:', duration, 'ms (send error recovered via thread confirm)');
               console.log('═══════════════════════════════════════════════════════════════\n');
-              return {
-                statusCode: 200,
-                body: JSON.stringify({
-                  success: true,
-                  requestId,
-                  recoveredAfterSendError: true,
-                  decision: {
-                    typeOfMessageReceived: result.typeOfMessageReceived,
-                    proposedResponse: result.proposedResponse,
+              return persistAndReturn(
+                {
+                  statusCode: 200,
+                  body: JSON.stringify({
+                    success: true,
+                    requestId,
+                    recoveredAfterSendError: true,
+                    decision: {
+                      typeOfMessageReceived: result.typeOfMessageReceived,
+                      proposedResponse: result.proposedResponse,
+                      shouldReply: true,
+                      escalated: false,
+                    },
+                  }),
+                },
+                {
+                  platform: 'airbnb',
+                  guestMessage,
+                  context: msgContext,
+                  result,
+                  extra: {
+                    sent: true,
                     shouldReply: true,
-                    escalated: false,
+                    category: result.typeOfMessageReceived,
+                    platform: 'airbnb',
+                    reason: 'Send threw but draft already on thread',
                   },
-                }),
-              };
+                }
+              );
             }
           } catch (confirmErr) {
             console.warn('[Handler] Post-send-error thread confirm failed (will hard-fail send):', confirmErr.message);
@@ -1455,22 +1600,38 @@ export const handler = async (event, context) => {
             console.log('\n⏱️  Total handler duration:', duration, 'ms (inquiry reply generated + escalated; no hard send error)');
             console.log('═══════════════════════════════════════════════════════════════\n');
 
-            return {
-              statusCode: 200,
-              body: JSON.stringify({
-                success: true,
-                requestId,
-                decision: {
-                  typeOfMessageReceived: result.typeOfMessageReceived,
-                  proposedResponse: result.proposedResponse,
+            return persistAndReturn(
+              {
+                statusCode: 200,
+                body: JSON.stringify({
+                  success: true,
+                  requestId,
+                  decision: {
+                    typeOfMessageReceived: result.typeOfMessageReceived,
+                    proposedResponse: result.proposedResponse,
+                    shouldReply: true,
+                    escalated: false,
+                    inquirySendFailed: true,
+                    manualDeliveryRequired: true
+                  },
+                  note: 'Inquiry reply generated and approved by judge/reflection but could not be auto-delivered (404 on send for the webhook conversation/inquiry ID). Full text published to SNS and logged for manual send.'
+                })
+              },
+              {
+                platform: 'airbnb',
+                guestMessage,
+                context: msgContext,
+                result,
+                extra: {
+                  sent: false,
                   shouldReply: true,
-                  escalated: false,
                   inquirySendFailed: true,
-                  manualDeliveryRequired: true
+                  skipReason: 'Inquiry send 404 — manual delivery required',
+                  category: result.typeOfMessageReceived,
+                  platform: 'airbnb',
                 },
-                note: 'Inquiry reply generated and approved by judge/reflection but could not be auto-delivered (404 on send for the webhook conversation/inquiry ID). Full text published to SNS and logged for manual send.'
-              })
-            };
+              }
+            );
           }
 
           // Reservation-path (or other non-inquiry) send failures remain hard errors.
@@ -1511,31 +1672,52 @@ export const handler = async (event, context) => {
     console.log('\n⏱️  Total handler duration:', duration, 'ms');
     console.log('═══════════════════════════════════════════════════════════════\n');
 
+    const didSend = !!(
+      result.shouldReply &&
+      result.proposedResponse &&
+      result.proposedResponse !== 'none' &&
+      !result.escalated
+    );
+
     // Return rich response for manual invokes (full trace is in CloudWatch anyway)
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        success: true,
-        requestId,
-        decision: {
-          typeOfMessageReceived: result.typeOfMessageReceived,
-          proposedResponse: result.proposedResponse,
-          shouldReply: result.shouldReply,
-          escalated: result.escalated,
-          cleaningIssueDetected: result.cleaningIssueDetected,
+    return persistAndReturn(
+      {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          requestId,
+          decision: {
+            typeOfMessageReceived: result.typeOfMessageReceived,
+            proposedResponse: result.proposedResponse,
+            shouldReply: result.shouldReply,
+            escalated: result.escalated,
+            cleaningIssueDetected: result.cleaningIssueDetected,
+          },
+          tools: {
+            cleaning: result.cleaningIssueDetected ? result.cleaningIssue : null,
+            thermostat: result.thermostatInfo,
+            heatPump: result.heatPumpInfo,
+            cancellation: result.cancellationInfo,
+            event: result.eventInfo,
+          },
+          reflection: result.reflection || null,
+          conversationJudge: result.conversationJudge || null,
+          fullResult: result, // Keep full object for deep debugging
+        }),
+      },
+      {
+        platform: msgContext.platform || 'airbnb',
+        guestMessage,
+        context: msgContext,
+        result,
+        extra: {
+          sent: didSend,
+          shouldReply: !!result.shouldReply,
+          category: result.typeOfMessageReceived,
+          platform: msgContext.platform || 'airbnb',
         },
-        tools: {
-          cleaning: result.cleaningIssueDetected ? result.cleaningIssue : null,
-          thermostat: result.thermostatInfo,
-          heatPump: result.heatPumpInfo,
-          cancellation: result.cancellationInfo,
-          event: result.eventInfo,
-        },
-        reflection: result.reflection || null,
-        conversationJudge: result.conversationJudge || null,
-        fullResult: result, // Keep full object for deep debugging
-      }),
-    };
+      }
+    );
   } catch (error) {
     const duration = Date.now() - startTime;
 
@@ -1557,6 +1739,18 @@ export const handler = async (event, context) => {
       console.error('Stack:', error.stack);
       console.error('Failed Context:', JSON.stringify(msgContext, null, 2));
 
+      await persistGuestMessagingRun({
+        requestId,
+        startTime,
+        durationMs: duration,
+        guestMessage: typeof guestMessage !== 'undefined' ? guestMessage : '',
+        context: typeof msgContext !== 'undefined' ? msgContext : {},
+        extra: {
+          sent: false,
+          error: error.message,
+          platform: (typeof msgContext !== 'undefined' && msgContext.platform) || 'airbnb',
+        },
+      });
       // Re-throw so the Lambda invocation is marked as failed (important for SQS + DLQ)
       throw error;
     }
@@ -1568,14 +1762,26 @@ export const handler = async (event, context) => {
     // Log context that failed for easier debugging
     console.error('Failed Context:', JSON.stringify(msgContext, null, 2));
 
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        success: false,
-        requestId,
-        error: error.message,
-        stack: error.stack,
-      }),
-    };
+    return persistAndReturn(
+      {
+        statusCode: 500,
+        body: JSON.stringify({
+          success: false,
+          requestId,
+          error: error.message,
+          stack: error.stack,
+        }),
+      },
+      {
+        platform: (typeof msgContext !== 'undefined' && msgContext.platform) || 'airbnb',
+        guestMessage: typeof guestMessage !== 'undefined' ? guestMessage : '',
+        context: typeof msgContext !== 'undefined' ? msgContext : {},
+        extra: {
+          sent: false,
+          error: error.message,
+          platform: (typeof msgContext !== 'undefined' && msgContext.platform) || 'airbnb',
+        },
+      }
+    );
   }
 };
