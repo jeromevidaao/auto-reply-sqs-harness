@@ -506,13 +506,11 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
-    const notCheckinDayAccessPolicy = this._applyNotCheckinDayAccessPolicy(parsed, context, guestMessage);
-    if (notCheckinDayAccessPolicy.applied) {
-      parsed.typeOfMessageReceived = notCheckinDayAccessPolicy.typeOfMessageReceived;
-      parsed.proposedResponse = notCheckinDayAccessPolicy.proposedResponse;
+    const stayWindowAccessPolicy = this._applyStayWindowAccessPolicy(parsed, context, guestMessage);
+    if (stayWindowAccessPolicy.applied) {
+      this._assignStayWindowAccess(parsed, stayWindowAccessPolicy);
       shouldReply = true;
       confidence = 1.0;
-      parsed.notCheckinDayAccess = true;
     }
 
     const apt2StreetLockoutPolicy = this._applyApt2StreetDoorLockoutPolicy(parsed, context, guestMessage);
@@ -650,19 +648,17 @@ export class GuestMessagingAgent {
       );
     }
 
-    // After first-host welcome so a day-before "what's our apt # / can't get in"
-    // is not replaced by a full welcome that implies they can enter today.
-    const notCheckinDayAccessFinalPm = this._applyNotCheckinDayAccessPolicy(
+    // After first-host welcome so a day-before / day-after "can't get in"
+    // is not replaced by a welcome or lockout script.
+    const stayWindowAccessFinalPm = this._applyStayWindowAccessPolicy(
       parsed,
       context,
       guestMessage
     );
-    if (notCheckinDayAccessFinalPm.applied) {
-      parsed.typeOfMessageReceived = notCheckinDayAccessFinalPm.typeOfMessageReceived;
-      parsed.proposedResponse = notCheckinDayAccessFinalPm.proposedResponse;
+    if (stayWindowAccessFinalPm.applied) {
+      this._assignStayWindowAccess(parsed, stayWindowAccessFinalPm);
       shouldReply = true;
       confidence = 1.0;
-      parsed.notCheckinDayAccess = true;
     }
 
     // Cassidy / production-miss hardening: high conf + sendable draft → always auto-reply.
@@ -693,6 +689,7 @@ export class GuestMessagingAgent {
       confidence,
       postCheckoutParkingInfo: context.postCheckoutParkingInfo || null,
       notCheckinDayAccess: !!parsed.notCheckinDayAccess,
+      postStayAccess: !!parsed.postStayAccess,
       rawModelOutput: raw,
       replyForceReason: force.reason || null,
     };
@@ -806,6 +803,7 @@ export class GuestMessagingAgent {
       'DIRECTIONS',
       'WIFI',
       'NOT_CHECKIN_DAY_ACCESS',
+      'POST_STAY_ACCESS',
       'CHECKOUT',
       'THANKS',
       'TRANSPORT_QUESTION',
@@ -852,6 +850,7 @@ export class GuestMessagingAgent {
         'THERMOSTAT_HEATPUMP',
         'APT2_STREET_DOOR_LOCKOUT',
         'NOT_CHECKIN_DAY_ACCESS',
+        'POST_STAY_ACCESS',
       ].includes(c);
     });
   }
@@ -1075,6 +1074,34 @@ export class GuestMessagingAgent {
     return days != null && days >= 1;
   }
 
+  _daysSinceCheckout(context = {}) {
+    const checkOut = (context.checkOut || context.check_out || '').toString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(checkOut)) return null;
+    const today = this._todayDateStr(context);
+    const todayD = new Date(`${today}T00:00:00`);
+    const co = new Date(`${checkOut}T00:00:00`);
+    return Math.round((todayD - co) / (1000 * 3600 * 24));
+  }
+
+  /** Checkout calendar day has already passed (America/New_York). */
+  _isAfterCheckoutDay(context = {}) {
+    const days = this._daysSinceCheckout(context);
+    return days != null && days >= 1;
+  }
+
+  _weekdayLong(iso = '') {
+    try {
+      const d = new Date(String(iso).slice(0, 10) + 'T12:00:00');
+      if (Number.isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('en-US', {
+        weekday: 'long',
+        timeZone: 'America/New_York',
+      });
+    } catch {
+      return '';
+    }
+  }
+
   _formatCheckInDateForReply(context = {}) {
     const iso = (context.checkIn || context.check_in || '').toString().trim();
     if (!iso) return '';
@@ -1096,22 +1123,22 @@ export class GuestMessagingAgent {
   _friendlyCheckInWhen(context = {}) {
     const days = this._daysUntilCheckIn(context);
     const iso = (context.checkIn || context.check_in || '').toString().trim();
-    let weekday = '';
-    try {
-      const d = new Date(iso.slice(0, 10) + 'T12:00:00');
-      if (!Number.isNaN(d.getTime())) {
-        weekday = d.toLocaleDateString('en-US', {
-          weekday: 'long',
-          timeZone: 'America/New_York',
-        });
-      }
-    } catch {
-      // ignore
-    }
+    const weekday = this._weekdayLong(iso);
     if (days === 1) return 'tomorrow';
     if (days != null && days >= 2 && weekday) return `on ${weekday}`;
     if (weekday) return `on ${weekday}`;
     return this._formatCheckInDateForReply(context) || 'your check-in date';
+  }
+
+  /** "yesterday" / "on Monday" — not "August 24, 2026". */
+  _friendlyCheckoutWhen(context = {}) {
+    const days = this._daysSinceCheckout(context);
+    const iso = (context.checkOut || context.check_out || '').toString().trim();
+    const weekday = this._weekdayLong(iso);
+    if (days === 1) return 'yesterday';
+    if (days != null && days >= 2 && weekday) return `on ${weekday}`;
+    if (weekday) return `on ${weekday}`;
+    return 'on your checkout day';
   }
 
   _pineUnitLabel(context = {}) {
@@ -1181,7 +1208,57 @@ export class GuestMessagingAgent {
       shouldReply: true,
       confidence: 1.0,
       escalated: false,
+      notCheckinDayAccess: true,
     };
+  }
+
+  /**
+   * Reverse of Michael: guest at the building a day (or more) after checkout.
+   * Door PIN is already off Schlage (11am checkout day); a new guest may be in.
+   */
+  _postStayAccessDraft(context = {}) {
+    const greeting = getTimeBasedGreeting(resolveNowForGreeting(context)).greeting || 'Hi';
+    const name = this._guestDisplayFirstName(context);
+    const days = this._daysSinceCheckout(context);
+    const when = this._friendlyCheckoutWhen(context);
+    const stayBit = days === 1 ? `your stay was ${when}` : `your stay ended ${when}`;
+    return (
+      `${greeting}, ${name}, I'm sorry — ${stayBit}. Checkout was at 10am. ` +
+      `The door code is already off the lock, and we have a new guest in the unit, which is why you can't get in. ` +
+      `Hope you had a great time in Portland!`
+    );
+  }
+
+  _applyPostStayAccessPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._isAfterCheckoutDay(context)) return { applied: false };
+    if (!this._looksLikePreCheckinAccessAttempt(guestMessage)) return { applied: false };
+    return {
+      applied: true,
+      typeOfMessageReceived: 'POST_STAY_ACCESS',
+      proposedResponse: this._postStayAccessDraft(context),
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+      postStayAccess: true,
+    };
+  }
+
+  _applyStayWindowAccessPolicy(parsed = {}, context = {}, guestMessage = '') {
+    const early = this._applyNotCheckinDayAccessPolicy(parsed, context, guestMessage);
+    if (early.applied) return early;
+    return this._applyPostStayAccessPolicy(parsed, context, guestMessage);
+  }
+
+  _assignStayWindowAccess(target = {}, policy = {}) {
+    if (!policy?.applied) return false;
+    target.typeOfMessageReceived = policy.typeOfMessageReceived;
+    target.proposedResponse = policy.proposedResponse;
+    target.shouldReply = true;
+    target.confidence = 1.0;
+    target.escalated = false;
+    if (policy.notCheckinDayAccess) target.notCheckinDayAccess = true;
+    if (policy.postStayAccess) target.postStayAccess = true;
+    return true;
   }
 
   /**
@@ -2175,7 +2252,10 @@ export class GuestMessagingAgent {
     if (!this._isFirstHostOnConfirmedReservation(context)) {
       return { applied: false };
     }
-    if (this._isBeforeCheckInDay(context) && this._looksLikePreCheckinAccessAttempt(guestMessage)) {
+    if (
+      this._looksLikePreCheckinAccessAttempt(guestMessage) &&
+      (this._isBeforeCheckInDay(context) || this._isAfterCheckoutDay(context))
+    ) {
       return { applied: false };
     }
     // Do not override post-welcome thanks / in-stay pure acks when host already welcomed
@@ -3107,6 +3187,10 @@ export class GuestMessagingAgent {
    */
   _isApt2StreetDoorLockout(guestMessage = '', context = {}) {
     if (!this._isApt2Listing(context)) return false;
+    // Before check-in or after checkout: never treat as in-stay street lockout.
+    if (this._isBeforeCheckInDay(context) || this._isAfterCheckoutDay(context)) {
+      return false;
+    }
 
     // Never override post-stay gratitude / review promises with lockout recovery.
     if (this._isPostStayGratitudeOrReviewPromise(guestMessage, context)) {
@@ -3173,7 +3257,7 @@ export class GuestMessagingAgent {
    * + prior-thread history used to re-fire this after checkout thanks — Henry review incident).
    */
   _applyApt2StreetDoorLockoutPolicy(parsed, context = {}, guestMessage = '') {
-    if (this._isBeforeCheckInDay(context)) {
+    if (this._isBeforeCheckInDay(context) || this._isAfterCheckoutDay(context)) {
       return { applied: false };
     }
     const detected = this._isApt2StreetDoorLockout(guestMessage, context);
@@ -3368,6 +3452,17 @@ export class GuestMessagingAgent {
       const when = this._friendlyCheckInWhen(context);
       lines.push(
         `- CRITICAL NOT-CHECK-IN-DAY ACCESS (Michael incident 2026-08-20 Apt 2): Guest is asking apt # / door / cannot get in BEFORE check-in day. Classify as NOT_CHECKIN_DAY_ACCESS. proposedResponse MUST say "today is not your check-in day", that check-in is ${when} at 4pm (use "tomorrow" or "on Monday" — never a calendar date like August 21, 2026), and "The door code is not on the lock until the morning of your arrival". MUST NOT give backup door codes, lockbox codes, or lockout recovery. MUST NOT imply they can enter today.`
+      );
+    }
+
+    if (this._isAfterCheckoutDay(context) && this._looksLikePreCheckinAccessAttempt(message)) {
+      const when = this._friendlyCheckoutWhen(context);
+      const stayBit =
+        this._daysSinceCheckout(context) === 1
+          ? `your stay was ${when}`
+          : `your stay ended ${when}`;
+      lines.push(
+        `- CRITICAL POST-STAY ACCESS (day-after checkout): Guest cannot get in / asks apt # / is at the door AFTER checkout. Classify as POST_STAY_ACCESS. proposedResponse MUST apologize and say ${stayBit}, "Checkout was at 10am", "The door code is already off the lock", and "we have a new guest in the unit". Use "yesterday" or "on Monday" — never a calendar date. MUST NOT give backup door codes, lockbox codes, or lockout recovery. MUST NOT help them enter.`
       );
     }
 
@@ -4648,19 +4743,17 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = true;
     }
 
-    const notCheckinDayAccessFinal = this._applyNotCheckinDayAccessPolicy(
+    const stayWindowAccessFinal = this._applyStayWindowAccessPolicy(
       finalResult,
       enrichedContext,
       guestMessage
     );
-    if (notCheckinDayAccessFinal.applied) {
-      console.log('[Agent] → Not-check-in-day access policy applied (door code not on lock yet)');
-      finalResult.typeOfMessageReceived = notCheckinDayAccessFinal.typeOfMessageReceived;
-      finalResult.proposedResponse = notCheckinDayAccessFinal.proposedResponse;
-      finalResult.shouldReply = true;
-      finalResult.confidence = 1.0;
-      finalResult.escalated = false;
-      finalResult.notCheckinDayAccess = true;
+    if (stayWindowAccessFinal.applied) {
+      const label = stayWindowAccessFinal.postStayAccess
+        ? 'Post-stay access policy applied (stay already ended, code off lock)'
+        : 'Not-check-in-day access policy applied (door code not on lock yet)';
+      console.log(`[Agent] → ${label}`);
+      this._assignStayWindowAccess(finalResult, stayWindowAccessFinal);
     }
 
     const apt2StreetLockoutPolicyFinal = this._applyApt2StreetDoorLockoutPolicy(
@@ -4932,19 +5025,17 @@ export class GuestMessagingAgent {
       }
     }
 
-    const notCheckinDayAccessLast = this._applyNotCheckinDayAccessPolicy(
+    const stayWindowAccessLast = this._applyStayWindowAccessPolicy(
       finalResult,
       enrichedContext,
       guestMessage
     );
-    if (notCheckinDayAccessLast.applied) {
-      console.log('[Agent] → Not-check-in-day access policy applied (final)');
-      finalResult.typeOfMessageReceived = notCheckinDayAccessLast.typeOfMessageReceived;
-      finalResult.proposedResponse = notCheckinDayAccessLast.proposedResponse;
-      finalResult.shouldReply = true;
-      finalResult.confidence = 1.0;
-      finalResult.escalated = false;
-      finalResult.notCheckinDayAccess = true;
+    if (stayWindowAccessLast.applied) {
+      const label = stayWindowAccessLast.postStayAccess
+        ? 'Post-stay access policy applied (final)'
+        : 'Not-check-in-day access policy applied (final)';
+      console.log(`[Agent] → ${label}`);
+      this._assignStayWindowAccess(finalResult, stayWindowAccessLast);
     }
 
     console.log('[Agent] handleMessage complete. Final decision type:', finalResult.typeOfMessageReceived);
@@ -4965,6 +5056,7 @@ export class GuestMessagingAgent {
       : [finalResult.typeOfMessageReceived];
     const isAccessIssue =
       !finalResult.notCheckinDayAccess &&
+      !finalResult.postStayAccess &&
       (finalCategories.some((c) => accessIssueCategories.includes(c)) ||
         this._isApt2StreetDoorLockout(guestMessage, enrichedContext));
 

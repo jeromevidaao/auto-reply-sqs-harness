@@ -452,6 +452,7 @@ describe('EventRequestTool (no LLM)', () => {
         guestName: 'Henry',
         checkIn: '2026-07-24',
         checkOut: '2026-07-26',
+        asOfDate: '2026-07-25',
         listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
         propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
         guestPhone: '6468040123',
@@ -2924,6 +2925,117 @@ describe('Not-check-in-day access (Michael, no LLM)', () => {
   });
 });
 
+describe('Post-stay access (day after checkout, no LLM)', () => {
+  const alexCtx = {
+    guestName: 'Alex',
+    listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+    propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+    checkIn: '2026-08-21T16:00:00-04:00',
+    checkOut: '2026-08-24T10:00:00-04:00',
+    asOfDate: '2026-08-25',
+    asOfInstant: '2026-08-25T18:04:00-04:00',
+  };
+  const cantGetIn =
+    "The door code is not working, we can't get in. Can you please confirm what our apt # is?";
+
+  it('detects cannot-get-in the day after checkout', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    assert.equal(agent._isAfterCheckoutDay(alexCtx), true);
+    assert.equal(agent._isBeforeCheckInDay(alexCtx), false);
+    assert.equal(agent._daysSinceCheckout(alexCtx), 1);
+    assert.equal(agent._looksLikePreCheckinAccessAttempt(cantGetIn), true);
+  });
+
+  it('rewrites to post-stay access (does not treat as lockout)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyPostStayAccessPolicy(
+      { typeOfMessageReceived: 'DOOR_CODE_ISSUE', proposedResponse: 'Try backup code 0000' },
+      alexCtx,
+      cantGetIn
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'POST_STAY_ACCESS');
+    assert.equal(applied.shouldReply, true);
+    assert.match(applied.proposedResponse, /I'?m sorry/i);
+    assert.match(applied.proposedResponse, /your stay was yesterday/i);
+    assert.doesNotMatch(applied.proposedResponse, /August 24/);
+    assert.match(applied.proposedResponse, /Checkout was at 10am/i);
+    assert.match(applied.proposedResponse, /door code is already off the lock/i);
+    assert.match(applied.proposedResponse, /new guest/i);
+    assert.doesNotMatch(applied.proposedResponse, /backup/i);
+    assert.doesNotMatch(applied.proposedResponse, /lock\s*box/i);
+
+    const lockout = agent._applyApt2StreetDoorLockoutPolicy({}, alexCtx, cantGetIn);
+    assert.equal(lockout.applied, false);
+  });
+
+  it('does not apply on checkout day or in-stay', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const onCheckout = agent._applyPostStayAccessPolicy(
+      {},
+      { ...alexCtx, asOfDate: '2026-08-24' },
+      cantGetIn
+    );
+    assert.equal(onCheckout.applied, false);
+    const inStay = agent._applyPostStayAccessPolicy(
+      {},
+      { ...alexCtx, asOfDate: '2026-08-22' },
+      cantGetIn
+    );
+    assert.equal(inStay.applied, false);
+  });
+
+  it('says on Monday when checkout was several days ago', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applyPostStayAccessPolicy(
+      {},
+      { ...alexCtx, asOfDate: '2026-08-27' },
+      cantGetIn
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /your stay ended on Monday/i);
+    assert.doesNotMatch(applied.proposedResponse, /yesterday/i);
+    assert.doesNotMatch(applied.proposedResponse, /August 24/);
+  });
+
+  it('Henry-style lockout after checkout becomes post-stay, not street lockbox', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const lockedOutMsg =
+      'We accidentally locked the door not knowing that the front door locked and are unable to get into the Airbnb.';
+    const ctx = {
+      guestName: 'Henry',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+      guestPhone: '6468040123',
+      checkIn: '2026-07-24',
+      checkOut: '2026-07-26',
+      asOfDate: '2026-07-27',
+    };
+    const stayWindow = agent._applyStayWindowAccessPolicy({}, ctx, lockedOutMsg);
+    assert.equal(stayWindow.applied, true);
+    assert.equal(stayWindow.typeOfMessageReceived, 'POST_STAY_ACCESS');
+    assert.match(stayWindow.proposedResponse, /yesterday/i);
+    assert.doesNotMatch(stayWindow.proposedResponse, /lock\s*box/i);
+    const lockout = agent._applyApt2StreetDoorLockoutPolicy({}, ctx, lockedOutMsg);
+    assert.equal(lockout.applied, false);
+  });
+});
+
 describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
   // These tests require a real GROK_API_KEY.
   // The mock LLM has been permanently removed (even for unit tests).
@@ -3271,5 +3383,48 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
     assert.doesNotMatch(result.proposedResponse, /lock\s*box/i);
     assert.doesNotMatch(result.proposedResponse, /you'?re staying in Sunny Apt 2/i);
     console.log('[michael-not-checkin-day] proposedResponse:\n', result.proposedResponse);
+  });
+
+  it('day-after-checkout cannot-get-in: sorry, stay was yesterday (mock Hospitable, live Grok)', async () => {
+    const mockHospitable = {
+      async hasGuestsOnDate() { return false; },
+      async getConversationMessages() { return []; },
+      async getReservationMessages() { return []; },
+      async getInquiryMessages() { return []; },
+      async getThreadMessages() { return []; },
+    };
+    const agent = new GuestMessagingAgent({
+      llm: 'auto',
+      projectRoot: projectRootForTests,
+      hospitableClient: mockHospitable,
+      requireLiveConversationHistory: false,
+    });
+    const msg =
+      "The door code is not working, we can't get in. Can you please confirm what our apt # is?";
+    const result = await agent.processMessage(msg, {
+      guestName: 'Alex',
+      listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+      propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+      checkIn: '2026-08-21T16:00:00-04:00',
+      checkOut: '2026-08-24T10:00:00-04:00',
+      asOfDate: '2026-08-25',
+      asOfInstant: '2026-08-25T18:04:00-04:00',
+      nowForGreeting: new Date('2026-08-25T18:04:00-04:00'),
+      reservationId: 'test-post-stay-not-sent',
+      conversation_id: 'test-post-stay-not-sent',
+    });
+
+    assert.equal(result.shouldReply, true, 'Must auto-reply that the stay already ended');
+    assert.equal(result.typeOfMessageReceived, 'POST_STAY_ACCESS');
+    assert.ok(result.proposedResponse && result.proposedResponse !== 'none');
+    assert.match(result.proposedResponse, /I'?m sorry/i);
+    assert.match(result.proposedResponse, /yesterday/i);
+    assert.doesNotMatch(result.proposedResponse, /August 24/);
+    assert.match(result.proposedResponse, /Checkout was at 10am/i);
+    assert.match(result.proposedResponse, /door code is already off the lock/i);
+    assert.match(result.proposedResponse, /new guest/i);
+    assert.doesNotMatch(result.proposedResponse, /backup/i);
+    assert.doesNotMatch(result.proposedResponse, /lock\s*box/i);
+    console.log('[post-stay-late-access] proposedResponse:\n', result.proposedResponse);
   });
 });

@@ -5,6 +5,7 @@
 **Scope — extremely narrow**:
 - **Only** Sunny Apt 2 / listing `114663c5-0709-4eff-a868-fa9ebd6ed42d`.
 - **Never** use for 1B, Apt 3, wrong-entrance guidance, normal door-code failures, or "did I lock the door?" anxiety (`DOOR_LOCKING_ISSUE`).
+- **Never** use before check-in day (`NOT_CHECKIN_DAY_ACCESS`) or after checkout day (`POST_STAY_ACCESS`) — do not hand a street key to someone whose stay has not started or has already ended.
 
 ## The real-world failure mode (Henry incident)
 

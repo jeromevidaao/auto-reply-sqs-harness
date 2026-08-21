@@ -14,3 +14,5 @@
 - Schlage PINs are programmed at **5:00 AM ET on check-in day** (Airbnb and HomeExchange).
 
 This is distinct from `EARLY_CHECKIN` (asking to arrive before 4pm **on** check-in day).
+
+The reverse (guest at the door **after** checkout, next stay already in) is `POST_STAY_ACCESS` — see `post-stay-access.md`.

@@ -1,0 +1,41 @@
+{
+  "id": "post-stay-late-access",
+  "description": "Guest is at the building the day after checkout, cannot get in (code already off the lock; next guest is in the unit). Must apologize, say the stay was yesterday, checkout was 10am, door code already off the lock, and a new guest is in. Do not send lockout/backup codes. Do not call live Hospitable.",
+  "guestMessage": "The door code is not working, we can't get in. Can you please confirm what our apt # is?",
+  "guestName": "Alex",
+  "checkIn": "2026-08-21T16:00:00-04:00",
+  "checkOut": "2026-08-24T10:00:00-04:00",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "Sunny Downtown 2 Bed Apt, Parking",
+  "context": {
+    "asOfDate": "2026-08-25",
+    "asOfInstant": "2026-08-25T18:04:00-04:00",
+    "nowForGreeting": "2026-08-25T18:04:00-04:00",
+    "reservationId": "test-post-stay-late-access-not-sent",
+    "conversationHistory": [],
+    "suggestedResponseSnippet": "Good afternoon, Alex, I'm sorry — your stay was yesterday. Checkout was at 10am. The door code is already off the lock, and we have a new guest in the unit, which is why you can't get in. Hope you had a great time in Portland!"
+  },
+  "rubric": {
+    "expectedCategory": "POST_STAY_ACCESS",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "forbiddenPhrases": [
+      "backup",
+      "lock box",
+      "lockbox",
+      "have a great stay",
+      "August 24, 2026",
+      "you're staying in Sunny Apt 2"
+    ],
+    "requiredPhrases": [
+      "I'm sorry",
+      "yesterday",
+      "Checkout was at 10am",
+      "door code is already off the lock",
+      "new guest"
+    ]
+  },
+  "notes": "Reverse of Michael day-before access. Checkout 2026-08-24 (Monday), asOfDate 2026-08-25. Deterministic _applyPostStayAccessPolicy. Schlage codes drop at 11AM ET on checkout day."
+}
