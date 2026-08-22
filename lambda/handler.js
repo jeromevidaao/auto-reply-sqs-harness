@@ -53,6 +53,7 @@ import {
 } from '../src/utils/reservationAccept.js';
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
 import { runPreSendThreadRefresh } from '../src/utils/preSendThreadRefresh.js';
+import { acquireReservationLock, releaseReservationLock } from '../src/utils/reservationLock.js';
 import { persistGuestMessagingRun } from '../src/utils/runMonitor.js';
 import { S3Client } from '@aws-sdk/client-s3';
 import { isHomeExchangePayload, handleHomeExchangeMessage, extractHomeExchangeMessage } from '../src/useCases/homeExchange.js';
@@ -1189,7 +1190,26 @@ export const handler = async (event, context) => {
   });
 
 
+  let reservationLock = { acquired: false };
   try {
+    reservationLock = await acquireReservationLock({
+      ddb: ddbClient,
+      reservationId: msgContext.reservationId || msgContext.reservation_id,
+      conversationId: msgContext.conversation_id || msgContext.airbnb_conversation_id,
+      holder: requestId,
+    });
+    if (reservationLock.skipped) {
+      console.log(`[Handler] reservation lock skipped (${reservationLock.reason})`);
+    } else if (reservationLock.acquired) {
+      console.log(
+        `[Handler] reservation lock acquired key=${reservationLock.key} waitedMs=${reservationLock.waitedMs}`
+      );
+    } else {
+      console.warn(
+        `[Handler] reservation lock timeout after ${reservationLock.waitedMs}ms — proceeding without lock key=${reservationLock.key}`
+      );
+    }
+
     const result = await agent.handleMessage(guestMessage, msgContext);
     const duration = Date.now() - startTime;
 
@@ -1306,6 +1326,12 @@ export const handler = async (event, context) => {
         // while Grok ran the guest sent "Richard popped in and helped" + "Thanks"; a second
         // Lambda then sent another "You're welcome!". Fetch immediately before POST.
         try {
+          const traces =
+            result.earlyTraces?.conversationTraces ||
+            result.conversationTraces ||
+            result.conversationContext ||
+            msgContext.conversationTraces ||
+            {};
           const preSend = await runPreSendThreadRefresh({
             hospitableClient,
             reservationId: reservationId && !msgContext.isInquiry ? reservationId : null,
@@ -1315,6 +1341,9 @@ export const handler = async (event, context) => {
             originalResult: result,
             context: msgContext,
             alreadyReprocessed: !!msgContext._preSendReprocessed,
+            existingThread:
+              traces.recentConversationMessages || msgContext.conversationHistory || null,
+            liveFetchedAt: traces.liveFetchedAt || null,
             reprocess: async (latestMessage, ctx) => agent.handleMessage(latestMessage, ctx),
           });
           if (preSend.reprocessed) {
@@ -1408,53 +1437,9 @@ export const handler = async (event, context) => {
             await hospitableClient.sendMessage(convId, result.proposedResponse);
           }
           console.log('✅ Reply successfully sent to guest via Hospitable');
-
-          // === Verification (best-effort only — never a hard failure) ===
-          // A 404 or missing message here is usually just eventual consistency.
-          // The actual send already succeeded, so we treat verification problems as warnings.
-          try {
-            await new Promise(resolve => setTimeout(resolve, 3000)); // slightly longer sleep for consistency
-
-            let recentMessages = null;
-            if (reservationId && !msgContext.isInquiry) {
-              recentMessages = await hospitableClient.getThreadMessages({ reservationId }, 5);
-            } else {
-              // Resolve conversation_id if we only have reservationId (inquiries / legacy paths)
-              let verifyConvId = convId;
-              if (!verifyConvId && reservationId) {
-                try {
-                  verifyConvId = await hospitableClient.getConversationIdForReservation(reservationId);
-                } catch (e) {
-                  console.warn('[Handler] Could not resolve conversation_id for verification:', e.message);
-                }
-              }
-
-              if (!verifyConvId) {
-                console.warn('⚠️ No conversation_id available for post-send verification (send itself succeeded).');
-              } else {
-                recentMessages = await hospitableClient.getThreadMessages({ conversationId: verifyConvId }, 5);
-              }
-            }
-
-            if (recentMessages) {
-              const latestMessage = recentMessages[0];
-
-              if (latestMessage && latestMessage.body && latestMessage.body.includes(sentPreview)) {
-                console.log('✅ Verification successful: The reply appears in recent messages.');
-              } else {
-                const recentPreviews = recentMessages.map(m => ({
-                  sender_type: m.sender_type,
-                  body_preview: m.body?.substring(0, 100)
-                }));
-                console.warn('⚠️ Verification could not yet confirm the sent message (eventual consistency or timing).');
-                console.warn('   Sent preview:', sentPreview);
-                console.warn('   Recent messages:', JSON.stringify(recentPreviews, null, 2));
-              }
-            }
-          } catch (verifyErr) {
-            // Never let verification errors cause a hard Lambda failure
-            console.warn('⚠️ Post-send verification step encountered an error (non-critical):', verifyErr.message);
-          }
+          // Do not GET the thread again after a 200 POST. That verify GET sat in the
+          // same ~2/min per-reservation bucket and 429'd sibling Lambdas (Michael 2026-08-21).
+          // Timeout/5xx still confirm via GET in the send catch + _sendWithConfirm recover.
 
         } catch (sendError) {
           // Timeout/429 can mean Hospitable accepted the POST but the client
@@ -1783,5 +1768,20 @@ export const handler = async (event, context) => {
         },
       }
     );
+  } finally {
+    if (reservationLock.acquired) {
+      try {
+        const rel = await releaseReservationLock({
+          ddb: ddbClient,
+          key: reservationLock.key,
+          holder: requestId,
+        });
+        console.log(
+          `[Handler] reservation lock release ${rel.released ? 'ok' : rel.reason || 'failed'} key=${reservationLock.key}`
+        );
+      } catch (e) {
+        console.warn('[Handler] reservation lock release failed:', e?.message || e);
+      }
+    }
   }
 };

@@ -163,6 +163,60 @@ describe('pre-send thread refresh (Michael double you-are-welcome)', () => {
     assert.equal(out.skipSend, false);
   });
 
+  it('reuses a fresh live thread and does not GET again', async () => {
+    let gets = 0;
+    const client = {
+      async getThreadMessages() {
+        gets += 1;
+        throw new Error('should not GET when live thread is fresh');
+      },
+    };
+    const fetchedAt = Date.parse('2026-08-21T18:41:16Z');
+    const out = await runPreSendThreadRefresh({
+      hospitableClient: client,
+      reservationId: 'res-1',
+      originalGuestMessage: 'Thanks',
+      originalResult: {
+        proposedResponse: "You're welcome!",
+        shouldReply: true,
+      },
+      existingThread: newestFirst,
+      liveFetchedAt: fetchedAt,
+      now: fetchedAt + 1200,
+      reprocess: async () => {
+        throw new Error('should not reprocess — Thanks is the latest guest turn');
+      },
+    });
+    assert.equal(gets, 0);
+    assert.equal(out.reusedLiveThread, true);
+    assert.equal(out.reprocessed, false);
+  });
+
+  it('GETs when the live thread is stale (LLM took longer than reuse window)', async () => {
+    let gets = 0;
+    const client = {
+      async getThreadMessages() {
+        gets += 1;
+        return newestFirst;
+      },
+    };
+    const fetchedAt = Date.parse('2026-08-21T18:41:16Z');
+    const out = await runPreSendThreadRefresh({
+      hospitableClient: client,
+      reservationId: 'res-1',
+      originalGuestMessage: 'Thanks',
+      originalResult: {
+        proposedResponse: "You're welcome!",
+        shouldReply: true,
+      },
+      existingThread: [msg('guest', 'Thanks', t2)],
+      liveFetchedAt: fetchedAt,
+      now: fetchedAt + 20_000,
+    });
+    assert.equal(gets, 1);
+    assert.equal(out.reusedLiveThread, false);
+  });
+
   it('isBareWelcomeAck matches short acks only', () => {
     assert.equal(isBareWelcomeAck("You're welcome, Michael!"), true);
     assert.equal(isBareWelcomeAck("You're welcome!"), true);

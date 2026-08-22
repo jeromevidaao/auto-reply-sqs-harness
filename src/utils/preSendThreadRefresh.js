@@ -10,6 +10,8 @@
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from './httpRetry.js';
 
 export const RECENT_WELCOME_ACK_MS = 10 * 60 * 1000;
+/** Reuse ConversationContextTool's live GET if it is this fresh (skip extra Hospitable GET). */
+export const PRE_SEND_REUSE_MAX_AGE_MS = 8000;
 
 export function isGuestMessage(m) {
   const t = String(m?.sender_type || m?.sender?.type || m?.role || '').toLowerCase();
@@ -126,6 +128,9 @@ export async function runPreSendThreadRefresh({
   reprocess,
   alreadyReprocessed = false,
   now = Date.now(),
+  existingThread = null,
+  liveFetchedAt = null,
+  reuseMaxAgeMs = PRE_SEND_REUSE_MAX_AGE_MS,
 } = {}) {
   const result0 = originalResult || {};
   if (!hospitableClient || typeof hospitableClient.getThreadMessages !== 'function') {
@@ -138,9 +143,25 @@ export async function runPreSendThreadRefresh({
       20
     );
 
+  const cached = Array.isArray(existingThread) ? existingThread : null;
+  const ageMs =
+    liveFetchedAt != null && Number.isFinite(Number(liveFetchedAt))
+      ? now - Number(liveFetchedAt)
+      : Infinity;
+  const canReuse = cached && ageMs >= 0 && ageMs <= reuseMaxAgeMs;
+
   let thread;
+  let reusedLiveThread = false;
   try {
-    thread = await fetchThread();
+    if (canReuse) {
+      thread = cached;
+      reusedLiveThread = true;
+      console.log(
+        `[preSend] reusing live thread from ${Math.round(ageMs)}ms ago (${cached.length} msgs) — skip GET`
+      );
+    } else {
+      thread = await fetchThread();
+    }
   } catch (err) {
     console.warn('[preSend] thread fetch failed (proceeding with original draft):', err?.message || err);
     return { result: result0, skipSend: false, reprocessed: false };
@@ -184,7 +205,7 @@ export async function runPreSendThreadRefresh({
     result.proposedResponse !== 'none' &&
     !result.escalated;
   if (!sendable) {
-    return { result, skipSend: false, reprocessed };
+    return { result, skipSend: false, reprocessed, reusedLiveThread };
   }
 
   let threadForDup = chrono;
@@ -199,8 +220,8 @@ export async function runPreSendThreadRefresh({
   const dup = shouldSkipDuplicateSend(threadForDup, result.proposedResponse, { now });
   if (dup.skip) {
     console.log(`[preSend] skip send — ${dup.reason}`);
-    return { result, skipSend: true, reprocessed, reason: dup.reason };
+    return { result, skipSend: true, reprocessed, reason: dup.reason, reusedLiveThread };
   }
 
-  return { result, skipSend: false, reprocessed, thread: threadForDup };
+  return { result, skipSend: false, reprocessed, thread: threadForDup, reusedLiveThread };
 }

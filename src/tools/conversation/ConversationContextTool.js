@@ -130,15 +130,14 @@ export class ConversationContextTool extends BaseTool {
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
         result.historySource = 'live_fetched';
+        result.liveFetchedAt = Date.now();
         result.recentMessageCount = allRecentMessages.length;
         result.traces.push(`Live history fetched successfully (${allRecentMessages.length} messages) — full recent thread available for anti-contradiction, greeting, and context scans`);
 
         // Make the live messages available to agent so _buildUserPrompt can include real conversationHistory.
         // This gives the LLM (and judge/reflection) visibility into prior host messages (e.g. recent "Good morning")
         // for anti-repetition, context, and better greeting decisions even if trace signals have lag.
-        if (allRecentMessages.length > 0) {
-          result.recentConversationMessages = allRecentMessages;
-        }
+        result.recentConversationMessages = allRecentMessages;
 
         if (recentHostMessages.length > 0) {
           const lastHost = recentHostMessages[0];
