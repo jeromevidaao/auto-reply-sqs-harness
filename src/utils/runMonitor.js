@@ -44,6 +44,19 @@ function pick(obj, keys) {
   return null;
 }
 
+function nestedSender(m) {
+  const s = m && m.sender;
+  if (!s || typeof s !== 'object') return '';
+  return s.type || s.role || s.sender_type || '';
+}
+
+function firstNonEmptyHistory(...cands) {
+  for (const c of cands) {
+    if (Array.isArray(c) && c.length) return c;
+  }
+  return [];
+}
+
 export function clipHistory(raw, limit = HISTORY_LIMIT) {
   if (!Array.isArray(raw) || !raw.length) return [];
   return raw.slice(-limit).map((m) => {
@@ -51,6 +64,7 @@ export function clipHistory(raw, limit = HISTORY_LIMIT) {
     if (typeof m === 'string') return { role: 'unknown', body: clip(m, BODY_MAX), at: null, name: null };
     const role = String(
       pick(m, ['sender_type', 'senderType', 'role', 'from', 'authorRole']) ||
+        nestedSender(m) ||
         (m.host === true || m.isHost === true ? 'host' : '') ||
         (m.guest === true || m.isGuest === true ? 'guest' : '') ||
         'unknown'
@@ -59,7 +73,10 @@ export function clipHistory(raw, limit = HISTORY_LIMIT) {
       role: role === 'owner' ? 'host' : role,
       body: clip(pick(m, ['body', 'message', 'text', 'content']) || '', BODY_MAX),
       at: pick(m, ['created_at', 'createdAt', 'at', 'timestamp', 'sent_at']) || null,
-      name: pick(m, ['sender_name', 'senderName', 'name', 'author', 'fromName']) || null,
+      name:
+        pick(m, ['sender_name', 'senderName', 'name', 'author', 'fromName']) ||
+        (m.sender && (m.sender.name || m.sender.full_name)) ||
+        null,
     };
   });
 }
@@ -136,12 +153,14 @@ export function buildRunItem(input) {
     result.typeOfMessageReceived ||
     result.category ||
     'UNCATEGORIZED';
-  const history =
-    extra.conversationHistory ||
-    result.conversationHistory ||
-    ctx.conversationHistory ||
-    ctx.messages ||
-    [];
+  const traces = result.earlyTraces?.conversationTraces || ctx.conversationTraces || {};
+  const history = firstNonEmptyHistory(
+    extra.conversationHistory,
+    result.conversationHistory,
+    traces.recentConversationMessages,
+    ctx.conversationHistory,
+    ctx.messages
+  );
 
   return {
     pk: RUN_PK,

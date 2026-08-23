@@ -91,6 +91,35 @@ describe('runMonitor', () => {
     assert.ok(item.expiresAt > 0);
   });
 
+  it('persists live-fetched thread from earlyTraces when context history is empty', () => {
+    const item = buildRunItem({
+      requestId: 'live-hist',
+      startTime: 1,
+      durationMs: 10,
+      guestMessage: 'Thanks',
+      context: { guestName: 'Kailyn', conversationHistory: [] },
+      result: {
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        shouldReply: true,
+        proposedResponse: "You're welcome, Kailyn!",
+        earlyTraces: {
+          conversationTraces: {
+            recentConversationMessages: [
+              { sender_type: 'guest', body: 'Hi', created_at: '2026-08-22T12:00:00Z' },
+              { sender: { type: 'host', name: 'Jerome' }, body: 'Welcome!' },
+              { sender_type: 'guest', body: 'Thanks' },
+            ],
+          },
+        },
+      },
+      extra: { sent: true },
+    });
+    assert.equal(item.conversationHistory.length, 3);
+    assert.equal(item.conversationHistory[1].role, 'host');
+    assert.equal(item.conversationHistory[1].name, 'Jerome');
+    assert.equal(item.conversationHistory[2].body, 'Thanks');
+  });
+
   it('persistGuestMessagingRun never throws and uses injected put', async () => {
     const seen = [];
     const out = await persistGuestMessagingRun(
