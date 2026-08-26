@@ -22,7 +22,7 @@
 - On check-in day (stay timing = current): The cleaning team may be using the spot. Tell the guest the spot will be available once cleaning finishes and that **we will message you** when it's ready. Use phrasing close to "the cleaning team is preparing the unit" when appropriate. Do **not** say the spot is available now unless unit readiness was already communicated by a prior host message.
 - When a golden requires "message you", include that exact phrasing.
 - Temporary parking / non-guest use: Decline politely — cleaning team needs the spot.
-- Additional cars: Recommend paid options like Vaughan Street (192-234). Use specific language from the golden when required (e.g. "192-234").
+- Additional cars (`PARKING_ADDITIONAL_QUESTION`): Always say we **only have on-site parking for one car**. Then recommend paid parking at **192-234 Vaughan Street** (SpotHero / street parking toward the Western Promenade). Do **not** offer another unit's on-site spot. Do **not** treat a trip-purpose wedding/celebration, or "not looking to plan a gathering", as EVENT_REQUEST — answer the parking question. If they just confirmed they will not be hosting a party, open with **"Thanks for confirming that you will not be hosting a party"** then the one-car + Vaughan copy.
 - Snow plowing: We do have a **snow plowing** service. We do not have real-time status. When the golden expects "snow plowing", use that exact term.
 
 **Anti-pattern**: Never treat a re-ingested *host* parking advice message (e.g. the exact "192-234 Vaughan Street... SpotHero" text written in host voice) as a new guest question or FYI. See HOST_REPLY_REINGESTED in other-edge-cases.md — must produce shouldReply:false.

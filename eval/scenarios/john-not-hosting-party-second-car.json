@@ -1,0 +1,47 @@
+{
+  "id": "john-not-hosting-party-second-car",
+  "description": "John (Apt 2) clarifies after a false event decline: not looking to plan a gathering, just needs parking for a second car. Must thank him for confirming no party and give additional-parking copy (one on-site car + Vaughan).",
+  "guestMessage": "I think you misunderstood. Not looking to plan a gathering. Just need parking for a second car.",
+  "guestName": "John",
+  "checkIn": "2026-08-28T16:00:00-04:00",
+  "checkOut": "2026-08-30T10:00:00-04:00",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "Sunny Downtown 2 Bed Apt, Parking",
+  "context": {
+    "asOfDate": "2026-08-26",
+    "asOfInstant": "2026-08-26T08:46:00-04:00",
+    "nowForGreeting": "2026-08-26T08:46:00-04:00",
+    "reservationId": "19a146d8-51a4-4aa9-ab47-6589ab6160de",
+    "conversationId": "554706e0-d736-4345-81ec-29bd1dc64b20",
+    "suggestedResponseSnippet": "Thanks for confirming that you will not be hosting a party. We only have on-site parking for one car. For paid parking, we have 192-234 Vaughan Street Parking nearby. The alternative is to find street parking in the area, usually towards the Western Promenade. I recommend using the SpotHero application, where you can book in advance and get cheaper rates.",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi Jerome & Ruby.\n\nWe are excited for our visit to Portland and the celebration of our niece's wedding. Thank you for the directions and check in info.\n\nDue to logistics we will be traveling to Portland with two cars. Can you recommend parking for the second vehicle? Is it possible to utilize another spot at the residence?\n\nPlease advise.\n\nThanks,\n\nJohn"
+      },
+      {
+        "sender_type": "host",
+        "body": "Good morning, John. You're welcome! Thank you for thinking of our place for your event! Unfortunately, we're not able to accommodate events or gatherings as this is a residential building and our apartment isn't set up for those types of activities. We appreciate your understanding and hope you find a perfect venue for your celebration!"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "PARKING_ADDITIONAL_QUESTION",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "forbiddenPhrases": [
+      "not able to accommodate events or gatherings",
+      "perfect venue for your celebration",
+      "thinking of our place for your event"
+    ],
+    "requiredPhrases": [
+      "Thanks for confirming that you will not be hosting a party",
+      "on-site parking for one car",
+      "Vaughan Street",
+      "192-234"
+    ]
+  },
+  "notes": "John Apt 2 2026-08-26 clarification after the false event decline. Must (1) thank for confirming they will not be hosting a party (2) existing additional-parking copy plus only one on-site car. Do not re-send the event decline (that send was skipped as equivalent in production)."
+}

@@ -5,6 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { GuestMessagingAgent } from '../src/agent.js';
 import { setHostContactsForTests, TEST_HOST_CONTACTS, clearHostContactsCache } from '../src/config/hostContacts.js';
 import { EventRequestTool } from '../src/tools/event/EventRequestTool.js';
+import {
+  additionalParkingDraft,
+  isAdditionalParkingAsk,
+  isEventHostingDenial,
+  isTripPurposeEventMention,
+} from '../src/tools/parking/additionalParking.js';
 import { ThermostatTool } from '../src/tools/hvac/ThermostatTool.js';
 import { StayExtensionTool } from '../src/tools/stay-extension/StayExtensionTool.js';
 import { PostCheckoutParkingTool } from '../src/tools/parking/PostCheckoutParkingTool.js';
@@ -72,6 +78,88 @@ describe('EventRequestTool (no LLM)', () => {
       msg
     );
     assert.equal(applied.applied, false);
+  });
+
+  const johnSecondCarMsg =
+    "Hi Jerome & Ruby.\n\nWe are excited for our visit to Portland and the celebration of our niece's wedding. Thank you for the directions and check in info.\n\nDue to logistics we will be traveling to Portland with two cars. Can you recommend parking for the second vehicle? Is it possible to utilize another spot at the residence?\n\nPlease advise.\n\nThanks,\n\nJohn";
+  const johnNoPartyMsg =
+    'I think you misunderstood. Not looking to plan a gathering. Just need parking for a second car.';
+
+  it('does not treat niece wedding + second-car parking as EVENT_REQUEST (John Apt 2)', async () => {
+    const tool = new EventRequestTool();
+    const result = await tool.execute(johnSecondCarMsg);
+    assert.equal(result.detected, false);
+    assert.equal(isAdditionalParkingAsk(johnSecondCarMsg), true);
+    assert.equal(isTripPurposeEventMention(johnSecondCarMsg), true);
+  });
+
+  it('does not treat "not looking to plan a gathering" + second car as EVENT_REQUEST', async () => {
+    const tool = new EventRequestTool();
+    const result = await tool.execute(johnNoPartyMsg);
+    assert.equal(result.detected, false);
+    assert.equal(result.deniedEvent, true);
+    assert.equal(isEventHostingDenial(johnNoPartyMsg), true);
+    assert.equal(isAdditionalParkingAsk(johnNoPartyMsg), true);
+  });
+
+  it('skips event policy when LLM labels second-car parking as EVENT_REQUEST', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyEventRequestPolicy(
+      {
+        typeOfMessageReceived: 'EVENT_REQUEST',
+        proposedResponse: "Thank you for thinking of our place for your event! Unfortunately, we're not able to accommodate events or gatherings as this is a residential building and our apartment isn't set up for those types of activities. We appreciate your understanding and hope you find a perfect venue for your celebration!",
+      },
+      { guestName: 'John', earlyEventDetection: { detected: true } },
+      johnSecondCarMsg
+    );
+    assert.equal(applied.applied, false);
+  });
+
+  it('forces additional-parking copy (one on-site car + Vaughan) for second-car asks', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyAdditionalParkingPolicy(
+      {
+        typeOfMessageReceived: 'EVENT_REQUEST',
+        proposedResponse: "Unfortunately, we're not able to accommodate events or gatherings.",
+      },
+      { guestName: 'John' },
+      johnSecondCarMsg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'PARKING_ADDITIONAL_QUESTION');
+    assert.match(applied.proposedResponse, /on-site parking for one car/i);
+    assert.match(applied.proposedResponse, /Vaughan Street/);
+    assert.match(applied.proposedResponse, /192-234/);
+    assert.doesNotMatch(applied.proposedResponse, /not able to accommodate events/i);
+  });
+
+  it('thanks for confirming no party then gives second-car parking (John clarification)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyAdditionalParkingPolicy(
+      {
+        typeOfMessageReceived: 'EVENT_REQUEST',
+        proposedResponse: "Unfortunately, we're not able to accommodate events or gatherings.",
+      },
+      { guestName: 'John' },
+      johnNoPartyMsg
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /Thanks for confirming that you will not be hosting a party/);
+    assert.match(applied.proposedResponse, /on-site parking for one car/i);
+    assert.match(applied.proposedResponse, /Vaughan Street/);
+    assert.match(applied.proposedResponse, /192-234/);
+    assert.doesNotMatch(applied.proposedResponse, /not able to accommodate events/i);
+    const seeded = additionalParkingDraft({ deniedEvent: true });
+    assert.match(seeded, /Thanks for confirming that you will not be hosting a party/);
   });
 
   it('does not false-positive on Airbnb booking intros or hotel recommendations', async () => {

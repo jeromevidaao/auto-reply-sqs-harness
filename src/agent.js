@@ -5,6 +5,13 @@ import { createLLMAdapter } from './adapters/llm/index.js';
 import { createNotificationAdapter } from './adapters/notification/index.js';
 import { ToolRegistry, CleaningIssueTool, ThermostatTool, HeatPumpTool, CancellationTool, EventRequestTool, AirbnbPolicyTool, UnitReadinessTool, ConversationContextTool, GoogleMapsTool, StayExtensionTool, PostCheckoutParkingTool } from './tools/index.js';
 import { EVENT_REQUEST_STANDARD_RESPONSE } from './tools/event/EventRequestTool.js';
+import {
+  additionalParkingDraft,
+  isAdditionalParkingAsk,
+  isEventHostingAsk,
+  isEventHostingDenial,
+  isTripPurposeEventMention,
+} from './tools/parking/additionalParking.js';
 import { ConversationHistoryRequiredError } from './errors/ConversationHistoryRequiredError.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 import {
@@ -452,6 +459,14 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
+    const additionalParkingPolicy = this._applyAdditionalParkingPolicy(parsed, context, guestMessage);
+    if (additionalParkingPolicy.applied) {
+      parsed.typeOfMessageReceived = additionalParkingPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = additionalParkingPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
     // Stay extension: force tool-grounded draft (calendar truth + alteration ask when free).
     // Prevents fabricating availability or falling back to "I'll check the calendar" after a live check.
     const stayExtPolicy = this._applyStayExtensionPolicy(parsed, context, guestMessage);
@@ -630,6 +645,14 @@ export class GuestMessagingAgent {
       confidence = postCheckoutParkingPolicy.confidence;
     }
 
+    const additionalParkingPolicyLate = this._applyAdditionalParkingPolicy(parsed, context, guestMessage);
+    if (additionalParkingPolicyLate.applied) {
+      parsed.typeOfMessageReceived = additionalParkingPolicyLate.typeOfMessageReceived;
+      parsed.proposedResponse = additionalParkingPolicyLate.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
     const postStayFeedbackPolicy = this._applyPostStayHousekeepingFeedbackPolicy(parsed, context, guestMessage);
     if (postStayFeedbackPolicy.applied) {
       parsed.typeOfMessageReceived = postStayFeedbackPolicy.typeOfMessageReceived;
@@ -732,6 +755,17 @@ export class GuestMessagingAgent {
     if (this._isPostCheckoutThankYou(msg, context)) {
       return { applied: false };
     }
+    // John Apt 2 2026-08-26: trip-purpose wedding, second-car parking, or
+    // "not looking to plan a gathering" must not force the event decline.
+    if (isEventHostingDenial(msg)) {
+      return { applied: false };
+    }
+    if (isAdditionalParkingAsk(msg) && !isEventHostingAsk(msg)) {
+      return { applied: false };
+    }
+    if (isTripPurposeEventMention(msg) && !isEventHostingAsk(msg)) {
+      return { applied: false };
+    }
 
     const categories = Array.isArray(parsed.typeOfMessageReceived)
       ? parsed.typeOfMessageReceived
@@ -756,6 +790,68 @@ export class GuestMessagingAgent {
     }
 
     return { applied: true, proposedResponse };
+  }
+
+  /**
+   * Second-car / extra vehicle parking. Always: only one on-site spot + Vaughan
+   * 192-234. If the guest just clarified they are not hosting a party, thank
+   * them for that confirmation first (John Apt 2 2026-08-26).
+   */
+  _applyAdditionalParkingPolicy(parsed = {}, context = {}, guestMessage = '') {
+    const msg = guestMessage || context.originalMessage || '';
+    if (!isAdditionalParkingAsk(msg)) {
+      return { applied: false };
+    }
+    if (this._isPostCheckoutParkingAsk(msg)) {
+      return { applied: false };
+    }
+    if (this._isPreCheckInParkingAsk(msg)) {
+      return { applied: false };
+    }
+    if (isEventHostingAsk(msg)) {
+      return { applied: false };
+    }
+
+    const deniedEvent = isEventHostingDenial(msg);
+    const draft = String(parsed.proposedResponse || '').trim();
+    const hasVaughan = /vaughan street/i.test(draft) && /192-234/.test(draft);
+    const hasOneCar = /on-site parking for one car/i.test(draft);
+    const hasThanks = !deniedEvent || /thanks for confirming that you will not be hosting a party/i.test(draft);
+    const hasEventDecline = /not able to accommodate events or gatherings/i.test(draft);
+
+    if (hasVaughan && hasOneCar && hasThanks && !hasEventDecline && draft.length > 40 && draft !== 'none') {
+      parsed.typeOfMessageReceived = 'PARKING_ADDITIONAL_QUESTION';
+      return {
+        applied: true,
+        typeOfMessageReceived: 'PARKING_ADDITIONAL_QUESTION',
+        proposedResponse: draft,
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
+    const body = additionalParkingDraft({ deniedEvent });
+    const name = this._guestDisplayFirstName(context);
+    const g = context.conversationTraces?.greeting;
+    const correctGreeting = getTimeBasedGreeting(this._nowForGreeting(context)).greeting;
+    let proposedResponse = body;
+    if (g?.shouldUseGreeting && name && name !== 'there') {
+      proposedResponse = `${correctGreeting}, ${name}, ${body}`;
+    } else if (name && name !== 'there' && !deniedEvent) {
+      proposedResponse = `Hi ${name}, ${body}`;
+    }
+    proposedResponse = proposedResponse.replace(/\s+/g, ' ').replace(/ ,/g, ',').trim();
+
+    parsed.typeOfMessageReceived = 'PARKING_ADDITIONAL_QUESTION';
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'PARKING_ADDITIONAL_QUESTION',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
   }
 
   _isPreArrivalSofaLinensAsk(guestMessage = '', context = {}) {
@@ -1948,6 +2044,7 @@ export class GuestMessagingAgent {
     const msg = (guestMessage || '').trim();
     if (!msg || /\?/.test(msg)) return false;
     if (this._isPostStayHousekeepingFeedback(msg)) return false;
+    if (isAdditionalParkingAsk(msg) || isEventHostingDenial(msg)) return false;
     if (!this._looksLikePlausibleFollowUp(msg) &&
         !(/^(thank you|thanks)/i.test(msg.toLowerCase()) && /(appreciate|excited)/i.test(msg.toLowerCase()))) {
       return false;
@@ -3997,13 +4094,30 @@ export class GuestMessagingAgent {
       lines.push('For any distance or "how close / walk / drive / Uber" questions, quote the driving + walking values above directly and naturally. Report both when the guest asks about walking distance or Uber.');
     }
 
-    if (context.earlyEventDetection?.detected) {
+    if (context.earlyEventDetection?.detected &&
+        !isAdditionalParkingAsk(message) &&
+        !isEventHostingDenial(message) &&
+        !isTripPurposeEventMention(message)) {
       const e = context.earlyEventDetection;
       lines.push('');
       lines.push('=== EVENT REQUEST DETECTED (MANDATORY standard decline) ===');
       lines.push('- Category MUST be: EVENT_REQUEST');
       lines.push('- Your proposedResponse MUST contain the exact substring "not able to accommodate events or gatherings"');
       lines.push(`- Use this standard response verbatim (greeting + name prefix optional): "${e.standardResponse || EVENT_REQUEST_STANDARD_RESPONSE}"`);
+    }
+
+    if (isAdditionalParkingAsk(message) && !isEventHostingAsk(message)) {
+      const denied = isEventHostingDenial(message);
+      lines.push('');
+      lines.push('=== ADDITIONAL / SECOND-CAR PARKING (MANDATORY) ===');
+      lines.push('- Category MUST be: PARKING_ADDITIONAL_QUESTION');
+      lines.push('- Category MUST NOT be EVENT_REQUEST — a niece\'s wedding / celebration as trip purpose, or "not looking to plan a gathering", is not hosting an event at the unit.');
+      lines.push('- We only have on-site parking for one car. Never offer a second on-site spot.');
+      lines.push('- Include 192-234 Vaughan Street and SpotHero for the extra vehicle.');
+      if (denied) {
+        lines.push('- Guest clarified they are not hosting a party. proposedResponse MUST contain the exact substring "Thanks for confirming that you will not be hosting a party" then the parking copy.');
+      }
+      lines.push(`- Use this body (greeting + name prefix optional): "${additionalParkingDraft({ deniedEvent: denied })}"`);
     }
 
     if (context.stayExtensionInfo) {
@@ -4962,6 +5076,20 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = true;
     }
 
+    const additionalParkingPolicyAfterEvent = this._applyAdditionalParkingPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (additionalParkingPolicyAfterEvent.applied) {
+      console.log('[Agent] → Additional parking policy applied (one on-site car + Vaughan; overrides event false positive)');
+      finalResult.typeOfMessageReceived = additionalParkingPolicyAfterEvent.typeOfMessageReceived;
+      finalResult.proposedResponse = additionalParkingPolicyAfterEvent.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+    }
+
     const earlyCheckinNameFinal = this._applyEarlyCheckinNamePolicy(finalResult, enrichedContext);
     if (earlyCheckinNameFinal.applied) {
       finalResult.proposedResponse = earlyCheckinNameFinal.proposedResponse;
@@ -5233,6 +5361,20 @@ export class GuestMessagingAgent {
       finalResult.confidence = postCheckoutParkingPolicyFinal.confidence;
       finalResult.postCheckoutParkingInfo =
         enrichedContext.postCheckoutParkingInfo || finalResult.postCheckoutParkingInfo || null;
+    }
+
+    const additionalParkingPolicyFinal = this._applyAdditionalParkingPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (additionalParkingPolicyFinal.applied) {
+      console.log('[Agent] → Additional parking policy applied (one on-site car + Vaughan Street)');
+      finalResult.typeOfMessageReceived = additionalParkingPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = additionalParkingPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
     }
 
     const postStayFeedbackPolicyFinal = this._applyPostStayHousekeepingFeedbackPolicy(finalResult, enrichedContext, guestMessage);
@@ -5559,6 +5701,47 @@ export class GuestMessagingAgent {
           ],
           deterministicGuard: true,
         };
+      }
+    }
+
+    if (
+      isAdditionalParkingAsk(guestMessage) ||
+      isEventHostingDenial(guestMessage)
+    ) {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const eventMismatch = firstDecision.typeOfMessageReceived === 'EVENT_REQUEST' ||
+        /not able to accommodate events|gatherings/i.test(draft);
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const llmAlreadyFixed = llmJudgeResult.verdict === 'REVISE' && revised &&
+        /vaughan street/i.test(revised) &&
+        /192-234/.test(revised) &&
+        !/not able to accommodate events/i.test(revised);
+
+      if (llmAlreadyFixed) {
+        return llmJudgeResult;
+      }
+
+      if (eventMismatch) {
+        const policy = this._applyAdditionalParkingPolicy(
+          { ...firstDecision },
+          context,
+          guestMessage
+        );
+        if (policy.applied) {
+          console.log('[Agent] → Deterministic judge guard: second-car parking / no-party clarification misclassified as EVENT_REQUEST (John Apt 2)');
+          return {
+            ...llmJudgeResult,
+            verdict: 'REVISE',
+            revisedResponse: policy.proposedResponse,
+            notes: (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+              'Deterministic guard: additional parking / not hosting a party — not an event request.',
+            issues: [
+              ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+              'Second-car parking or no-party clarification misclassified as EVENT_REQUEST (John Apt 2 2026-08-26).'
+            ],
+            deterministicGuard: true,
+          };
+        }
       }
     }
 

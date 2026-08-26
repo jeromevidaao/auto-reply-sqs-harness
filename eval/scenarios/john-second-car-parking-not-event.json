@@ -1,0 +1,54 @@
+{
+  "id": "john-second-car-parking-not-event",
+  "description": "John (Apt 2) mentions a niece's wedding as trip purpose and asks for parking for a second car. Production auto treated 'celebration' as EVENT_REQUEST and declined events instead of answering additional parking.",
+  "guestMessage": "Hi Jerome & Ruby.\n\nWe are excited for our visit to Portland and the celebration of our niece's wedding. Thank you for the directions and check in info.\n\nDue to logistics we will be traveling to Portland with two cars. Can you recommend parking for the second vehicle? Is it possible to utilize another spot at the residence?\n\nPlease advise.\n\nThanks,\n\nJohn",
+  "guestName": "John",
+  "checkIn": "2026-08-28T16:00:00-04:00",
+  "checkOut": "2026-08-30T10:00:00-04:00",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "Sunny Downtown 2 Bed Apt, Parking",
+  "context": {
+    "asOfDate": "2026-08-26",
+    "asOfInstant": "2026-08-26T08:43:00-04:00",
+    "nowForGreeting": "2026-08-26T08:43:00-04:00",
+    "reservationId": "19a146d8-51a4-4aa9-ab47-6589ab6160de",
+    "conversationId": "554706e0-d736-4345-81ec-29bd1dc64b20",
+    "suggestedResponseSnippet": "Hi John, We only have on-site parking for one car. For paid parking, we have 192-234 Vaughan Street Parking nearby. The alternative is to find street parking in the area, usually towards the Western Promenade. I recommend using the SpotHero application, where you can book in advance and get cheaper rates.",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi Jerome. My family and I are coming to Portland for my niece's wedding. Looking forward to the stay and seeing Portland.\n\nJohn"
+      },
+      {
+        "sender_type": "host",
+        "body": "Good evening, John!\n\nThank you for booking with us—Ruby and I are delighted to host you and your family for your niece's wedding. Wishing you a wonderful celebration and time exploring Portland!\n\nCheck-in begins at 4PM. If the cleaning is completed before then, we'll message you. We have one off-street parking spot available for your use during your stay.\n\nI will send the detailed check-in instructions the morning of your trip.\n\nWarm regards,\nJerome & Ruby"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Sounds great! Thank you."
+      },
+      {
+        "sender_type": "host",
+        "body": "You're welcome, John!"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "PARKING_ADDITIONAL_QUESTION",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "forbiddenPhrases": [
+      "not able to accommodate events or gatherings",
+      "perfect venue for your celebration",
+      "thinking of our place for your event"
+    ],
+    "requiredPhrases": [
+      "on-site parking for one car",
+      "Vaughan Street",
+      "192-234"
+    ]
+  },
+  "notes": "John Apt 2 2026-08-26. Niece's wedding is trip purpose in Portland, not hosting at the unit. Answer PARKING_ADDITIONAL_QUESTION: one on-site car + 192-234 Vaughan Street. Do not send EVENT_REQUEST decline."
+}
