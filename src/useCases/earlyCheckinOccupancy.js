@@ -1,10 +1,18 @@
 /**
- * Occupancy + routing for post-cleaning unit-ready / early check-in notices.
+ * Occupancy + routing for unit-ready / early check-in notices.
  *
- * cleaningToRegister enqueues act=early_checkin_notice on grok_message when
- * the cleaner marks a unit done. Isolated path — no Grok. Messages the guest
- * checking in today on that listing (Airbnb via Hospitable or HomeExchange).
- * Send window: 8:00 AM ≤ now < 4:00 PM America/New_York. Never after 4pm ET.
+ * Two producers enqueue act=early_checkin_notice on grok_message:
+ *   - cleaningToRegister (action=cleaning.unit_ready): cleaner marked the
+ *     unit done. Message today's check-in even when there is a same-day
+ *     checkout (that is the turnover).
+ *   - noon Lambda (action=noon.vacant_unit_ready, source=noon_vacant):
+ *     EventBridge noon ET. Message today's check-in only when the unit was
+ *     vacant last night (no checkout today on Airbnb or HE) and the listing
+ *     is not in Dynamo uncleanedUnits.
+ *
+ * Isolated path — no Grok. Airbnb via Hospitable or HomeExchange, whichever
+ * guest is actually arriving today. Send window: 8:00 AM ≤ now < 4:00 PM
+ * America/New_York. Never after 4pm ET.
  */
 import {
   dateOnly,
@@ -31,8 +39,11 @@ export {
 export const EARLY_CHECKIN_NOTICE_ACT = 'early_checkin_notice';
 export const FCM_TYPE_EARLY_CHECKIN = 'early_checkin_guest_notice';
 export const CLEANING_TABLE = 'cleaning';
+export const UNCLEANED_TABLE = 'uncleanedUnits';
 export const SEND_WINDOW_START_MINUTES = 8 * 60;
 export const SEND_WINDOW_END_MINUTES = 16 * 60;
+export const NOON_VACANT_SOURCE = 'noon_vacant';
+export const NOON_VACANT_ACTION = 'noon.vacant_unit_ready';
 
 export const UNIT_READY_TEMPLATE =
   'Hi {FirstName},\nWe are pleased to let you know that the unit is ready for you to check in now.';
@@ -88,6 +99,25 @@ export function guestDedupeKey(guest) {
   ].join(':');
 }
 
+export function hasCheckoutToday(guests, today) {
+  const day = dateOnly(today);
+  if (!day) return false;
+  return (Array.isArray(guests) ? guests : []).some((g) => {
+    return dateOnly(g?.checkOut || g?.check_out) === day;
+  });
+}
+
+export function isNoonVacantSource(value) {
+  const raw = String(value || '').toLowerCase();
+  return (
+    raw === NOON_VACANT_SOURCE ||
+    raw === 'noon' ||
+    raw === NOON_VACANT_ACTION ||
+    raw === 'noon_vacant_unit_ready' ||
+    raw === 'vacant_overnight'
+  );
+}
+
 export function pickNextCheckinGuests(guests, today) {
   const arriving = [];
   const seen = new Set();
@@ -106,7 +136,13 @@ export function pickNextCheckinGuests(guests, today) {
   return arriving;
 }
 
-export function decideUnitReadyRecipients(listingId, guestsByListing, today, now = new Date()) {
+export function decideUnitReadyRecipients(
+  listingId,
+  guestsByListing,
+  today,
+  now = new Date(),
+  opts = {}
+) {
   const windowReason = unitReadySkipReason(now);
   if (windowReason) {
     return { send: false, reason: windowReason, recipients: [] };
@@ -123,6 +159,12 @@ export function decideUnitReadyRecipients(listingId, guestsByListing, today, now
   }));
   if (!recipients.length) {
     return { send: false, reason: 'no_checkin_today', recipients: [] };
+  }
+  if (opts.requireVacantOvernight && opts.uncleaned) {
+    return { send: false, reason: 'uncleaned_unit', recipients };
+  }
+  if (opts.requireVacantOvernight && hasCheckoutToday(guests, today)) {
+    return { send: false, reason: 'checkout_today', recipients };
   }
   const platforms = [...new Set(recipients.map((r) => r.platform))];
   const reason =
@@ -152,7 +194,8 @@ export function isEarlyCheckinNoticeAct(value) {
   return (
     raw === EARLY_CHECKIN_NOTICE_ACT ||
     raw === 'cleaning.unit_ready' ||
-    raw === 'early_checkin_after_cleaning'
+    raw === 'early_checkin_after_cleaning' ||
+    isNoonVacantSource(raw)
   );
 }
 
@@ -201,6 +244,7 @@ export function extractEarlyCheckinNoticeContext(event = null) {
     }
   }
   let data = {};
+  let action = '';
   for (const p of blobs) {
     if (p?.data && typeof p.data === 'object') {
       data = { ...data, ...p.data };
@@ -208,6 +252,7 @@ export function extractEarlyCheckinNoticeContext(event = null) {
     if (p?.listingId || p?.listingName) {
       data = { ...data, ...p };
     }
+    if (typeof p?.action === 'string' && p.action) action = p.action;
   }
   const simulate = data.simulate === true || data.simulate === 'true' || data.simulate === 1;
   const sendGuestsRaw = data.sendGuests;
@@ -215,12 +260,16 @@ export function extractEarlyCheckinNoticeContext(event = null) {
     !simulate && sendGuestsRaw !== false && sendGuestsRaw !== 'false' && sendGuestsRaw !== 0;
   const listingId = String(data.listingId || '').trim();
   const unit = UNIT_BY_LISTING[listingId] || null;
+  const sourceRaw = data.source || data.origin || action || '';
+  const requireVacantOvernight = isNoonVacantSource(sourceRaw);
   return {
     listingId,
     listingName: data.listingName || unit?.propertyName || '',
     date: dateOnly(data.date) || '',
     eventAt: data.eventAt || '',
     instruction: data.instruction || '',
+    source: requireVacantOvernight ? NOON_VACANT_SOURCE : 'cleaning',
+    requireVacantOvernight,
     simulate,
     sendGuests,
   };
@@ -294,7 +343,23 @@ export function buildEarlyCheckinGuestNotify({
     return {
       type: FCM_TYPE_EARLY_CHECKIN,
       title: `Unit-ready skipped — after 4pm ET${sim}`,
-      body: `${unit}: cleaning finished at or after 4pm ET, so no early check-in message.`,
+      body: `${unit}: at or after 4pm ET, so no early check-in message.`,
+      data,
+    };
+  }
+  if (decision?.reason === 'checkout_today' || sendSkipReason === 'checkout_today') {
+    return {
+      type: FCM_TYPE_EARLY_CHECKIN,
+      title: `Unit-ready skipped — checkout today${sim}`,
+      body: `${unit}: a guest is checking out today, so noon did not send "unit is ready".`,
+      data,
+    };
+  }
+  if (decision?.reason === 'uncleaned_unit' || sendSkipReason === 'uncleaned_unit') {
+    return {
+      type: FCM_TYPE_EARLY_CHECKIN,
+      title: `Unit-ready skipped — not cleaned${sim}`,
+      body: `${unit}: still in the uncleaned bucket, so noon did not send "unit is ready".`,
       data,
     };
   }

@@ -22,11 +22,14 @@
  *     API ring_smoke_poll saw a Kidde × Ring Apt #2 detector go active.
  *     Isolated path — no Grok. Messages every current Apt #2 guest on
  *     Airbnb (Hospitable) and/or HomeExchange. simulate=true never sends.
- * - Post-cleaning unit-ready (act=early_checkin_notice):
- *     cleaningToRegister enqueues this when the cleaner marks a unit done.
- *     Isolated path — no Grok. Messages the guest checking in today on that
- *     listing (Airbnb via Hospitable or HomeExchange). Send window 8:00 AM
- *     through just before 4:00 PM America/New_York — never after 4pm ET.
+ * - Unit-ready / early check-in (act=early_checkin_notice):
+ *     cleaningToRegister (action=cleaning.unit_ready) after the cleaner marks
+ *     a unit done, or the noon vacant-overnight Lambda
+ *     (action=noon.vacant_unit_ready). Isolated path — no Grok. Messages the
+ *     guest checking in today (Airbnb via Hospitable or HomeExchange). Noon
+ *     source additionally skips when there is a checkout today or the listing
+ *     is still in uncleanedUnits. Send window 8:00 AM through just before
+ *     4:00 PM America/New_York — never after 4pm ET.
  * - HomeExchange check-in instructions (act=homeexchange_checkin_instructions):
  *     3 days before arrival (or immediately when the stay is accepted ≤3 days
  *     out). Unit-strict template + guest phone last-4. Owner FCM always.

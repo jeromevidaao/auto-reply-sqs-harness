@@ -1,13 +1,17 @@
 /**
- * Isolated post-cleaning unit-ready / early check-in guest notice.
+ * Isolated unit-ready / early check-in guest notice.
  *
- * cleaningToRegister enqueues act=early_checkin_notice on grok_message. This path never
- * goes through Grok. Occupancy comes from Hospitable + HE. Messages the guest
+ * Producers on grok_message act=early_checkin_notice:
+ *   - cleaningToRegister (action=cleaning.unit_ready)
+ *   - noon Lambda (action=noon.vacant_unit_ready) — skip if checkout today
+ *     (Airbnb or HE) or listing still in uncleanedUnits
+ *
+ * Never goes through Grok. Occupancy from Hospitable + HE. Messages the guest
  * checking in today on that listing (Airbnb and/or HomeExchange). Send window
  * is 8:00 AM through just before 4:00 PM America/New_York. simulate /
  * sendGuests=false never POSTs to the guest.
  */
-import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
   alreadySentUnitReadyNotice,
   buildEarlyCheckinGuestNotify,
@@ -21,11 +25,34 @@ import {
   loadCurrentGuestsByListing,
   nyClock,
   nyTodayAndHour,
+  UNCLEANED_TABLE,
   UNIT_BY_LISTING,
   unitReadySkipReason,
 } from './earlyCheckinOccupancy.js';
 
 export { isEarlyCheckinNoticeTurn, EARLY_CHECKIN_NOTICE_ACT } from './earlyCheckinOccupancy.js';
+
+/**
+ * True when Dynamo uncleanedUnits still has this listing as needed.
+ * Fail closed: lookup errors throw so we never send "unit is ready" blindly.
+ */
+export async function isUnitStillUncleaned({ ddbClient = null, listingId } = {}) {
+  const lid = String(listingId || '').trim();
+  if (!lid) return false;
+  if (!ddbClient) {
+    throw new Error('uncleaned_lookup_unavailable');
+  }
+  const data = await ddbClient.send(
+    new GetCommand({
+      TableName: UNCLEANED_TABLE,
+      Key: { listingId: lid },
+    })
+  );
+  const item = data && data.Item;
+  if (!item) return false;
+  if (item.needed === false) return false;
+  return true;
+}
 
 async function recentThread(recipient, { hospitableClient, homeExchangeClient }) {
   if (recipient.platform === 'homeexchange' && homeExchangeClient?.listMessages) {
@@ -147,6 +174,8 @@ export async function handleEarlyCheckinNotice({
     sendError: null,
     sendSkipReason: windowReason,
     occupancyError: null,
+    source: ctx.source,
+    requireVacantOvernight: ctx.requireVacantOvernight,
     today,
     hourNy: clock.hourNy,
     minuteNy: clock.minuteNy,
@@ -198,7 +227,33 @@ export async function handleEarlyCheckinNotice({
     return result;
   }
 
-  const decision = decideUnitReadyRecipients(listingId, guestsByListing, today, now);
+  let uncleaned = false;
+  if (ctx.requireVacantOvernight) {
+    try {
+      uncleaned = await isUnitStillUncleaned({ ddbClient, listingId });
+    } catch (err) {
+      const msg = err?.message || String(err);
+      result.occupancyError = msg;
+      result.sendError = msg;
+      result.sendSkipReason = 'uncleaned_lookup_failed';
+      await notifyDecision(notifyOwner, {
+        simulate: ctx.simulate,
+        decision: result.decision,
+        recipients: [],
+        listingId,
+        listingName: result.listingName,
+        proposedResponse: result.proposedResponse,
+        sent: false,
+        sendError: msg,
+      });
+      return result;
+    }
+  }
+
+  const decision = decideUnitReadyRecipients(listingId, guestsByListing, today, now, {
+    requireVacantOvernight: ctx.requireVacantOvernight,
+    uncleaned,
+  });
   const recipients = decision.recipients || [];
   const first = recipients[0] || null;
   result.decision = decision;
@@ -206,6 +261,15 @@ export async function handleEarlyCheckinNotice({
   result.recipient = first;
   result.proposedResponse = fillUnitReadyTemplate(guestFirstName(first));
   result.sendSkipReason = decision.send ? null : decision.reason;
+
+  // Noon on an empty unit is a no-op every day — do not ping Android.
+  if (
+    ctx.requireVacantOvernight &&
+    !decision.send &&
+    decision.reason === 'no_checkin_today'
+  ) {
+    return result;
+  }
 
   if (!decision.send || !recipients.length) {
     await notifyDecision(notifyOwner, {
