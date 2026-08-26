@@ -46,12 +46,35 @@ export function normalizeHeGuestText(text) {
  * not only Caroline's "the cleaning fee is fine".
  */
 export const HE_FEE_ACCEPTED_RE =
-  /(?:cleaning\s+)?fees?\s+is\s+fine|(?:cleaning\s+)?fees?\s+works|(?:completely\s+|totally\s+|just\s+)?fine\s+with(?:\s+paying)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:happy|glad)\s+to\s+(?:pay|cover)(?:\s+the)?(?:\s+cleaning)?\s+fees?|ok(?:ay)?(?:\s+with|\s+paying|\s+to\s+pay)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|no\s+problem(?:\s+with|\s+paying)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:we(?:'re|\s+are)|i(?:'m|\s+am))\s+(?:completely\s+|totally\s+)?(?:fine|ok(?:ay)?)\s+with(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:will|can|we'll|we\s+will|we\s+can)\s+(?:pay|cover)(?:\s+the)?(?:\s+cleaning)?\s+fees?/i;
+  /(?:cleaning\s+)?fees?\s+is\s+fine|(?:cleaning\s+)?fees?\s+works|(?:completely\s+|totally\s+|just\s+)?fine\s+with(?:\s+paying)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:happy|glad)\s+to\s+(?:pay|cover)(?:\s+the)?(?:\s+cleaning)?\s+fees?|ok(?:ay)?(?:\s+with|\s+paying|\s+to\s+pay)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|no\s+problem(?:\s+with|\s+paying)?(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:we(?:'re|\s+are)|i(?:'m|\s+am))\s+(?:completely\s+|totally\s+)?(?:fine|ok(?:ay)?)\s+with(?:\s+the)?(?:\s+cleaning)?\s+fees?|(?:will|can|we'll|we\s+will|we\s+can)\s+(?:pay|cover)(?:\s+the)?(?:\s+cleaning)?\s+fees?|accept(?:s|ed|ing)?(?:\s+paying|\s+to\s+pay)?(?:\s+the)?(?:\s+\$?\d+)?(?:\s+cleaning)?\s+fees?|agree(?:s|d)?(?:\s+to\s+pay|\s+paying|\s+with)?(?:\s+the)?(?:\s+\$?\d+)?(?:\s+cleaning)?\s+fees?/i;
 
 export function guestAcceptedCleaningFeeText(text) {
   const raw = normalizeHeGuestText(text);
   if (!raw.trim()) return false;
   return HE_FEE_ACCEPTED_RE.test(raw);
+}
+
+/**
+ * Guest asked to skip our cleaner and do the turnover themselves.
+ * Clara 2026-08-26: "Unless it’s possible to clean the apartment ourselves".
+ * Never allowed — they still pay the cleaning fee separately after the stay.
+ */
+export function guestAskedToSelfClean(text) {
+  const raw = normalizeHeGuestText(text);
+  if (!raw.trim()) return false;
+  return (
+    /clean(?:ing)? (?:the )?(?:apartment|place|home|unit) ourselves/i.test(raw) ||
+    /(?:we|i)(?:'d| would)? (?:rather |like to )?clean (?:it |the )?(?:ourselves|ourself)/i.test(raw) ||
+    /do the cleaning ourselves/i.test(raw) ||
+    /self[- ]clean/i.test(raw) ||
+    /clean(?:ing)? ourselves/i.test(raw)
+  );
+}
+
+/** HE copy must never imply the cleaning fee is bundled into GuestPoints / the stay. */
+export function heDraftImpliesCleaningFeeIncluded(text) {
+  const raw = String(text || '');
+  return /cleaning fee[\s\S]{0,80}\bincluded\b|\bincluded\b[\s\S]{0,80}cleaning fee/i.test(raw);
 }
 
 export function isHomeExchangeContext(context = {}) {
@@ -229,6 +252,7 @@ export function shouldRunSharedHeCategories({
   thisTurnWantsPreapprove,
   askedDates = null,
   replacementAfterCancel = false,
+  askedToSelfClean = false,
 } = {}) {
   if (isFirst) return false;
   if (preapproveOk) return false;
@@ -237,6 +261,8 @@ export function shouldRunSharedHeCategories({
   if (thisTurnWantsPreapprove) return false;
   // Mark & Lora: a date-availability ask must not fall through to OTHER_MESSAGE.
   if (askedDates || replacementAfterCancel) return false;
+  // Clara: self-clean ask is HE policy, not a shared thank-you / OTHER_MESSAGE.
+  if (askedToSelfClean) return false;
   return true;
 }
 

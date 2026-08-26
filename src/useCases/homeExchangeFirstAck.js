@@ -29,7 +29,7 @@ const LANDMARKS = [
 ];
 
 function forbiddenAckRe() {
-  return /cleaning fee|after your stay|after you leave|those dates|calendar|available|not open|accept the request|pre-?approv|blocked those dates|feel free to book|let me know if you have any questions|happy to hear|self-check-in|\b4pm\b|\b10am\b|off-street parking|\$\d+/i;
+  return /cleaning fee|after your stay|after you leave|those dates|calendar|available|not open|accept the request|pre-?approv|blocked those dates|feel free to book|let me know if you have any questions|happy to hear|self-check-in|\b4pm\b|\b10am\b|off-street parking|\$\d+|fee is included/i;
 }
 
 export function extractHeFirstMessageHooks(message = '') {
@@ -176,6 +176,7 @@ Examples of the right shape:
 Rules:
 - No greeting (no Hi / Hello / Good morning).
 - No calendar, availability, dates open/closed, cleaning fee, payment, pre-approval, booking, 4pm, 10am, parking, check-in, checkout.
+- Never say a cleaning fee is included. Guests pay the cleaning fee separately after the stay.
 - Do not invent facts the guest did not state.
 - Do not use "happy to hear", "let me know if you have any questions", or "feel free to book".
 - Do not sign off.

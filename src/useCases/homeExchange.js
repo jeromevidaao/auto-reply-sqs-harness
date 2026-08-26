@@ -57,12 +57,16 @@
  *
  * Confirmation (fee accepted + original exchange dates available on Hospitable
  * AND on the HomeExchange home calendar):
- *   1) GET /v1/exchanges/{conversationId}/get-exchanges then
+ *   1) Recheck Hospitable calendar + reservations immediately before approve
+ *      (Clara 2026-08-26 — do not PATCH if nights are no longer open).
+ *   2) GET /v1/exchanges/{conversationId}/get-exchanges then
  *      PATCH /v1/exchanges/{conversationId}/approve with that array
- *   2) PUT Hospitable calendar available:false for [checkIn, checkOut)
- *   3) Persist the block for the 4-day expire-unblock job
- *   4) Send: "I just sent you a pre-approval and blocked those dates for you."
- *   Errors (already finalized, Hospitable PUT fail): notify Android, do not proceed.
+ *   3) PUT Hospitable calendar available:false for [checkIn, checkOut)
+ *   4) Persist the block for the 4-day expire-unblock job
+ *   5) Send: "I just sent you a pre-approval and blocked those dates for you."
+ *   Errors (already finalized, Hospitable PUT fail, recheck closed): notify Android, do not proceed.
+ *   Never say the HE cleaning fee is included — guests pay it separately after the stay.
+ *   Self-clean is never allowed (Clara: "clean the apartment ourselves").
  *   HE/Hospitable writes retry 4× with 5/15/30s backoff (~1 min) then SQS.
  *   Every successful HE guest send (and send-fail after retries) FCM the owner
  *   phone. Airbnb auto-replies are not notified this way.
@@ -87,6 +91,8 @@ import {
   shouldRunSharedHeCategories,
   thisTurnWantsHePreapprove,
   guestAcceptedCleaningFeeText,
+  guestAskedToSelfClean,
+  heDraftImpliesCleaningFeeIncluded,
   guestAskedToAddNights,
   threadHasCancelledPreapproval,
   threadHasCancelledExchange,
@@ -574,6 +580,8 @@ export function guestAcceptedCleaningFee(text) {
   return guestAcceptedCleaningFeeText(text);
 }
 
+export { guestAskedToSelfClean, heDraftImpliesCleaningFeeIncluded };
+
 export function guestAskedToPreapprove(text) {
   return /\bpre-?approv|\bfinalize\b/i.test(String(text || ''));
 }
@@ -1058,6 +1066,41 @@ export function buildHeFeeThanksLine(cleaningFee, stayRange) {
   );
 }
 
+/** Refuse self-clean; the fee is paid to us separately after the stay — never "included". */
+export function buildHeSelfCleanRefusalLine(cleaningFee) {
+  const feeText = feeAmountText(cleaningFee);
+  return (
+    `We can't have guests clean the apartment themselves — our cleaner handles turnover after you leave. ` +
+    `You'll pay the ${feeText} cleaning fee to us separately after your stay.`
+  );
+}
+
+export function buildHeSelfCleanRefuseDraft({ guestName, cleaningFee } = {}) {
+  const name = (guestName || 'there').split(/\s+/)[0];
+  const refuse = buildHeSelfCleanRefusalLine(cleaningFee);
+  const feeText = feeAmountText(cleaningFee);
+  return {
+    typeOfMessageReceived: 'HOMEEXCHANGE_FOLLOWUP',
+    shouldReply: true,
+    proposedResponse:
+      `Hi ${name} — ${refuse} Would you be okay paying the ${feeText} after your stay?`,
+    reason: 'homeexchange_self_clean_refused_ask_fee',
+  };
+}
+
+export function sanitizeHeCleaningFeeCopy(text) {
+  const raw = String(text || '');
+  if (!heDraftImpliesCleaningFeeIncluded(raw)) return raw;
+  return (
+    raw
+      .replace(/[,.]?\s*(?:the\s+)?cleaning fee[^.!?\n]*\bincluded\b[^.!?\n]*/gi, '')
+      .replace(/\bincluded\b[^.!?\n]*cleaning fee[^.!?\n]*/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim() +
+    ' The cleaning fee is paid to us separately after your stay.'
+  );
+}
+
 export function buildHomeExchangeReplacementDraft({
   guestName,
   askedDates,
@@ -1317,11 +1360,13 @@ function buildPreapproveGuestMessage({
   originalRange,
   extraParagraph,
   extraNightNote,
+  selfCleanNote,
 } = {}) {
   const name = (guestName || 'there').split(/\s+/)[0];
   let text = `Hi ${name}`;
   if (feeThanks) text += ` — ${feeThanks}.`;
   else text += '.';
+  if (selfCleanNote) text += ` ${selfCleanNote}`;
   if (extraNightNote) text += ` ${extraNightNote}`;
   text +=
     ` I just sent you a pre-approval` +
@@ -1539,6 +1584,7 @@ export async function handleHomeExchangeMessage({
     action: context.action,
     act: context.act,
   });
+  const askedToSelfClean = guestAskedToSelfClean(message);
   const cancelledPreapproval = threadHasCancelledPreapproval(conversationHistory);
   const cancelledExchange = threadHasCancelledExchange(conversationHistory);
   const resubmittedAfterCancel = guestResubmittedAfterHeCancel(message, conversationHistory);
@@ -1752,6 +1798,8 @@ export async function handleHomeExchangeMessage({
       stayRange: formatStayRange(checkIn, checkOut),
       extraNightChecked: calendar?.checked === true,
     });
+  } else if (askedToSelfClean && !feeAccepted && !guestFinalized) {
+    draft = buildHeSelfCleanRefuseDraft({ guestName, cleaningFee });
   }
 
   const exchangeMatchesApprove =
@@ -1797,6 +1845,7 @@ export async function handleHomeExchangeMessage({
       airbnbListingId,
       checkIn: approveCheckIn,
       checkOut: approveCheckOut,
+      leftoverNights,
       now,
       cleaningFeeAccepted: feeAccepted,
     });
@@ -1821,7 +1870,14 @@ export async function handleHomeExchangeMessage({
       originalRange: approvedRange,
       extraParagraph,
       extraNightNote: extraNightNoteText(extraNights, extraNightsOpen),
+      selfCleanNote: askedToSelfClean ? buildHeSelfCleanRefusalLine(cleaningFee) : null,
     });
+  } else if (preapprove.attempted && preapprove.reason === 'hospitable_not_open_at_approve') {
+    const name = (guestName || 'there').split(/\s+/)[0];
+    draft.shouldReply = true;
+    draft.reason = 'homeexchange_preapprove_calendar_closed';
+    draft.proposedResponse =
+      `Hi ${name}, I rechecked our calendar and those dates are no longer open, so I can't send a pre-approval right now.`;
   }
 
   const heReservation = buildHeReservationContext({
@@ -1858,6 +1914,7 @@ export async function handleHomeExchangeMessage({
       thisTurnWantsPreapprove,
       askedDates,
       replacementAfterCancel,
+      askedToSelfClean,
     })
   ) {
     try {
@@ -1887,6 +1944,10 @@ export async function handleHomeExchangeMessage({
       draft.reason = 'homeexchange_shared_agent_failed';
       sendError = err?.message || String(err);
     }
+  }
+
+  if (draft?.proposedResponse) {
+    draft.proposedResponse = sanitizeHeCleaningFeeCopy(draft.proposedResponse);
   }
 
   if (sendEnabled && homeExchangeClient && typeof homeExchangeClient.sendMessage === 'function') {
@@ -1972,6 +2033,7 @@ export async function handleHomeExchangeMessage({
     cancelledExchange,
     replacementAfterCancel,
     feeAccepted,
+    askedToSelfClean,
     alreadyThankedFee,
     heReservation,
     historyFetched: loadedHistory.historyFetched,
@@ -1994,6 +2056,31 @@ export async function handleHomeExchangeMessage({
   };
 }
 
+export async function confirmHospitableOpenBeforeApprove({
+  hospitableClient,
+  propertyId,
+  checkIn,
+  checkOut,
+  leftoverNights = [],
+} = {}) {
+  const window = await loadHospitableWindow(hospitableClient, propertyId, checkIn, checkOut);
+  const hospitable = analyzeCalendarOpen({
+    calendarDays: window.calendarDays,
+    reservations: window.reservations,
+    checkIn,
+    checkOut,
+    leftoverNights,
+  });
+  return {
+    open: !!(hospitable.checked && hospitable.open),
+    checked: !!hospitable.checked,
+    unavailable: hospitable.unavailable || [],
+    calendarError: window.calendarError,
+    reservationsError: window.reservationsError,
+    hospitable,
+  };
+}
+
 export async function runHomeExchangePreapprove({
   homeExchangeClient,
   hospitableClient,
@@ -2007,6 +2094,7 @@ export async function runHomeExchangePreapprove({
   airbnbListingId,
   checkIn,
   checkOut,
+  leftoverNights = [],
   now = new Date(),
   cleaningFeeAccepted = false,
 } = {}) {
@@ -2078,6 +2166,38 @@ export async function runHomeExchangePreapprove({
   }
 
   if (!exchangeAlreadyApproved(exchange, conv)) {
+    const confirm = await confirmHospitableOpenBeforeApprove({
+      hospitableClient,
+      propertyId,
+      checkIn,
+      checkOut,
+      leftoverNights,
+    });
+    console.log(
+      '[HomeExchange] Hospitable calendar recheck before pre-approve',
+      JSON.stringify({
+        conversationId,
+        checkIn,
+        checkOut,
+        open: confirm.open,
+        checked: confirm.checked,
+        unavailable: confirm.unavailable,
+        calendarError: confirm.calendarError,
+        reservationsError: confirm.reservationsError,
+      })
+    );
+    if (!confirm.open) {
+      base.reason = 'hospitable_not_open_at_approve';
+      await notifyHePreapproval(notifyOwner, {
+        kind: 'error',
+        ...unitNotify,
+        exchangeId: exchange.id,
+        error: `Hospitable calendar recheck: dates not available — did not pre-approve.${
+          confirm.unavailable?.length ? ` Unavailable: ${confirm.unavailable.join(', ')}.` : ''
+        }`,
+      });
+      return base;
+    }
     try {
       if (typeof homeExchangeClient.approveConversation === 'function') {
         await homeExchangeClient.approveConversation(conversationId);

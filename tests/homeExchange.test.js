@@ -24,6 +24,10 @@ import {
   isStayExtensionOf,
   guestAcceptedCleaningFee,
   guestAcceptedCleaningFeeInThread,
+  guestAskedToSelfClean,
+  heDraftImpliesCleaningFeeIncluded,
+  buildHeSelfCleanRefusalLine,
+  sanitizeHeCleaningFeeCopy,
   guestAskedToPreapprove,
   hostAlreadyThankedCleaningFee,
   shouldThankForCleaningFee,
@@ -1596,6 +1600,18 @@ describe('HomeExchange HE calendar + pre-approve (no guest confirmation send)', 
     assert.equal(thisTurnWantsHePreapprove('Thank you. Coming your way!'), false);
     assert.equal(thisTurnWantsHePreapprove('the cleaning fee is fine'), true);
     assert.equal(
+      guestAcceptedCleaningFee(
+        'Hi Ruby, lovely ! Yes we accept paying $125 cleaning fee \nUnless it’s possible to clean the apartment ourselves, I’m rather obsessive, so it will be 100% perfect'
+      ),
+      true
+    );
+    assert.equal(guestAskedToSelfClean('Unless it’s possible to clean the apartment ourselves'), true);
+    assert.equal(heDraftImpliesCleaningFeeIncluded('the $125 cleaning fee is included in GuestPoints'), true);
+    assert.equal(
+      heDraftImpliesCleaningFeeIncluded("You'll pay the $125 cleaning fee to us separately after your stay."),
+      false
+    );
+    assert.equal(
       thisTurnWantsHePreapprove(
         'Hi Ruby, oh that is great news. We\u2019re completely fine with the cleaning fee!'
       ),
@@ -2694,5 +2710,271 @@ describe('HomeExchange cancelled stay + new dates (Mark & Lora)', () => {
     assert.match(draft.proposedResponse, /October 14, 2026/);
     assert.match(draft.proposedResponse, /Home Exchange calendar is up to date/i);
     assert.match(draft.proposedResponse, /alternative dates/i);
+  });
+});
+
+describe('HomeExchange Clara fee-accept + self-clean (Apt #3 Oct 19–21 2026)', () => {
+  const claraFeeSelfClean =
+    'Hi Ruby, lovely ! Yes we accept paying $125 cleaning fee \nUnless it’s possible to clean the apartment ourselves, I’m rather obsessive, so it will be 100% perfect';
+  const claraNights = ['2026-10-19', '2026-10-20'];
+  const claraOpenDays = () =>
+    claraNights.map((date) => ({ date, status: { available: true } }));
+  const claraBlockedDays = () =>
+    claraNights.map((date) => ({ date, status: { available: false } }));
+
+  it('detects Clara fee-yes and self-clean; copy never says the fee is included', () => {
+    assert.equal(guestAcceptedCleaningFee(claraFeeSelfClean), true);
+    assert.equal(guestAskedToSelfClean(claraFeeSelfClean), true);
+    assert.equal(thisTurnWantsHePreapprove(claraFeeSelfClean), true);
+    const line = buildHeSelfCleanRefusalLine({ amount: 125 });
+    assert.match(line, /can't have guests clean the apartment themselves/i);
+    assert.match(line, /separately after your stay/i);
+    assert.equal(heDraftImpliesCleaningFeeIncluded(line), false);
+    assert.equal(/included/i.test(line), false);
+    const cleaned = sanitizeHeCleaningFeeCopy(
+      'Hi Clara — the cleaning fee is included in the exchange. I just sent you a pre-approval.'
+    );
+    assert.equal(heDraftImpliesCleaningFeeIncluded(cleaned), false);
+    assert.match(cleaned, /separately after your stay/i);
+  });
+
+  it('self-clean without fee-yes refuses and asks for the fee (no pre-approve)', async () => {
+    const approved = [];
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Unless it’s possible to clean the apartment ourselves?',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95472973',
+          guestName: 'Clara et Mathis',
+          checkIn: '2026-10-19',
+          checkOut: '2026-10-21',
+          listing: { platform: 'homeexchange', platform_id: '3202475' },
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return claraOpenDays();
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar() {
+          throw new Error('must not block');
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 24259977, price: 125 } };
+        },
+      },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2026-10-01', '2026-10-31');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127664593,
+                status: 0,
+                start_on: '2026-10-19',
+                end_on: '2026-10-21',
+                home: { id: 3202475 },
+              },
+            ],
+          };
+        },
+        async approveConversation() {
+          approved.push('should-not-approve');
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      blockStore: { async put(item) { return item; } },
+      notifyOwner: async () => ({ ok: true }),
+      sharedCategoryRunner: async () => {
+        throw new Error('must not fall through to shared categories');
+      },
+    });
+    assert.equal(result.feeAccepted, false);
+    assert.equal(result.askedToSelfClean, true);
+    assert.equal(result.preapprove.ok, false);
+    assert.deepEqual(approved, []);
+    assert.equal(result.sent, true);
+    assert.equal(result.reason, 'homeexchange_self_clean_refused_ask_fee');
+    assert.match(sentBodies[0], /can't have guests clean the apartment themselves/i);
+    assert.match(sentBodies[0], /separately after your stay/i);
+    assert.equal(/included/i.test(sentBodies[0]), false);
+  });
+
+  it('Clara fee-yes + self-clean pre-approves after Hospitable recheck, refuses self-clean, pays separately', async () => {
+    const approved = [];
+    const blocked = [];
+    const sentBodies = [];
+    const calCalls = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: claraFeeSelfClean,
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95472973',
+          guestName: 'Clara et Mathis',
+          checkIn: '2026-10-19',
+          checkOut: '2026-10-21',
+          listing: { platform: 'homeexchange', platform_id: '3202475' },
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar(propertyId) {
+          calCalls.push(propertyId);
+          assert.equal(propertyId, '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd');
+          return claraOpenDays();
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar(_id, dates) {
+          blocked.push(...dates);
+          return { status: 'accepted' };
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 24259977, price: 125 } };
+        },
+      },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2026-10-01', '2026-10-31');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127664593,
+                status: 0,
+                approved_at: null,
+                start_on: '2026-10-19',
+                end_on: '2026-10-21',
+                home: { id: 3202475 },
+              },
+            ],
+          };
+        },
+        async approveConversation(conversationId) {
+          approved.push(conversationId);
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      blockStore: { async put(item) { return item; } },
+      notifyOwner: async () => ({ ok: true }),
+      sharedCategoryRunner: async () => {
+        throw new Error('must not fall through to shared thank-you');
+      },
+    });
+    assert.equal(result.feeAccepted, true);
+    assert.equal(result.askedToSelfClean, true);
+    assert.equal(result.calendar.open, true);
+    assert.equal(result.preapprove.ok, true);
+    assert.ok(calCalls.length >= 2, 'must recheck Hospitable before approve');
+    assert.deepEqual(approved, ['95472973']);
+    assert.equal(blocked.length, 2);
+    assert.equal(blocked[0].date, '2026-10-19');
+    assert.equal(blocked[1].date, '2026-10-20');
+    assert.equal(result.sent, true);
+    assert.equal(result.reason, 'homeexchange_preapproved');
+    assert.match(sentBodies[0], /^Hi Clara/);
+    assert.match(sentBodies[0], /thanks for confirming the \$125 cleaning fee is fine/i);
+    assert.match(sentBodies[0], /can't have guests clean the apartment themselves/i);
+    assert.match(sentBodies[0], /pay the \$125 cleaning fee to us separately after your stay/i);
+    assert.match(sentBodies[0], /pre-approval/i);
+    assert.match(sentBodies[0], /blocked those dates for you/i);
+    assert.equal(/included/i.test(sentBodies[0]), false);
+    assert.equal(heDraftImpliesCleaningFeeIncluded(sentBodies[0]), false);
+    assert.equal(/you.?re welcome/i.test(sentBodies[0]), false);
+  });
+
+  it('does not pre-approve when the Hospitable recheck finds nights closed', async () => {
+    const approved = [];
+    const sentBodies = [];
+    let calCalls = 0;
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: claraFeeSelfClean,
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: false,
+          conversation_id: '95472973',
+          guestName: 'Clara et Mathis',
+          checkIn: '2026-10-19',
+          checkOut: '2026-10-21',
+          listing: { platform: 'homeexchange', platform_id: '3202475' },
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          calCalls += 1;
+          return calCalls === 1 ? claraOpenDays() : claraBlockedDays();
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+        async updatePropertyCalendar() {
+          throw new Error('must not block when recheck is closed');
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 24259977, price: 125 } };
+        },
+      },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2026-10-01', '2026-10-31');
+        },
+        async getConversation() {
+          return {
+            exchanges: [
+              {
+                id: 127664593,
+                status: 0,
+                start_on: '2026-10-19',
+                end_on: '2026-10-21',
+                home: { id: 3202475 },
+              },
+            ],
+          };
+        },
+        async approveConversation() {
+          approved.push('should-not-approve');
+          return { ok: true };
+        },
+        async sendMessage(_id, content) {
+          sentBodies.push(content);
+          return { ok: true };
+        },
+      },
+      blockStore: { async put(item) { return item; } },
+      notifyOwner: async () => ({ ok: true }),
+    });
+    assert.equal(result.feeAccepted, true);
+    assert.equal(result.preapprove.ok, false);
+    assert.equal(result.preapprove.reason, 'hospitable_not_open_at_approve');
+    assert.deepEqual(approved, []);
+    assert.equal(result.sent, true);
+    assert.equal(result.reason, 'homeexchange_preapprove_calendar_closed');
+    assert.match(sentBodies[0], /no longer open/i);
+    assert.equal(/included/i.test(sentBodies[0] || ''), false);
   });
 });
