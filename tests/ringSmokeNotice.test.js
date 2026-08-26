@@ -89,11 +89,26 @@ describe('ring smoke occupancy routing', () => {
   it('fills guest copy with the detector name', () => {
     const body = fillSmokeGuestTemplate('Katie', 'Bedroom (TT7A)', 'smoke');
     assert.match(body, /^Hi Katie,/);
-    assert.match(body, /Bedroom \(TT7A\) smoke detector/);
-    assert.match(body, /Pine Apt #2/);
+    assert.match(body, /The Bedroom \(TT7A\) smoke detector just went off in Pine Apt #2/);
     assert.match(body, /call 911/);
     assert.match(body, /cooking or steam/);
     assert.match(body, /\nJerome\n/);
+  });
+
+  it('does not say smoke detector twice when the Ring name is generic (Carlos)', () => {
+    for (const raw of ['smoke detector', 'Smoke detector', 'a smoke detector', '', null]) {
+      const body = fillSmokeGuestTemplate('Carlos', raw, 'smoke');
+      assert.match(
+        body,
+        /The smoke detector just went off in Pine Apt #2\. Please check now\./
+      );
+      assert.equal((body.toLowerCase().match(/smoke detector/g) || []).length, 1);
+      assert.doesNotMatch(body, /detector smoke detector/i);
+    }
+    const hallway = fillSmokeGuestTemplate('Carlos', 'Hallway', 'smoke');
+    assert.match(hallway, /The Hallway smoke detector just went off in Pine Apt #2/);
+    const co = fillSmokeGuestTemplate('Carlos', 'Hallway', 'carbon monoxide');
+    assert.match(co, /The Hallway carbon monoxide detector just went off in Pine Apt #2/);
   });
 
   it('detects the isolated act and is not HE chat', () => {
@@ -260,8 +275,23 @@ describe('handleRingSmokeNotice', () => {
       sentCount: 1,
     });
     assert.match(n.title, /message sent to Katie/);
-    assert.match(n.body, /Hallway/);
+    assert.match(n.body, /Hallway smoke detector/);
+    assert.doesNotMatch(n.body, /detector smoke detector/i);
     assert.equal(n.data.listingId, LISTING_APT2);
     assert.equal(n.data.type, 'ring_smoke_guest_notice');
+  });
+
+  it('owner FCM does not double a generic smoke detector name', () => {
+    const n = buildSmokeGuestNotify({
+      simulate: false,
+      decision: { reason: 'unit_occupied', send: true },
+      recipients: [KATIE],
+      detectorName: 'smoke detector',
+      alarmKind: 'smoke',
+      sent: true,
+      sentCount: 1,
+    });
+    assert.match(n.body, /Apt #2 smoke detector\./);
+    assert.doesNotMatch(n.body, /smoke detector smoke detector/i);
   });
 });

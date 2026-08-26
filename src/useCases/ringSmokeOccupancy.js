@@ -25,13 +25,38 @@ export const PROPERTY_NAME = 'Pine Apt #2';
 export const SMOKE_GUEST_TEMPLATE = [
   'Hi {FirstName},',
   '',
-  'The {detectorName} {alarmKind} detector just went off in Pine Apt #2. Please check now.',
+  'The {detectorPhrase} just went off in Pine Apt #2. Please check now.',
   '',
   'If it is a real fire: leave and call 911. If cooking or steam: open windows. Reply if you need help.',
   '',
   'Jerome',
   '',
 ].join('\n');
+
+/**
+ * Guest-facing noun: "Hallway smoke detector", never "smoke detector smoke detector".
+ * Ring sometimes sends the generic device name "smoke detector" (Carlos 2026-08-26).
+ */
+export function formatSmokeDetectorPhrase(detectorName, alarmKind) {
+  const kindRaw = String(alarmKind || 'smoke').trim().toLowerCase() || 'smoke';
+  const kindLabel =
+    kindRaw === 'co' ||
+    kindRaw === 'carbon monoxide' ||
+    kindRaw === 'carbon-monoxide' ||
+    (kindRaw.includes('carbon') && kindRaw.includes('monoxide'))
+      ? 'carbon monoxide'
+      : 'smoke';
+  let loc = String(detectorName || '')
+    .trim()
+    .replace(/^an?\s+/i, '')
+    .trim();
+  loc = loc.replace(/\s*(carbon monoxide|\bco\b|smoke)?\s*detectors?\s*$/i, '').trim();
+  const locLower = loc.toLowerCase();
+  if (!loc || locLower === 'smoke' || locLower === 'co' || locLower === 'carbon monoxide') {
+    return `${kindLabel} detector`;
+  }
+  return `${loc} ${kindLabel} detector`;
+}
 
 export function decideSmokeRecipients(guestsByListing, today, hourNy) {
   const guests = (guestsByListing && guestsByListing[LISTING_APT2]) || [];
@@ -58,11 +83,11 @@ export function decideSmokeRecipients(guestsByListing, today, hourNy) {
 
 export function fillSmokeGuestTemplate(firstName, detectorName, alarmKind) {
   const name = String(firstName || 'there').trim() || 'there';
-  const detector = String(detectorName || 'smoke detector').trim() || 'smoke detector';
-  const kind = String(alarmKind || 'smoke').trim() || 'smoke';
-  return SMOKE_GUEST_TEMPLATE.replace(/\{FirstName\}/g, name)
-    .replace(/\{detectorName\}/g, detector)
-    .replace(/\{alarmKind\}/g, kind);
+  const phrase = formatSmokeDetectorPhrase(detectorName, alarmKind);
+  return SMOKE_GUEST_TEMPLATE.replace(/\{FirstName\}/g, name).replace(
+    /\{detectorPhrase\}/g,
+    phrase
+  );
 }
 
 export function alreadySentSmokeNotice(messages, detectorName) {
@@ -174,6 +199,7 @@ export function buildSmokeGuestNotify({
 } = {}) {
   const name = detectorName || 'smoke detector';
   const kind = alarmKind || 'smoke';
+  const phrase = formatSmokeDetectorPhrase(name, kind);
   const list = Array.isArray(recipients) ? recipients : [];
   const first = list[0] || null;
   const guest = first ? guestFirstName(first) : 'guest';
@@ -211,7 +237,7 @@ export function buildSmokeGuestNotify({
     return {
       type: FCM_TYPE_SMOKE_GUEST,
       title: `Smoke detected (sim) — ${guest}`,
-      body: `Would message Apt #2 guests via ${platformLabel} about the ${name} ${kind} detector. Guest send skipped (simulation).`,
+      body: `Would message Apt #2 guests via ${platformLabel} about the ${phrase}. Guest send skipped (simulation).`,
       data,
     };
   }
@@ -219,7 +245,7 @@ export function buildSmokeGuestNotify({
     return {
       type: FCM_TYPE_SMOKE_GUEST,
       title: `Smoke detected — message sent to ${guest}`,
-      body: `Apt #2 ${name} ${kind} detector. Message sent via ${platformLabel}.`,
+      body: `Apt #2 ${phrase}. Message sent via ${platformLabel}.`,
       data,
     };
   }
@@ -227,7 +253,7 @@ export function buildSmokeGuestNotify({
     return {
       type: FCM_TYPE_SMOKE_GUEST,
       title: `Smoke detected — Apt #2 vacant${sim}`,
-      body: `${name} ${kind} detector. No current guests to message.`,
+      body: `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}. No current guests to message.`,
       data,
     };
   }
