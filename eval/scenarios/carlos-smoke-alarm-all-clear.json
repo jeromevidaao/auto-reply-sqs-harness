@@ -1,0 +1,48 @@
+{
+  "id": "carlos-smoke-alarm-all-clear",
+  "description": "Carlos (Apt 2) replies after our Ring smoke notice: everything is good, something was boiling, Richard checked. Production suppressed the reply because we had just sent the alarm. Must thank them and say glad you are all safe — never repeat 911.",
+  "guestMessage": "Everything is good, we had something boiling. Richard came up to make sure everything was okay.",
+  "guestName": "Carlos",
+  "checkIn": "2026-08-24T16:00:00-04:00",
+  "checkOut": "2026-08-28T10:00:00-04:00",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "Sunny Downtown 2 Bed Apt, Parking",
+  "context": {
+    "asOfDate": "2026-08-26",
+    "reservationId": "660075cd-d520-4de9-bece-9860625728d5",
+    "conversationHistory": [
+      {
+        "sender_type": "host",
+        "body": "Hi Carlos,\n\nThe smoke detector just went off in Pine Apt #2. Please check now.\n\nIf it is a real fire: leave and call 911. If cooking or steam: open windows. Reply if you need help.\n\nJerome\n"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Everything is good, we had something boiling. Richard came up to make sure everything was okay."
+      }
+    ],
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "minutesSinceLastHostMessage": 4
+    },
+    "suggestedResponseSnippet": "Thanks for letting us know everything is okay, Carlos! Glad you are all safe — and thanks to Richard for checking in."
+  },
+  "rubric": {
+    "expectedCategory": "FYI_STATEMENT",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "Thanks for letting us know",
+      "everything is okay",
+      "Glad you are all safe"
+    ],
+    "forbiddenPhrases": [
+      "call 911",
+      "Please check now",
+      "smoke detector just went off",
+      "leave and call"
+    ]
+  },
+  "notes": "Carlos Apt 2 2026-08-26. Host smoke notice at 18:38Z, guest all-clear at 18:42Z. Recent-host suppression wiped the ack. Deterministic _applySmokeAlarmAllClearPolicy."
+}

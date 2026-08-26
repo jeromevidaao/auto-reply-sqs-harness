@@ -36,6 +36,23 @@ export function checkInYmdFromContext(context = {}) {
   return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : '';
 }
 
+/** Calendar date in America/New_York (`YYYY-MM-DD`). Never use UTC `toISOString` for ops dates. */
+export function ymdInAmericaNewYork(dateLike) {
+  const d = dateLike instanceof Date ? dateLike : dateLike ? new Date(dateLike) : new Date();
+  if (Number.isNaN(d.getTime())) {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  }
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+export function previousYmd(ymd) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function emptyResult(extra = {}) {
   return {
     guestArrived: false,

@@ -1,0 +1,70 @@
+{
+  "id": "trevor-checkin-day-not-ready",
+  "description": "Trevor (Apt 3) on check-in day after a same-day turnover. Cleaning DynamoDB has no pressedAt. Last guest line is an FYI without a question mark. Production sent nothing (FYI_STATEMENT). Must apologize that it is not ready yet.",
+  "guestMessage": "Ok we’ll come back closer to 4 if it’s not ready, figured we’d ask ;-)",
+  "guestName": "Trevor",
+  "checkIn": "2026-08-26T16:00:00-04:00",
+  "checkOut": "2026-08-28T10:00:00-04:00",
+  "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+  "propertyName": "Cozy, Central 2 Bd Apt, Parking",
+  "context": {
+    "asOfDate": "2026-08-26",
+    "asOfInstant": "2026-08-26T14:42:00-04:00",
+    "nowForGreeting": "2026-08-26T14:42:00-04:00",
+    "reservationId": "e7d0087a-59f4-49ed-9a85-7f79b01fd9ee",
+    "conversation_id": "d68b3647-33fc-472e-be3c-22c734d50432",
+    "airbnbListingId": "24259977",
+    "unitReadiness": {
+      "detected": true,
+      "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+      "airbnbListingId": "24259977",
+      "date": "2026-08-26",
+      "cleaningKey": "24259977_2026-08-26",
+      "isUnitReady": false,
+      "buttonPressed": false,
+      "pressedAt": null,
+      "hadSameDayTurnover": true,
+      "hadPreviousDayGuests": true,
+      "reason": "Previous-night guest checked out and cleaning is not complete yet. Guest will be messaged when the unit is ready.",
+      "source": "internal_cleaning_table"
+    },
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "duplicateRisk": true,
+      "earlyUnitReadyOffered": false,
+      "historyFetchFailed": false,
+      "historySource": "scenario"
+    },
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Thanks Jerome! Looks like we’re going to get there closer to 3. Let us know if the place is ready early, otherwise we’ll kill some time, thanks!"
+      },
+      {
+        "sender_type": "host",
+        "body": "Good afternoon, Trevor, You're welcome! I'll check on readiness and let you know."
+      },
+      {
+        "sender_type": "guest",
+        "body": "We’re about 5 min away, should we kill an hour? Thanks again!"
+      },
+      {
+        "sender_type": "host",
+        "body": "You're welcome, Trevor!"
+      }
+    ],
+    "suggestedResponseSnippet": "Sorry Trevor, it is not ready yet. Coming back closer to 4pm is perfect — we'll message you as soon as it is."
+  },
+  "rubric": {
+    "expectedCategory": ["EARLY_CHECKIN", "EARLY_CHECKIN_QUESTION", "CHECK_IN_TIME_QUESTION"],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "requiredPhrases": ["sorry", "not ready yet", "4pm", "message you"],
+    "forbiddenPhrases": ["cleaning button", "you're welcome", "you can check in now", "unit is ready"]
+  },
+  "notes": "Trevor Dickson Apt 3 2026-08-26. Previous guest Stephen Couitt checked out 10am. cleaning 24259977_2026-08-26 had no pressedAt. Production: FYI_STATEMENT / judge APPROVE no-reply 2.7 min after You're welcome. UnitReadinessTool never ran because checkIn ISO !== UTC today, and DDB used pk + Hospitable UUID. Deterministic _applyCheckInDayNotReadyPolicy.",
+  "productionMiss": true,
+  "unitTestEnforced": true
+}

@@ -20,6 +20,12 @@
 
 This is **exactly** the kind of message that should receive a short, warm auto-reply. It does not require information on our side.
 
+**Also — all-clear after OUR Ring smoke / CO notice (Carlos, Apt 2, 2026-08-26):**
+Host just sent: "The smoke detector just went off… If it is a real fire: leave and call 911. If cooking or steam: open windows."
+Guest replies: "Everything is good, we had something boiling. Richard came up to make sure everything was okay."
+
+This is the same FYI family, but recent-host suppression used to wipe it because we had just messaged them. **Always reply.** Thank them for letting us know everything is okay and say you are glad they are all safe. Do **not** repeat 911 / "please check now". If they mentioned Richard checking in, a brief thanks to Richard is welcome.
+
 ## Critical Rules — Reply Behavior
 - **ALWAYS set shouldReply: true** for these messages.
 - **NEVER** output `proposedResponse: "none"` or fall back to OTHER_MESSAGE + none (which triggers escalation).
@@ -34,6 +40,7 @@ This is **exactly** the kind of message that should receive a short, warm auto-r
 - "Thanks for the heads up, David! Glad the eggs didn't cause any real trouble — appreciate you letting me know so I don't worry. 😊"
 - "Haha, no worries at all! Thanks for the FYI — better safe than sorry with the smoke detector. Everything okay otherwise?"
 - "Thanks David, good to know! No fire trucks on the way here. Enjoy the rest of your stay."
+- "Thanks for letting us know everything is okay, Carlos! Glad you are all safe — and thanks to Richard for checking in."
 
 ## Anti-Patterns (Do NOT do these)
 - Do not escalate (shouldReply=false or proposedResponse="none").

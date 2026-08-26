@@ -1,122 +1,148 @@
 import { BaseTool } from '../BaseTool.js';
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  airbnbListingIdFromContext,
+  checkInYmdFromContext,
+  previousYmd,
+  ymdInAmericaNewYork,
+} from '../../utils/guestCheckIns.js';
 
 /**
  * UnitReadinessTool
  *
- * Determines whether a unit is likely ready for a new guest based on:
- * - Same-day turnover records in the "cleaning" DDB table
- * - Previous day's occupancy via Hospitable API
+ * Ground truth for check-in-day "is the unit ready?":
+ * - DynamoDB `cleaning` row `{airbnbListingId}_{YYYY-MM-DD}` with `pressedAt`
+ *   means the physical cleaning button was pushed that day (unit is clean).
+ * - Missing row / no `pressedAt` after a previous-night guest = not ready.
  *
- * This helps the agent give accurate information about early check-in / unit readiness.
+ * Do not tell guests about the button; that field is for the agent/policy.
  */
 export class UnitReadinessTool extends BaseTool {
   constructor({ ddbClient = null, hospitableClient = null } = {}) {
     super({
       name: 'get_unit_readiness',
-      description: 'Checks if a property is ready for guest arrival. Considers same-day turnovers (from internal cleaning table) and previous day occupancy via Hospitable.',
+      description:
+        'Checks if a property is ready for guest arrival from the cleaning DynamoDB table (button press) and previous-night occupancy via Hospitable.',
     });
 
     this.ddbClient = ddbClient;
     this.hospitableClient = hospitableClient;
-
-    // You can configure the table name via env or constructor if needed
     this.cleaningTableName = process.env.CLEANING_TABLE_NAME || 'cleaning';
   }
 
-  async execute(input, context = {}) {
-    const listingId = context.listingId || input?.listingId;
-    const targetDate = input?.date || context.checkIn || this._getToday();
+  async execute(input = {}, context = {}) {
+    const merged = { ...context, ...input };
+    const propertyUuid = String(merged.listingId || merged.listing_id || merged.propertyId || '').trim();
+    const airbnbListingId = airbnbListingIdFromContext(merged);
+    const checkInYmd =
+      checkInYmdFromContext(merged) ||
+      (typeof input?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.date.slice(0, 10))
+        ? input.date.slice(0, 10)
+        : '');
+    const todayYmd = this._todayYmd(merged);
+    const cleaningYmd = checkInYmd || todayYmd;
 
-    if (!listingId) {
+    if (!airbnbListingId && !propertyUuid) {
       throw new Error('listingId is required for UnitReadinessTool');
     }
 
-    console.log(`[UnitReadinessTool] Checking readiness for listing ${listingId} on ${targetDate}`);
+    const previousDate = previousYmd(cleaningYmd);
+    const ddbKey = airbnbListingId ? `${airbnbListingId}_${cleaningYmd}` : '';
 
-    const previousDate = this._getPreviousDate(targetDate);
-    const ddbKey = `${listingId}_${previousDate}`;
+    console.log(
+      `[UnitReadinessTool] Checking readiness listing=${propertyUuid || '(none)'} airbnb=${airbnbListingId || '(none)'} date=${cleaningYmd} key=${ddbKey || '(none)'}`
+    );
 
-    // Step 1: Check internal "cleaning" table for same-day turnover
-    const hadSameDayTurnover = await this._checkSameDayTurnover(ddbKey);
+    const cleaning = await this._getCleaningRow(ddbKey);
+    const hadPreviousDayGuests = await this._checkPreviousDayOccupancy(
+      propertyUuid || airbnbListingId,
+      previousDate
+    );
 
-    if (hadSameDayTurnover) {
-      return {
-        detected: true,
-        listingId,
-        date: targetDate,
-        isUnitReady: false, // They handle messaging separately when unit becomes ready
-        hadSameDayTurnover: true,
-        hadPreviousDayGuests: true, // implied by same-day turnover
-        reason: 'Same-day turnover detected. Guest will be messaged when unit is ready.',
-        source: 'internal_cleaning_table'
-      };
+    const buttonPressed = !!cleaning.pressedAt;
+    let isUnitReady;
+    let reason;
+    if (!hadPreviousDayGuests) {
+      isUnitReady = true;
+      reason = 'No guests the previous night — unit should be ready.';
+    } else if (buttonPressed) {
+      isUnitReady = true;
+      reason = 'Previous-night guest checked out and cleaning is complete.';
+    } else {
+      isUnitReady = false;
+      reason =
+        'Previous-night guest checked out and cleaning is not complete yet. Guest will be messaged when the unit is ready.';
     }
-
-    // Step 2: No same-day turnover → check previous day occupancy via Hospitable
-    const hadPreviousDayGuests = await this._checkPreviousDayOccupancy(listingId, previousDate);
 
     return {
       detected: true,
-      listingId,
-      date: targetDate,
-      isUnitReady: !hadPreviousDayGuests,
-      hadSameDayTurnover: false,
+      listingId: propertyUuid || airbnbListingId,
+      airbnbListingId: airbnbListingId || null,
+      date: cleaningYmd,
+      cleaningKey: ddbKey || null,
+      isUnitReady,
+      buttonPressed,
+      pressedAt: cleaning.pressedAt,
+      hadSameDayTurnover: hadPreviousDayGuests,
       hadPreviousDayGuests,
-      reason: hadPreviousDayGuests
-        ? 'Had guests the previous day → unit likely needs cleaning'
-        : 'No guests previous day → unit should be ready',
-      source: 'hospitable_previous_day_check'
+      reason,
+      source: cleaning.lookedUp ? 'internal_cleaning_table' : 'hospitable_previous_day_check',
     };
   }
 
-  async _checkSameDayTurnover(ddbKey) {
+  _todayYmd(context = {}) {
+    const anchor = context.asOfDate || context.simulatedToday || context.today;
+    if (anchor) return String(anchor).slice(0, 10);
+    if (context.asOfInstant) return ymdInAmericaNewYork(context.asOfInstant);
+    return ymdInAmericaNewYork();
+  }
+
+  async _getCleaningRow(ddbKey) {
+    if (!ddbKey) {
+      return { lookedUp: false, found: false, pressedAt: null };
+    }
     if (!this.ddbClient) {
       console.warn('[UnitReadinessTool] No DDB client provided. Cannot check cleaning table.');
-      return false; // fail safe
+      return { lookedUp: false, found: false, pressedAt: null };
     }
 
     try {
       const result = await this.ddbClient.send(
         new GetCommand({
           TableName: this.cleaningTableName,
-          Key: { pk: ddbKey }   // Adjust key name if your table uses a different attribute (e.g. "id" or "key")
+          Key: { listingIdAndDate: ddbKey },
         })
       );
-
-      const exists = !!result.Item;
-      console.log(`[UnitReadinessTool] DDB check for ${ddbKey}: ${exists ? 'FOUND (same-day turnover)' : 'NOT FOUND'}`);
-      return exists;
+      const item = result?.Item || null;
+      const pressedAt = item?.pressedAt || null;
+      console.log(
+        `[UnitReadinessTool] DDB ${ddbKey}: ${item ? 'FOUND' : 'NOT FOUND'} pressedAt=${pressedAt || 'none'}`
+      );
+      return { lookedUp: true, found: !!item, pressedAt };
     } catch (err) {
       console.error('[UnitReadinessTool] Error checking DDB cleaning table:', err.message);
-      return false; // fail safe
+      return { lookedUp: false, found: false, pressedAt: null };
     }
   }
 
   async _checkPreviousDayOccupancy(listingId, date) {
+    if (!listingId || !date) {
+      return true;
+    }
     if (!this.hospitableClient) {
       console.warn('[UnitReadinessTool] No Hospitable client provided. Cannot check previous day occupancy.');
-      return true; // fail safe → assume needs cleaning
+      return true;
     }
 
     try {
-      // The HospitableClient should implement hasGuestsOnDate(listingId, date)
       const hadGuests = await this.hospitableClient.hasGuestsOnDate(listingId, date);
-      console.log(`[UnitReadinessTool] Hospitable check for ${listingId} on ${date}: ${hadGuests ? 'HAD GUESTS' : 'NO GUESTS'}`);
-      return hadGuests;
+      console.log(
+        `[UnitReadinessTool] Hospitable check for ${listingId} on ${date}: ${hadGuests ? 'HAD GUESTS' : 'NO GUESTS'}`
+      );
+      return !!hadGuests;
     } catch (err) {
       console.error('[UnitReadinessTool] Error calling Hospitable:', err.message);
-      return true; // fail safe
+      return true;
     }
-  }
-
-  _getToday() {
-    return new Date().toISOString().split('T')[0];
-  }
-
-  _getPreviousDate(dateStr) {
-    const date = new Date(dateStr);
-    date.setDate(date.getDate() - 1);
-    return date.toISOString().split('T')[0];
   }
 }

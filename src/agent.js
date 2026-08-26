@@ -40,7 +40,7 @@ import {
   stripLeadingFormalTimeGreeting,
   alignLeadingTimeGreeting,
 } from './utils/timeGreeting.js';
-import { lookupGuestCheckIn } from './utils/guestCheckIns.js';
+import { checkInYmdFromContext, lookupGuestCheckIn, ymdInAmericaNewYork } from './utils/guestCheckIns.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -373,6 +373,30 @@ export class GuestMessagingAgent {
       context.preArrivalSofaLinensAsk = true;
     }
 
+    // Check-in day readiness (Trevor 2026-08-26): eval calls processMessage
+    // directly, so DynamoDB cleaning-table pressedAt must be loaded here too.
+    if (!context.unitReadiness && (this._looksLikeCheckInDay(context) || this._isCheckInDayReadinessAsk(guestMessage))) {
+      const unitReadinessTool = this.tools.get('get_unit_readiness');
+      if (unitReadinessTool) {
+        try {
+          const readiness = await unitReadinessTool.execute({}, context);
+          if (readiness) {
+            context.unitReadiness = readiness;
+            console.log(
+              '[Agent] → Unit readiness (processMessage): isUnitReady=' +
+                readiness.isUnitReady +
+                ' buttonPressed=' +
+                readiness.buttonPressed +
+                ' reason=' +
+                (readiness.reason || '')
+            );
+          }
+        } catch (err) {
+          console.warn('[Agent] unit readiness (processMessage) failed', err?.message || err);
+        }
+      }
+    }
+
     const system = await this.loadPrompt(context);
 
     // Build a rich user prompt (we will evolve this heavily)
@@ -637,6 +661,14 @@ export class GuestMessagingAgent {
       confidence = preCheckInParkingPolicy.confidence;
     }
 
+    const checkInDayNotReadyPolicy = this._applyCheckInDayNotReadyPolicy(parsed, context, guestMessage);
+    if (checkInDayNotReadyPolicy.applied) {
+      parsed.typeOfMessageReceived = checkInDayNotReadyPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = checkInDayNotReadyPolicy.proposedResponse;
+      shouldReply = checkInDayNotReadyPolicy.shouldReply;
+      confidence = checkInDayNotReadyPolicy.confidence;
+    }
+
     const postCheckoutParkingPolicy = this._applyPostCheckoutParkingPolicy(parsed, context, guestMessage);
     if (postCheckoutParkingPolicy.applied) {
       parsed.typeOfMessageReceived = postCheckoutParkingPolicy.typeOfMessageReceived;
@@ -696,6 +728,14 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
+    const smokeAllClearPolicy = this._applySmokeAlarmAllClearPolicy(parsed, context, guestMessage);
+    if (smokeAllClearPolicy.applied) {
+      parsed.typeOfMessageReceived = smokeAllClearPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = smokeAllClearPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
     // After first-host welcome so a day-before / day-after "can't get in"
     // is not replaced by a welcome or lockout script.
     const stayWindowAccessFinalPm = this._applyStayWindowAccessPolicy(
@@ -705,6 +745,15 @@ export class GuestMessagingAgent {
     );
     if (stayWindowAccessFinalPm.applied) {
       this._assignStayWindowAccess(parsed, stayWindowAccessFinalPm);
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    // Trevor 2026-08-26: last so first-host welcome / FYI cannot wipe the not-ready draft.
+    const checkInDayNotReadyLate = this._applyCheckInDayNotReadyPolicy(parsed, context, guestMessage);
+    if (checkInDayNotReadyLate.applied) {
+      parsed.typeOfMessageReceived = checkInDayNotReadyLate.typeOfMessageReceived;
+      parsed.proposedResponse = checkInDayNotReadyLate.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -932,6 +981,7 @@ export class GuestMessagingAgent {
       'TRANSPORT_QUESTION',
       'ACTIVITIES_QUESTION',
       'RECOMMENDATION',
+      'FYI_STATEMENT',
     ];
   }
 
@@ -957,6 +1007,7 @@ export class GuestMessagingAgent {
    */
   _guestAsksNewQuestion(guestMessage = '', typeOfMessageReceived) {
     if (/\?/.test(String(guestMessage || ''))) return true;
+    if (this._isCheckInDayReadinessAsk(guestMessage)) return true;
     return this._messageCategories({ typeOfMessageReceived }).some((c) => {
       if (/_QUESTION$/.test(c)) return true;
       return [
@@ -1824,6 +1875,122 @@ export class GuestMessagingAgent {
     };
   }
 
+  _conversationHistoryItems(context = {}) {
+    const out = [];
+    const seen = new Set();
+    const pushAll = (arr) => {
+      if (!Array.isArray(arr)) return;
+      for (const m of arr) {
+        const text = String(m?.content || m?.body || m?.text || '').trim();
+        if (!text) continue;
+        const key = `${m?.sender_type || m?.sender?.type || ''}|${text.slice(0, 160)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(m);
+      }
+    };
+    pushAll(context.conversationHistory);
+    pushAll(context.conversationTraces?.recentConversationMessages);
+    return out;
+  }
+
+  _hostSentSmokeDetectorNotice(context = {}) {
+    return this._conversationHistoryItems(context).some((m) => {
+      const role = String(m?.sender_type || m?.sender?.type || m?.role || '').toLowerCase();
+      if (role && role !== 'host') return false;
+      const text = String(m?.content || m?.body || m?.text || '').toLowerCase();
+      return /smoke detector just went off|co detector just went off|carbon monoxide detector just went off/.test(
+        text
+      );
+    });
+  }
+
+  _alreadySentSmokeAlarmAllClear(context = {}) {
+    return this._conversationHistoryItems(context).some((m) => {
+      const role = String(m?.sender_type || m?.sender?.type || m?.role || '').toLowerCase();
+      if (role && role !== 'host') return false;
+      const text = String(m?.content || m?.body || m?.text || '').toLowerCase();
+      return /thanks for letting us know/.test(text) && /glad you are all safe/.test(text);
+    });
+  }
+
+  /**
+   * Guest all-clear after our Ring smoke / CO notice (Carlos Apt 2, 2026-08-26):
+   * "Everything is good, we had something boiling. Richard came up..."
+   * Recent-host suppression used to wipe this because we had just sent the alarm notice.
+   */
+  _isSmokeAlarmAllClear(guestMessage = '', context = {}) {
+    const lower = String(guestMessage || '').toLowerCase();
+    if (!lower.trim()) return false;
+    if (/\?/.test(String(guestMessage || ''))) return false;
+    const needsHelp =
+      /\b(real fire|call 911|we (?:left|evacuated)|need help|smoke everywhere)\b/.test(lower) &&
+      !/everything is (good|ok|okay|fine)|false alarm|just cooking|boiling/.test(lower);
+    if (needsHelp) return false;
+    if (this._alreadySentSmokeAlarmAllClear(context)) return false;
+
+    const allClear =
+      /everything is (good|ok|okay|fine|alright)|everything was (good|ok|okay|fine)|all (good|ok|okay|fine|clear)|we(?:'re| are) (?:all )?(?:good|ok|okay|fine|safe)|false alarm|no (?:real )?fire/i.test(
+        lower
+      );
+    const cooking =
+      /\b(boil(?:ing|ed)?|cooking|steam|fried eggs?|toaster|oven|burnt toast|something boiling)\b/i.test(
+        lower
+      );
+    const smokeCtx = /\b(smoke detector|co detector|carbon monoxide|fire truck|false alarm)\b/i.test(
+      lower
+    );
+    const hostNotice = this._hostSentSmokeDetectorNotice(context);
+    if (hostNotice && (allClear || cooking)) return true;
+    if (allClear && (cooking || smokeCtx)) return true;
+    return false;
+  }
+
+  _smokeAlarmAllClearSnippet(context = {}, guestMessage = '') {
+    const name = this._guestDisplayFirstName(context);
+    const who = name && name !== 'there' ? `, ${name}` : '';
+    const richard = /\brichard\b/i.test(String(guestMessage || ''));
+    const thanksRichard = richard ? ' — and thanks to Richard for checking in' : '';
+    return `Thanks for letting us know everything is okay${who}! Glad you are all safe${thanksRichard}.`;
+  }
+
+  _smokeAlarmAllClearDraftIsGood(draft = '') {
+    const text = String(draft || '').trim();
+    if (!text || text === 'none' || text.length > 420) return false;
+    if (/call 911|please check now|smoke detector just went off|leave and call/i.test(text)) {
+      return false;
+    }
+    return (
+      /thanks for letting us know/i.test(text) &&
+      /everything is okay/i.test(text) &&
+      /glad you are all safe/i.test(text)
+    );
+  }
+
+  _applySmokeAlarmAllClearPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._isSmokeAlarmAllClear(guestMessage, context)) {
+      return { applied: false };
+    }
+    const draft = (parsed.proposedResponse || '').trim();
+    const proposedResponse = this._smokeAlarmAllClearDraftIsGood(draft)
+      ? draft
+      : this._smokeAlarmAllClearSnippet(context, guestMessage);
+    parsed.typeOfMessageReceived = 'FYI_STATEMENT';
+    parsed.proposedResponse = proposedResponse;
+    parsed.shouldReply = true;
+    parsed.confidence = 1.0;
+    parsed.escalated = false;
+    parsed.suppressedDueToRecentHost = false;
+    return {
+      applied: true,
+      typeOfMessageReceived: 'FYI_STATEMENT',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+    };
+  }
+
   _applyInStayDepartureThankYouPolicy(parsed, context = {}, guestMessage = '') {
     if (!this._isTemporaryDepartureDuringStay(guestMessage, context)) {
       return { applied: false };
@@ -1874,6 +2041,60 @@ export class GuestMessagingAgent {
 
   _hostAlreadyOfferedUnitReady(context = {}) {
     return !!(context.conversationTraces?.earlyUnitReadyOffered || context.earlyUnitReadyOffered);
+  }
+
+  /**
+   * Check-in day "is it ready / kill an hour / come back closer to 4".
+   * Trevor 2026-08-26: last line was FYI without "?" and we sent nothing.
+   */
+  _isCheckInDayReadinessAsk(guestMessage = '') {
+    const msg = String(guestMessage || '');
+    if (!msg.trim()) return false;
+    return (
+      /\b(not ready|ready early|place is ready|unit is ready|apartment is ready|kill an hour|kill some time|closer to [34]|5 min(?:ute)?s? away|if it['’]?s not ready|is (?:the )?(?:place|unit|apt|apartment) ready)\b/i.test(
+        msg
+      ) ||
+      (/\bready\b/i.test(msg) && /\b(early|check[\s-]?in|arriv)/i.test(msg))
+    );
+  }
+
+  _checkInDayNotReadySnippet(context = {}) {
+    const name = this._guestDisplayFirstName(context) || 'there';
+    return `Sorry ${name}, it is not ready yet. Coming back closer to 4pm is perfect — we'll message you as soon as it is.`;
+  }
+
+  _unitIsNotReadyFromCleaningTable(context = {}) {
+    const readiness = context.unitReadiness || {};
+    if (readiness.isUnitReady === false) return true;
+    if (readiness.buttonPressed === false && readiness.hadPreviousDayGuests) return true;
+    return false;
+  }
+
+  /**
+   * Same-day turnover + cleaning table has no pressedAt → tell them it is not
+   * ready. Never mention the physical cleaning button to the guest.
+   */
+  _applyCheckInDayNotReadyPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._looksLikeCheckInDay(context)) return { applied: false };
+    if (!this._isCheckInDayReadinessAsk(guestMessage)) return { applied: false };
+    if (this._hostAlreadyOfferedUnitReady(context)) return { applied: false };
+    if (context.guestArrived) return { applied: false };
+    if (!this._unitIsNotReadyFromCleaningTable(context)) return { applied: false };
+
+    const proposedResponse = this._checkInDayNotReadySnippet(context);
+    parsed.typeOfMessageReceived = 'EARLY_CHECKIN';
+    parsed.proposedResponse = proposedResponse;
+    parsed.shouldReply = true;
+    parsed.confidence = 1.0;
+    parsed.escalated = false;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'EARLY_CHECKIN',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
   }
 
   _applyPreCheckInParkingPolicy(parsed, context = {}, guestMessage = '') {
@@ -3828,6 +4049,22 @@ export class GuestMessagingAgent {
       lines.push('- CRITICAL IN-STAY TEMPORARY DEPARTURE (Amie incident): Guest is currently IN their stay (check-in day or mid-stay, NOT checkout day). They said they "left the apartment/unit" temporarily (e.g. stepped out so a property manager could knock, deliver a blanket, or leave an item by the door). This is NOT checkout and they are returning tonight. Classify as THANK_YOU_MESSAGE. proposedResponse MUST be a brief warm "You\'re welcome, [Name]!" only. MUST NOT say "safe travels", "hope you enjoyed your stay", "have a great trip", or any end-of-stay farewell.');
     }
 
+    if (this._isSmokeAlarmAllClear(message, context)) {
+      lines.push(
+        '- CRITICAL SMOKE/CO ALL-CLEAR (Carlos Apt 2, 2026-08-26): We just messaged them that a smoke/CO detector went off. They replied that everything is good / it was cooking, boiling, or steam (Richard may have checked). Classify as FYI_STATEMENT. shouldReply MUST be true. proposedResponse MUST thank them for letting us know everything is okay and say Glad you are all safe. Do NOT repeat 911 / "please check now" / the detector-went-off notice. Do NOT suppress because we just sent the alarm message — that notice is why they are reporting back. Recent-host suppression must not wipe this.'
+      );
+    }
+
+    if (this._looksLikeCheckInDay(context) && this._isCheckInDayReadinessAsk(message) && this._unitIsNotReadyFromCleaningTable(context)) {
+      lines.push(
+        '- CRITICAL UNIT READINESS (Trevor 2026-08-26): Check-in day and DynamoDB cleaning table has no pressedAt after a previous-night guest. The unit is NOT ready. Classify as EARLY_CHECKIN. shouldReply MUST be true. proposedResponse MUST apologize that it is not ready yet, confirm check-in is 4pm, and say we will message them as soon as it is. MUST NOT reply with only "You\'re welcome". MUST NOT mention the cleaning button. MUST NOT tell them they can come in now.'
+      );
+    } else if (context.unitReadiness && context.unitReadiness.isUnitReady === true && this._isCheckInDayReadinessAsk(message)) {
+      lines.push(
+        '- UNIT READINESS: Cleaning is complete / no previous-night guest. You may tell them the unit is ready if they asked. Do not mention the cleaning button.'
+      );
+    }
+
     if (this._looksLikeInStayCribLocationAsk(message, context)) {
       const loc = this._isApt2Listing(context)
         ? 'It should be in the closet of the smaller bedroom.'
@@ -4468,27 +4705,24 @@ export class GuestMessagingAgent {
    * Lightweight heuristic to decide if we should run an early UnitReadiness check.
    */
   _looksLikeCheckInDay(ctx = {}) {
-    if (!ctx.checkIn) return false;
+    const checkInYmd = checkInYmdFromContext(ctx);
+    if (!checkInYmd && !ctx.checkIn) return false;
 
+    const ymd = checkInYmd || String(ctx.checkIn).slice(0, 10);
     const anchor = ctx.asOfDate || ctx.simulatedToday || ctx.today;
     let today;
     if (anchor) {
       today = String(anchor).slice(0, 10);
+    } else if (ctx.asOfInstant) {
+      today = ymdInAmericaNewYork(ctx.asOfInstant);
     } else if (ctx.bookingTimestamp) {
-      try {
-        today = new Date(ctx.bookingTimestamp).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-      } catch (e) {
-        today = new Date().toISOString().split('T')[0];
-      }
+      today = ymdInAmericaNewYork(ctx.bookingTimestamp);
     } else {
-      today = new Date().toISOString().split('T')[0];
+      today = ymdInAmericaNewYork();
     }
-    const checkIn = ctx.checkIn;
 
-    // If check-in is today or the context already marks it as current stay
-    if (checkIn === today) return true;
+    if (ymd === today) return true;
     if (ctx.stayTiming === 'current') return true;
-
     return false;
   }
 
@@ -4654,6 +4888,7 @@ export class GuestMessagingAgent {
       finalDecision.shouldReply &&
       !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext) &&
       !isThankYouCategory &&
+      !this._isSmokeAlarmAllClear(guestMessage, enrichedContext) &&
       !this._guestAsksNewQuestion(guestMessage, finalDecision.typeOfMessageReceived) &&
       // Never suppress the mandatory first-host new-booking welcome (Roberto).
       !this._isFirstHostOnConfirmedReservation(enrichedContext)
@@ -5277,6 +5512,21 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = true;
     }
 
+    const smokeAllClearFinal = this._applySmokeAlarmAllClearPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (smokeAllClearFinal.applied) {
+      console.log('[Agent] → Smoke-alarm all-clear policy applied (thanks + glad you are all safe)');
+      finalResult.typeOfMessageReceived = smokeAllClearFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = smokeAllClearFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+      finalResult.suppressedDueToRecentHost = false;
+    }
+
     const cancellationCategoryFinal = this._applyCancellationCategoryPolicy(finalResult, guestMessage);
     if (cancellationCategoryFinal.applied) {
       finalResult.typeOfMessageReceived = cancellationCategoryFinal.typeOfMessageReceived;
@@ -5350,6 +5600,21 @@ export class GuestMessagingAgent {
       finalResult.proposedResponse = preCheckInParkingPolicyFinal.proposedResponse;
       finalResult.shouldReply = preCheckInParkingPolicyFinal.shouldReply;
       finalResult.confidence = preCheckInParkingPolicyFinal.confidence;
+    }
+
+    const checkInDayNotReadyFinal = this._applyCheckInDayNotReadyPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (checkInDayNotReadyFinal.applied) {
+      console.log('[Agent] → Check-in-day not-ready policy applied (cleaning table has no pressedAt)');
+      finalResult.typeOfMessageReceived = checkInDayNotReadyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = checkInDayNotReadyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+      finalResult.unitReadiness = enrichedContext.unitReadiness || finalResult.unitReadiness || null;
     }
 
     const postCheckoutParkingPolicyFinal = this._applyPostCheckoutParkingPolicy(finalResult, enrichedContext, guestMessage);
@@ -5668,6 +5933,40 @@ export class GuestMessagingAgent {
    * re-sends welcome logistics on a post-welcome thank-you. Does not depend on Grok seeing history.
    */
   _applyDeterministicJudgeGuards(llmJudgeResult = {}, firstDecision = {}, context = {}, guestMessage = '') {
+    if (this._isSmokeAlarmAllClear(guestMessage, context)) {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const llmAlreadyFixed =
+        llmJudgeResult.verdict === 'REVISE' && this._smokeAlarmAllClearDraftIsGood(revised);
+      if (!llmAlreadyFixed) {
+        const withheld =
+          llmJudgeResult.verdict === 'REJECT' ||
+          firstDecision.shouldReply === false ||
+          !this._smokeAlarmAllClearDraftIsGood(draft);
+        if (withheld) {
+          const policy = this._applySmokeAlarmAllClearPolicy(
+            { ...firstDecision, proposedResponse: draft },
+            context,
+            guestMessage
+          );
+          console.log('[Agent] → Deterministic judge guard: smoke-alarm all-clear must thank + glad you are all safe (Carlos)');
+          return {
+            ...llmJudgeResult,
+            verdict: 'REVISE',
+            revisedResponse: policy.proposedResponse,
+            notes:
+              (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+              'Deterministic guard: guest all-clear after smoke notice — thank them and say glad you are all safe.',
+            issues: [
+              ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+              'Smoke/CO all-clear (cooking/boiling/steam) after our detector notice must auto-reply thanks + Glad you are all safe (Carlos Apt 2 2026-08-26).',
+            ],
+            deterministicGuard: true,
+          };
+        }
+      }
+    }
+
     if (this._isPostCheckoutThankYou(guestMessage, context)) {
       const draft = (firstDecision.proposedResponse || '').trim();
       const eventMismatch = firstDecision.typeOfMessageReceived === 'EVENT_REQUEST' ||

@@ -2219,6 +2219,128 @@ describe('THANK_YOU_MESSAGE repeat allowance (no LLM)', () => {
   });
 });
 
+describe('Smoke-alarm all-clear (Carlos, no LLM)', () => {
+  const carlosMsg =
+    'Everything is good, we had something boiling. Richard came up to make sure everything was okay.';
+  const smokeNotice = [
+    'Hi Carlos,',
+    '',
+    'The smoke detector just went off in Pine Apt #2. Please check now.',
+    '',
+    'If it is a real fire: leave and call 911. If cooking or steam: open windows. Reply if you need help.',
+    '',
+    'Jerome',
+    '',
+  ].join('\n');
+  const carlosCtx = {
+    guestName: 'Carlos',
+    listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+    propertyName: 'Sunny Downtown 2 Bed Apt, Parking',
+    checkIn: '2026-08-24T16:00:00-04:00',
+    checkOut: '2026-08-28T10:00:00-04:00',
+    asOfDate: '2026-08-26',
+    conversationHistory: [
+      { sender_type: 'host', body: smokeNotice },
+      { sender_type: 'guest', body: carlosMsg },
+    ],
+  };
+
+  it('forces thanks + glad you are all safe even when the LLM withholds', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applySmokeAlarmAllClearPolicy(
+      {
+        typeOfMessageReceived: 'OTHER_MESSAGE',
+        proposedResponse: 'none',
+        shouldReply: false,
+      },
+      carlosCtx,
+      carlosMsg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.shouldReply, true);
+    assert.equal(applied.typeOfMessageReceived, 'FYI_STATEMENT');
+    assert.match(applied.proposedResponse, /Thanks for letting us know everything is okay, Carlos/i);
+    assert.match(applied.proposedResponse, /Glad you are all safe/i);
+    assert.match(applied.proposedResponse, /thanks to Richard for checking in/i);
+    assert.doesNotMatch(applied.proposedResponse, /call 911/i);
+  });
+
+  it('does not fire on unrelated all-good messages', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applySmokeAlarmAllClearPolicy(
+      { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'none' },
+      { guestName: 'Carlos', conversationHistory: [] },
+      'Everything is good, thanks!'
+    );
+    assert.equal(applied.applied, false);
+  });
+
+  it('does not send a second all-clear if we already thanked them', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const applied = agent._applySmokeAlarmAllClearPolicy(
+      { typeOfMessageReceived: 'FYI_STATEMENT', proposedResponse: 'none' },
+      {
+        ...carlosCtx,
+        conversationHistory: [
+          { sender_type: 'host', body: smokeNotice },
+          { sender_type: 'guest', body: carlosMsg },
+          {
+            sender_type: 'host',
+            body: 'Thanks for letting us know everything is okay, Carlos! Glad you are all safe — and thanks to Richard for checking in.',
+          },
+        ],
+      },
+      carlosMsg
+    );
+    assert.equal(applied.applied, false);
+  });
+
+  it('HARDENING: recent host smoke notice does not suppress the all-clear ack', async () => {
+    const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: {
+        complete: async () =>
+          JSON.stringify({
+            typeOfMessageReceived: 'OTHER_MESSAGE',
+            proposedResponse: 'none',
+            shouldReply: false,
+            confidence: 0.4,
+          }),
+      },
+      hospitableClient: mockHospitableClient({
+        getReservationMessages: async () => [
+          { sender_type: 'host', body: smokeNotice, created_at: twoMinAgo },
+          { sender_type: 'guest', body: carlosMsg, created_at: new Date().toISOString() },
+        ],
+      }),
+      requireLiveConversationHistory: false,
+    });
+
+    const result = await agent.handleMessage(carlosMsg, {
+      ...carlosCtx,
+      conversation_id: '5b54f75a-d12f-422f-8e53-047e152cae37',
+      reservationId: '660075cd-d520-4de9-bece-9860625728d5',
+      sender_type: 'guest',
+    });
+
+    assert.equal(result.shouldReply, true);
+    assert.ok(result.suppressedDueToRecentHost !== true);
+    assert.equal(result.typeOfMessageReceived, 'FYI_STATEMENT');
+    assert.match(result.proposedResponse, /Thanks for letting us know everything is okay, Carlos/i);
+    assert.match(result.proposedResponse, /Glad you are all safe/i);
+  });
+});
+
 describe('Judge rewrite quality loop (no real LLM)', () => {
   it('builds rewrite prompt with critique + tool ground truth', () => {
     const agent = new GuestMessagingAgent({
