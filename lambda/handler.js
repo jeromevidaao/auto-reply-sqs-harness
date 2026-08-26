@@ -22,6 +22,11 @@
  *     API ring_smoke_poll saw a Kidde × Ring Apt #2 detector go active.
  *     Isolated path — no Grok. Messages every current Apt #2 guest on
  *     Airbnb (Hospitable) and/or HomeExchange. simulate=true never sends.
+ * - Post-cleaning unit-ready (act=early_checkin_notice):
+ *     cleaningToRegister enqueues this when the cleaner marks a unit done.
+ *     Isolated path — no Grok. Messages the guest checking in today on that
+ *     listing (Airbnb via Hospitable or HomeExchange). Send window 8:00 AM
+ *     through just before 4:00 PM America/New_York — never after 4pm ET.
  * - HomeExchange check-in instructions (act=homeexchange_checkin_instructions):
  *     3 days before arrival (or immediately when the stay is accepted ≤3 days
  *     out). Unit-strict template + guest phone last-4. Owner FCM always.
@@ -69,6 +74,10 @@ import {
   handleRingSmokeNotice,
   isRingSmokeNoticeTurn,
 } from '../src/useCases/ringSmokeNotice.js';
+import {
+  handleEarlyCheckinNotice,
+  isEarlyCheckinNoticeTurn,
+} from '../src/useCases/earlyCheckinNotice.js';
 import { createHeFirstAckWriter } from '../src/useCases/homeExchangeFirstAck.js';
 import { expireHomeExchangeBlocks } from '../src/useCases/homeExchangeExpire.js';
 import { createDdbBlockStore } from '../src/useCases/homeExchangeBlocks.js';
@@ -205,6 +214,83 @@ export const handler = async (event, context) => {
       statusCode: 200,
       body: JSON.stringify({ success: true, act, queueName, queueUrl: QueueUrl }),
     };
+  }
+
+  // Isolated post-cleaning unit-ready notice. Must run before Airbnb / HE chat
+  // so we never Grok-rewrite the template or send via the wrong platform.
+  if (act === 'early_checkin_notice' || isEarlyCheckinNoticeTurn(event)) {
+    console.log('[Handler] Early check-in / unit-ready guest notice — isolated path');
+    const hospitableClient = new HospitableClient();
+    const homeExchangeClient = new HomeExchangeClient();
+    const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
+    const readyResult = await handleEarlyCheckinNotice({
+      event,
+      hospitableClient,
+      homeExchangeClient,
+      notifyOwner: notifyOwnerAndroid,
+      ddbClient,
+    });
+    const duration = Date.now() - startTime;
+    console.log('[Handler] Early check-in notice result:', {
+      sent: readyResult.sent,
+      sentCount: readyResult.sentCount || 0,
+      simulate: readyResult.simulate,
+      sendSkipReason: readyResult.sendSkipReason || null,
+      sendError: readyResult.sendError || null,
+      reason: readyResult.decision?.reason || null,
+      guests: (readyResult.recipients || []).map((r) => r.firstName).filter(Boolean),
+      listingId: readyResult.listingId || null,
+    });
+    if (readyResult.sendError && !readyResult.simulate) {
+      console.error('[Handler] Early check-in guest send failed:', readyResult.sendError);
+      throw new Error(`Failed early check-in guest notice: ${readyResult.sendError}`);
+    }
+    console.log('\n⏱️  Total handler duration:', duration, 'ms (early-checkin-notice)');
+    const readyPlatform =
+      readyResult.recipient?.platform === 'homeexchange' ? 'homeexchange' : 'airbnb';
+    return persistAndReturn(
+      {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          requestId,
+          earlyCheckinNotice: true,
+          sent: readyResult.sent,
+          sentCount: readyResult.sentCount || 0,
+          simulate: readyResult.simulate,
+          sendDisabled: !readyResult.sent,
+          decision: {
+            typeOfMessageReceived: readyResult.typeOfMessageReceived,
+            proposedResponse: readyResult.proposedResponse,
+            shouldReply: !!readyResult.sent,
+            escalated: false,
+          },
+          readyResult,
+        }),
+      },
+      {
+        platform: readyPlatform,
+        act: 'early_checkin_notice',
+        result: {
+          typeOfMessageReceived: readyResult.typeOfMessageReceived || 'EARLY_CHECKIN_NOTICE',
+          proposedResponse: readyResult.proposedResponse,
+          shouldReply: !!readyResult.sent,
+          sent: !!readyResult.sent,
+        },
+        extra: {
+          sent: !!readyResult.sent,
+          shouldReply: !!readyResult.sent,
+          category: readyResult.typeOfMessageReceived || 'EARLY_CHECKIN_NOTICE',
+          platform: readyPlatform,
+          reason: readyResult.decision?.reason || readyResult.sendSkipReason || null,
+          guestName:
+            (readyResult.recipients || []).map((r) => r.firstName).filter(Boolean).join(', ') ||
+            null,
+          propertyName: readyResult.listingName || null,
+          proposedResponse: readyResult.proposedResponse,
+        },
+      }
+    );
   }
 
   // Isolated keypad-lockout guest notice. Must run before Airbnb / HE chat so

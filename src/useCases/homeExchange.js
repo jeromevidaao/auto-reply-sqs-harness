@@ -225,6 +225,7 @@ export function isHomeExchangePayload(event) {
     if (act === 'new_reservation_home_exchange') continue;
     if (act === 'keypad_lockout_notice') continue;
     if (act === 'ring_smoke_notice') continue;
+    if (act === 'early_checkin_notice') continue;
 
     const data = p.data && typeof p.data === 'object' ? p.data : {};
     const ctx = p.context && typeof p.context === 'object' ? p.context : {};
