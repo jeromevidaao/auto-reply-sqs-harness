@@ -1,8 +1,7 @@
 /**
  * Isolated post-cleaning unit-ready / early check-in guest notice.
  *
- * cleaningToRegister (and leftover earlyCheckinMessageAfterCleaningButtonPressed
- * forwards) enqueue act=early_checkin_notice on grok_message. This path never
+ * cleaningToRegister enqueues act=early_checkin_notice on grok_message. This path never
  * goes through Grok. Occupancy comes from Hospitable + HE. Messages the guest
  * checking in today on that listing (Airbnb and/or HomeExchange). Send window
  * is 8:00 AM through just before 4:00 PM America/New_York. simulate /
