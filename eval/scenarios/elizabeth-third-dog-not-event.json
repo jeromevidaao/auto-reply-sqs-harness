@@ -1,0 +1,55 @@
+{
+  "id": "elizabeth-third-dog-not-event",
+  "description": "Elizabeth (Apt 3) asks whether a third senior dog would be an issue given the listing 2-dog max, using 'in the unlikely event'. Production auto treated 'event' / Thanksgiving as EVENT_REQUEST and sent the no-parties decline.",
+  "guestMessage": "Hi again,  One last question.  In the unlikely event that our very senior dog is still around for Thanksgiving, will that be an issue?  She sleeps most of the time and goes on very short walks or goes in a doggy stroller.  Of course, I should've carefully read the listing about your 2 dog max",
+  "guestName": "Elizabeth",
+  "checkIn": "2026-11-25T16:00:00-05:00",
+  "checkOut": "2026-11-28T10:00:00-05:00",
+  "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+  "propertyName": "53 Pine St #3 · Cozy West End Victorian | EV Charging + Parking",
+  "context": {
+    "asOfDate": "2026-08-26",
+    "asOfInstant": "2026-08-26T22:30:00-04:00",
+    "nowForGreeting": "2026-08-26T22:30:00-04:00",
+    "reservationId": "fe01d62b-0473-45d9-9f34-efafdf0d084c",
+    "conversationId": "91dfeabf-e640-4cf4-8e58-b2f468d40885",
+    "petCount": 2,
+    "hasPets": true,
+    "suggestedResponseSnippet": "Unfortunately we have a maximum 2 dogs policy, so we can't accommodate a third. Sorry — we had issues in the past with more than 2.",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi!  We look forward to staying at your home!  We are very respectful and quiet and don't mind stairs.  We are traveling with 2 well behaved dogs.  We do have a third dog, but don't believe she will make it to Thanksgiving:(. She is almost 19 years old."
+      },
+      {
+        "sender_type": "host",
+        "body": "Good evening, Elizabeth, thank you for the note — sounds like a wonderful Thanksgiving trip. We love dogs and have you noted for 2 pets. The $30 pet fee is already included in your reservation. Just a reminder that pets cannot go on the beds. Check-in is at 4pm with self-check-in and you have one dedicated off-street parking spot. I will send the detailed check-in instructions 3 days before your arrival.\n\nJerome & Ruby"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Great-thank you again and good night!"
+      },
+      {
+        "sender_type": "host",
+        "body": "You're welcome, Elizabeth! Have a good night."
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "PET_QUESTIONS",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "forbiddenPhrases": [
+      "not able to accommodate events or gatherings",
+      "perfect venue for your celebration",
+      "thinking of our place for your event",
+      "add the pets"
+    ],
+    "requiredPhrases": [
+      "maximum 2 dogs"
+    ]
+  },
+  "notes": "Elizabeth Apt 3 2026-08-26 reservation fe01d62b. 4 guests, 2 pets already on the reservation. Thanksgiving Nov 25–28 is trip dates, not hosting an event. Answer PET_QUESTIONS: maximum 2 dogs, cannot accommodate a third. Do not send EVENT_REQUEST decline. Host already corrected live — do not re-send."
+}

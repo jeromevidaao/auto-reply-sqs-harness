@@ -1,0 +1,51 @@
+{
+  "id": "elizabeth-furniture-cover-ok",
+  "description": "Elizabeth (Apt 3) did not see the bed rule. She travels with extra sheets and always covers the furniture; dogs jump on beds at home; she offers to cancel if that is a problem. Production auto sent a firm pet-on-bed refusal plus Airbnb cancellation policy 475. Covering furniture is fine with us — no need to cancel.",
+  "guestMessage": "Hi Jerome and Ruby,  \n\nThank you and I didn't see the bed rule.  We travel with extra sheets because we always cover the furniture everywhere we go, just out of consideration to the property owners  .Our dogs do jump on our beds at home, so I'm thinking that may be a problem.  Please let me know and I will cancel the listing.  Apologies!",
+  "guestName": "Elizabeth",
+  "checkIn": "2026-11-25T16:00:00-05:00",
+  "checkOut": "2026-11-28T10:00:00-05:00",
+  "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+  "propertyName": "53 Pine St #3 · Cozy West End Victorian | EV Charging + Parking",
+  "context": {
+    "asOfDate": "2026-08-26",
+    "reservationId": "fe01d62b-0473-45d9-9f34-efafdf0d084c",
+    "petCount": 2,
+    "hasPets": true,
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi!  We look forward to staying at your home!  We are very respectful and quiet and don't mind stairs.  We are traveling with 2 well behaved dogs.  We do have a third dog, but don't believe she will make it to Thanksgiving:(. She is almost 19 years old."
+      },
+      {
+        "sender_type": "host",
+        "body": "Good evening, Elizabeth, thank you for the note — sounds like a wonderful Thanksgiving trip. We love dogs and have you noted for 2 pets. The $30 pet fee is already included in your reservation. Just a reminder that pets cannot go on the beds. Check-in is at 4pm with self-check-in and you have one dedicated off-street parking spot. I will send the detailed check-in instructions 3 days before your arrival.\n\nJerome & Ruby"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Hi Jerome and Ruby,  \n\nThank you and I didn't see the bed rule.  We travel with extra sheets because we always cover the furniture everywhere we go, just out of consideration to the property owners  .Our dogs do jump on our beds at home, so I'm thinking that may be a problem.  Please let me know and I will cancel the listing.  Apologies!"
+      }
+    ],
+    "suggestedResponseSnippet": "This is fine with us if you cover the furniture. No need to cancel — thanks for checking with us!"
+  },
+  "rubric": {
+    "expectedCategory": "PET_QUESTIONS",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "fine with us",
+      "cover the furniture",
+      "No need to cancel"
+    ],
+    "forbiddenPhrases": [
+      "help/article/475",
+      "pet rule is firm",
+      "dogs can't go on the beds",
+      "cannot go on the beds",
+      "strict cancellation"
+    ]
+  },
+  "notes": "Elizabeth Apt 3 2026-08-27. Auto sent firm bed-rule + 475 after guest offered linen covers. Host: covering furniture is fine, no need to cancel. Do not re-send — host already replied."
+}

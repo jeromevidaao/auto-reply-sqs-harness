@@ -5,6 +5,7 @@ import {
   isEventHostingDenial,
   isTripPurposeEventMention,
 } from '../parking/additionalParking.js';
+import { isPetOverMaxAsk, isUnlikelyEventIdiom } from '../pets/petOverMax.js';
 
 /**
  * EventRequestTool
@@ -15,6 +16,10 @@ import {
  * John Apt 2 2026-08-26: do NOT treat trip-purpose weddings ("celebration of
  * our niece's wedding"), additional-parking asks, or "not looking to plan a
  * gathering" clarifications as EVENT_REQUEST.
+ *
+ * Elizabeth Apt 3 2026-08-26: do NOT treat "in the unlikely event that our
+ * very senior dog…" / 2-dog-max questions as EVENT_REQUEST. That is
+ * PET_QUESTIONS (max 2 dogs).
  */
 export const EVENT_REQUEST_STANDARD_RESPONSE =
   "Thank you for thinking of our place for your event! Unfortunately, we're not able to accommodate events or gatherings as this is a residential building and our apartment isn't set up for those types of activities. We appreciate your understanding and hope you find a perfect venue for your celebration!";
@@ -38,6 +43,14 @@ export class EventRequestTool extends BaseTool {
 
     if (isEventHostingDenial(message)) {
       return { detected: false, deniedEvent: true };
+    }
+
+    if (isPetOverMaxAsk(message) && !isEventHostingAsk(message)) {
+      return { detected: false, petOverMax: true };
+    }
+
+    if (isUnlikelyEventIdiom(message) && !isEventHostingAsk(message)) {
+      return { detected: false, unlikelyEventIdiom: true };
     }
 
     if (isAdditionalParkingAsk(message) && !isEventHostingAsk(message)) {

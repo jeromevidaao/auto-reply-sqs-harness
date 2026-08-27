@@ -11,6 +11,11 @@ import {
   isEventHostingDenial,
   isTripPurposeEventMention,
 } from '../src/tools/parking/additionalParking.js';
+import {
+  PET_OVER_MAX_SNIPPET,
+  isPetOverMaxAsk,
+  isUnlikelyEventIdiom,
+} from '../src/tools/pets/petOverMax.js';
 import { ThermostatTool } from '../src/tools/hvac/ThermostatTool.js';
 import { StayExtensionTool } from '../src/tools/stay-extension/StayExtensionTool.js';
 import { PostCheckoutParkingTool } from '../src/tools/parking/PostCheckoutParkingTool.js';
@@ -100,6 +105,55 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(result.deniedEvent, true);
     assert.equal(isEventHostingDenial(johnNoPartyMsg), true);
     assert.equal(isAdditionalParkingAsk(johnNoPartyMsg), true);
+  });
+
+  const elizabethThirdDogMsg =
+    "Hi again,  One last question.  In the unlikely event that our very senior dog is still around for Thanksgiving, will that be an issue?  She sleeps most of the time and goes on very short walks or goes in a doggy stroller.  Of course, I should've carefully read the listing about your 2 dog max";
+
+  it('does not treat "in the unlikely event" + 2 dog max as EVENT_REQUEST (Elizabeth Apt 3)', async () => {
+    const tool = new EventRequestTool();
+    const result = await tool.execute(elizabethThirdDogMsg);
+    assert.equal(result.detected, false);
+    assert.equal(result.petOverMax, true);
+    assert.equal(isPetOverMaxAsk(elizabethThirdDogMsg), true);
+    assert.equal(isUnlikelyEventIdiom(elizabethThirdDogMsg), true);
+  });
+
+  it('skips event policy when LLM labels a 3rd-dog ask as EVENT_REQUEST', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyEventRequestPolicy(
+      {
+        typeOfMessageReceived: 'EVENT_REQUEST',
+        proposedResponse: "Thank you for thinking of our place for your event! Unfortunately, we're not able to accommodate events or gatherings as this is a residential building and our apartment isn't set up for those types of activities. We appreciate your understanding and hope you find a perfect venue for your celebration!",
+      },
+      { guestName: 'Elizabeth', earlyEventDetection: { detected: true } },
+      elizabethThirdDogMsg
+    );
+    assert.equal(applied.applied, false);
+  });
+
+  it('forces PET_QUESTIONS max-2-dogs copy for a third-dog ask (Elizabeth Apt 3)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyPetOverMaxPolicy(
+      {
+        typeOfMessageReceived: 'EVENT_REQUEST',
+        proposedResponse: "Thank you for thinking of our place for your event! Unfortunately, we're not able to accommodate events or gatherings as this is a residential building and our apartment isn't set up for those types of activities. We appreciate your understanding and hope you find a perfect venue for your celebration!",
+      },
+      { guestName: 'Elizabeth' },
+      elizabethThirdDogMsg
+    );
+    assert.equal(applied.applied, true);
+    assert.equal(applied.typeOfMessageReceived, 'PET_QUESTIONS');
+    assert.match(applied.proposedResponse, /maximum 2 dogs/i);
+    assert.doesNotMatch(applied.proposedResponse, /not able to accommodate events/i);
+    assert.doesNotMatch(applied.proposedResponse, /perfect venue for your celebration/i);
+    assert.match(PET_OVER_MAX_SNIPPET, /maximum 2 dogs/i);
   });
 
   it('skips event policy when LLM labels second-car parking as EVENT_REQUEST', () => {
@@ -3926,5 +3980,117 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
     assert.doesNotMatch(result.proposedResponse, /see you soon/i);
     assert.doesNotMatch(result.proposedResponse, /see you then/i);
     console.log('[michael-in-stay-thanks] proposedResponse:\n', result.proposedResponse);
+  });
+
+  it('Elizabeth 3rd-dog / 2-dog-max is PET_QUESTIONS not EVENT_REQUEST (mock Hospitable, live Grok)', async () => {
+    // Production 2026-08-26 Apt 3 reservation fe01d62b. Guest asked if a
+    // third senior dog would be an issue given the 2-dog max. Auto matched
+    // "in the unlikely event" / Thanksgiving as EVENT_REQUEST and sent the
+    // no-parties decline. This is a pet-count ask, not a party.
+    const elizabethMsg =
+      "Hi again,  One last question.  In the unlikely event that our very senior dog is still around for Thanksgiving, will that be an issue?  She sleeps most of the time and goes on very short walks or goes in a doggy stroller.  Of course, I should've carefully read the listing about your 2 dog max";
+    const priorThread = [
+      {
+        sender_type: 'guest',
+        body: "Hi!  We look forward to staying at your home!  We are very respectful and quiet and don't mind stairs.  We are traveling with 2 well behaved dogs.  We do have a third dog, but don't believe she will make it to Thanksgiving:(. She is almost 19 years old.",
+        created_at: '2026-08-26T22:26:34Z',
+      },
+      {
+        sender_type: 'host',
+        body: 'Good evening, Elizabeth, thank you for the note — sounds like a wonderful Thanksgiving trip. We love dogs and have you noted for 2 pets. The $30 pet fee is already included in your reservation. Just a reminder that pets cannot go on the beds. Check-in is at 4pm with self-check-in and you have one dedicated off-street parking spot. I will send the detailed check-in instructions 3 days before your arrival.\n\nJerome & Ruby',
+        created_at: '2026-08-26T22:28:34Z',
+      },
+      {
+        sender_type: 'guest',
+        body: "Hi Jerome and Ruby,  \n\nThank you and I didn't see the bed rule.  We travel with extra sheets because we always cover the furniture everywhere we go, just out of consideration to the property owners  .Our dogs do jump on our beds at home, so I'm thinking that may be a problem.  Please let me know and I will cancel the listing.  Apologies!",
+        created_at: '2026-08-27T01:30:07Z',
+      },
+      {
+        sender_type: 'host',
+        body: 'This is all good with us then! Thank you Elizabeth!',
+        created_at: '2026-08-27T01:31:03Z',
+      },
+      {
+        sender_type: 'guest',
+        body: "so cancel, right?  Sorry, didn't understand your message!",
+        created_at: '2026-08-27T01:32:05Z',
+      },
+      {
+        sender_type: 'host',
+        body: 'This is fine with us if we are covering the furniture\nNo need to cancel\nBut thanks for checking with us!',
+        created_at: '2026-08-27T01:34:30Z',
+      },
+      {
+        sender_type: 'guest',
+        body: 'okay, just want to be transparent since you also have a strict 24 hour cancellation from moment of reservation, I wanted to double check.',
+        created_at: '2026-08-27T01:36:49Z',
+      },
+      {
+        sender_type: 'host',
+        body: 'All good - thanks for checking with us again',
+        created_at: '2026-08-27T01:37:12Z',
+      },
+      {
+        sender_type: 'guest',
+        body: 'Great-thank you again and good night!',
+        created_at: '2026-08-27T01:37:28Z',
+      },
+      {
+        sender_type: 'host',
+        body: "You're welcome, Elizabeth! Have a good night.",
+        created_at: '2026-08-27T01:38:08Z',
+      },
+      {
+        sender_type: 'guest',
+        body: elizabethMsg,
+        created_at: '2026-08-27T02:30:39Z',
+      },
+    ];
+    const mockHospitable = {
+      async hasGuestsOnDate() { return false; },
+      async getConversationMessages() { return priorThread; },
+      async getReservationMessages() { return priorThread; },
+      async getInquiryMessages() { return priorThread; },
+      async getThreadMessages() { return priorThread; },
+    };
+    const agent = new GuestMessagingAgent({
+      llm: 'auto',
+      projectRoot: projectRootForTests,
+      hospitableClient: mockHospitable,
+      requireLiveConversationHistory: false,
+    });
+    const result = await agent.handleMessage(elizabethMsg, {
+      guestName: 'Elizabeth',
+      listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+      propertyName: '53 Pine St #3 · Cozy West End Victorian | EV Charging + Parking',
+      checkIn: '2026-11-25T16:00:00-05:00',
+      checkOut: '2026-11-28T10:00:00-05:00',
+      asOfDate: '2026-08-26',
+      asOfInstant: '2026-08-26T22:30:00-04:00',
+      nowForGreeting: new Date('2026-08-26T22:30:00-04:00'),
+      reservationId: 'fe01d62b-0473-45d9-9f34-efafdf0d084c',
+      conversation_id: '91dfeabf-e640-4cf4-8e58-b2f468d40885',
+      conversationId: '91dfeabf-e640-4cf4-8e58-b2f468d40885',
+      sender_type: 'guest',
+      petCount: 2,
+      hasPets: true,
+      conversationHistory: priorThread,
+    });
+
+    console.log('[elizabeth-third-dog] category=', result.typeOfMessageReceived);
+    console.log('[elizabeth-third-dog] proposedResponse:\n', result.proposedResponse);
+
+    assert.equal(result.shouldReply, true, 'Must auto-reply to the 3rd-dog / 2-dog-max question');
+    assert.equal(
+      result.typeOfMessageReceived,
+      'PET_QUESTIONS',
+      'Must be PET_QUESTIONS, not EVENT_REQUEST (Thanksgiving / "in the unlikely event" is not a party)'
+    );
+    assert.ok(result.proposedResponse && result.proposedResponse !== 'none');
+    assert.match(result.proposedResponse, /maximum 2 dogs/i);
+    assert.doesNotMatch(result.proposedResponse, /not able to accommodate events or gatherings/i);
+    assert.doesNotMatch(result.proposedResponse, /perfect venue for your celebration/i);
+    assert.doesNotMatch(result.proposedResponse, /thinking of our place for your event/i);
+    assert.doesNotMatch(result.proposedResponse, /add the pets/i);
   });
 });

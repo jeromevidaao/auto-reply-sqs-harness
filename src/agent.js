@@ -12,6 +12,15 @@ import {
   isEventHostingDenial,
   isTripPurposeEventMention,
 } from './tools/parking/additionalParking.js';
+import {
+  PET_OVER_MAX_SNIPPET,
+  isPetOverMaxAsk,
+  isUnlikelyEventIdiom,
+} from './tools/pets/petOverMax.js';
+import {
+  PET_FURNITURE_MITIGATION_SNIPPET,
+  isPetFurnitureMitigation,
+} from './tools/pets/petFurnitureMitigation.js';
 import { ConversationHistoryRequiredError } from './errors/ConversationHistoryRequiredError.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 import {
@@ -491,6 +500,14 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
+    const petOverMaxPolicy = this._applyPetOverMaxPolicy(parsed, context, guestMessage);
+    if (petOverMaxPolicy.applied) {
+      parsed.typeOfMessageReceived = petOverMaxPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = petOverMaxPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
     // Stay extension: force tool-grounded draft (calendar truth + alteration ask when free).
     // Prevents fabricating availability or falling back to "I'll check the calendar" after a live check.
     const stayExtPolicy = this._applyStayExtensionPolicy(parsed, context, guestMessage);
@@ -602,6 +619,18 @@ export class GuestMessagingAgent {
     }
 
     this._applyCancellationCategoryPolicy(parsed, guestMessage);
+
+    const petFurnitureMitigationPolicy = this._applyPetFurnitureMitigationPolicy(
+      parsed,
+      context,
+      guestMessage
+    );
+    if (petFurnitureMitigationPolicy.applied) {
+      parsed.typeOfMessageReceived = petFurnitureMitigationPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = petFurnitureMitigationPolicy.proposedResponse;
+      shouldReply = petFurnitureMitigationPolicy.shouldReply;
+      confidence = petFurnitureMitigationPolicy.confidence;
+    }
 
     // Julia incident: eval runner uses processMessage directly — apply already-cancelled rewrite here too.
     const alreadyCancelledPolicy = this._applyAlreadyCancelledPolicy(parsed, context, guestMessage);
@@ -809,6 +838,12 @@ export class GuestMessagingAgent {
     if (isEventHostingDenial(msg)) {
       return { applied: false };
     }
+    if (isPetOverMaxAsk(msg) && !isEventHostingAsk(msg)) {
+      return { applied: false };
+    }
+    if (isUnlikelyEventIdiom(msg) && !isEventHostingAsk(msg)) {
+      return { applied: false };
+    }
     if (isAdditionalParkingAsk(msg) && !isEventHostingAsk(msg)) {
       return { applied: false };
     }
@@ -903,8 +938,125 @@ export class GuestMessagingAgent {
     };
   }
 
+  /**
+   * Third / extra pet vs listing max of 2 (Elizabeth Apt 3 2026-08-26).
+   * "In the unlikely event that our very senior dog…" is PET_QUESTIONS, not
+   * an EVENT_REQUEST. Always: maximum 2 dogs, cannot accommodate a third.
+   */
+  _applyPetOverMaxPolicy(parsed = {}, context = {}, guestMessage = '') {
+    const msg = guestMessage || context.originalMessage || '';
+    if (!isPetOverMaxAsk(msg)) {
+      return { applied: false };
+    }
+    if (isEventHostingAsk(msg)) {
+      return { applied: false };
+    }
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const hasMax = /maximum 2 dogs/i.test(draft);
+    const allowsThird = /\b(?:third|3rd|extra|additional) (?:dog|pet).{0,40}\b(?:ok|okay|fine|allowed|welcome|no problem)\b/i.test(draft)
+      || /\b(?:yes|sure).{0,40}\b(?:third|3rd|extra) (?:dog|pet)\b/i.test(draft);
+    const hasEventDecline = /not able to accommodate events or gatherings/i.test(draft);
+    const sendable = draft.length > 20 && draft !== 'none';
+
+    if (hasMax && !allowsThird && !hasEventDecline && sendable) {
+      parsed.typeOfMessageReceived = 'PET_QUESTIONS';
+      return {
+        applied: true,
+        typeOfMessageReceived: 'PET_QUESTIONS',
+        proposedResponse: draft,
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
+    const body = PET_OVER_MAX_SNIPPET;
+    const name = this._guestDisplayFirstName(context);
+    const g = context.conversationTraces?.greeting;
+    const correctGreeting = getTimeBasedGreeting(this._nowForGreeting(context)).greeting;
+    let proposedResponse = body;
+    if (g?.shouldUseGreeting && name && name !== 'there') {
+      proposedResponse = `${correctGreeting}, ${name}, ${body}`;
+    } else if (name && name !== 'there') {
+      proposedResponse = `Hi ${name}, ${body}`;
+    }
+    proposedResponse = proposedResponse.replace(/\s+/g, ' ').replace(/ ,/g, ',').trim();
+
+    parsed.typeOfMessageReceived = 'PET_QUESTIONS';
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'PET_QUESTIONS',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
+  /**
+   * Elizabeth Apt 3 2026-08-27: guest covers furniture with extra sheets as
+   * pet-on-bed mitigation and offers to cancel. That is fine with us — never
+   * send "the pet rule is firm" or help/article/475.
+   */
+  _applyPetFurnitureMitigationPolicy(parsed = {}, context = {}, guestMessage = '') {
+    const msg = guestMessage || context.originalMessage || '';
+    if (!isPetFurnitureMitigation(msg)) {
+      return { applied: false };
+    }
+    // A 3rd-dog / 2-dog-max ask is a different policy (still not allowed).
+    if (isPetOverMaxAsk(msg)) {
+      return { applied: false };
+    }
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const harsh =
+      /help\/article\/475|pet rule is firm|dogs? can(?:not|'t) go on the beds|cannot go on the beds|strict cancellation/i.test(
+        draft
+      );
+    const hasFine = /fine with us/i.test(draft) && /cover the furniture/i.test(draft);
+    const hasNoCancel = /no need to cancel/i.test(draft);
+    const sendable = draft.length > 20 && draft !== 'none';
+
+    if (hasFine && hasNoCancel && !harsh && sendable) {
+      parsed.typeOfMessageReceived = 'PET_QUESTIONS';
+      parsed.proposedResponse = draft;
+      return {
+        applied: true,
+        typeOfMessageReceived: 'PET_QUESTIONS',
+        proposedResponse: draft,
+        shouldReply: true,
+        confidence: 1.0,
+        notes: 'fine / furniture mitigation accepted',
+      };
+    }
+
+    const body = PET_FURNITURE_MITIGATION_SNIPPET;
+    const name = this._guestDisplayFirstName(context);
+    let proposedResponse = body;
+    if (name && name !== 'there') {
+      proposedResponse = `Hi ${name}, ${body}`;
+    }
+
+    parsed.typeOfMessageReceived = 'PET_QUESTIONS';
+    parsed.proposedResponse = proposedResponse;
+    parsed.notes = `${parsed.notes || ''} fine / furniture mitigation accepted`.trim();
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'PET_QUESTIONS',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      notes: 'fine / furniture mitigation accepted',
+    };
+  }
+
   _isPreArrivalSofaLinensAsk(guestMessage = '', context = {}) {
     if (this._isPostStayHousekeepingFeedback(guestMessage)) {
+      return false;
+    }
+    if (isPetFurnitureMitigation(guestMessage)) {
       return false;
     }
     const lower = guestMessage.toLowerCase();
@@ -2730,6 +2882,9 @@ export class GuestMessagingAgent {
    * NEW_RESERVATION_WELCOME logistics (never escalate-only for short acks like ok/hi/thanks).
    */
   _applyFirstHostNewBookingWelcomePolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (isPetFurnitureMitigation(guestMessage)) {
+      return { applied: false };
+    }
     if (!this._isFirstHostOnConfirmedReservation(context)) {
       return { applied: false };
     }
@@ -3104,6 +3259,9 @@ export class GuestMessagingAgent {
   }
 
   _isExtraLinensTowelsInStayAsk(guestMessage = '', context = {}) {
+    if (isPetFurnitureMitigation(guestMessage)) {
+      return false;
+    }
     if (this._isPreArrivalSofaLinensAsk(guestMessage, context)) {
       return false;
     }
@@ -4334,13 +4492,37 @@ export class GuestMessagingAgent {
     if (context.earlyEventDetection?.detected &&
         !isAdditionalParkingAsk(message) &&
         !isEventHostingDenial(message) &&
-        !isTripPurposeEventMention(message)) {
+        !isTripPurposeEventMention(message) &&
+        !isPetOverMaxAsk(message) &&
+        !isPetFurnitureMitigation(message) &&
+        !isUnlikelyEventIdiom(message)) {
       const e = context.earlyEventDetection;
       lines.push('');
       lines.push('=== EVENT REQUEST DETECTED (MANDATORY standard decline) ===');
       lines.push('- Category MUST be: EVENT_REQUEST');
       lines.push('- Your proposedResponse MUST contain the exact substring "not able to accommodate events or gatherings"');
       lines.push(`- Use this standard response verbatim (greeting + name prefix optional): "${e.standardResponse || EVENT_REQUEST_STANDARD_RESPONSE}"`);
+    }
+
+    if (isPetFurnitureMitigation(message) && !isPetOverMaxAsk(message)) {
+      lines.push('');
+      lines.push('=== PET FURNITURE MITIGATION (MANDATORY) ===');
+      lines.push('- Guest is covering furniture/beds/sofas with their own linens or extra sheets (dogs on furniture at home) and asking if that is a problem / offering to cancel.');
+      lines.push('- Category MUST be: PET_QUESTIONS');
+      lines.push('- This is FINE with us. proposedResponse MUST contain "fine with us", "cover the furniture", and "No need to cancel".');
+      lines.push('- MUST NOT say the pet rule is firm, MUST NOT repeat "pets cannot go on the beds", MUST NOT link https://www.airbnb.com/help/article/475 or a strict cancellation policy.');
+      lines.push(`- Use this body (greeting + name prefix optional): "${PET_FURNITURE_MITIGATION_SNIPPET}"`);
+    }
+
+    if (isPetOverMaxAsk(message) && !isEventHostingAsk(message)) {
+      lines.push('');
+      lines.push('=== PET OVER MAX / THIRD DOG (MANDATORY) ===');
+      lines.push('- Category MUST be: PET_QUESTIONS');
+      lines.push('- Category MUST NOT be EVENT_REQUEST — "in the unlikely event that our dog…" and Thanksgiving as the trip dates are not a request to host a party.');
+      lines.push('- Listing max is 2 dogs/pets. We cannot accommodate a third.');
+      lines.push('- proposedResponse MUST contain the exact substring "maximum 2 dogs".');
+      lines.push('- Do not say add the pets / pet fee — this is an over-max ask, not a missing pet-count on the reservation.');
+      lines.push(`- Use this body (greeting + name prefix optional): "${PET_OVER_MAX_SNIPPET}"`);
     }
 
     if (isAdditionalParkingAsk(message) && !isEventHostingAsk(message)) {
@@ -4889,6 +5071,7 @@ export class GuestMessagingAgent {
       !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext) &&
       !isThankYouCategory &&
       !this._isSmokeAlarmAllClear(guestMessage, enrichedContext) &&
+      !isPetOverMaxAsk(guestMessage) &&
       !this._guestAsksNewQuestion(guestMessage, finalDecision.typeOfMessageReceived) &&
       // Never suppress the mandatory first-host new-booking welcome (Roberto).
       !this._isFirstHostOnConfirmedReservation(enrichedContext)
@@ -5325,6 +5508,37 @@ export class GuestMessagingAgent {
       finalResult.escalated = false;
     }
 
+    const petOverMaxPolicyFinal = this._applyPetOverMaxPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (petOverMaxPolicyFinal.applied) {
+      console.log('[Agent] → Pet over-max policy applied (maximum 2 dogs; overrides event false positive)');
+      finalResult.typeOfMessageReceived = petOverMaxPolicyFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = petOverMaxPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+    }
+
+    const petFurnitureMitigationFinal = this._applyPetFurnitureMitigationPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (petFurnitureMitigationFinal.applied) {
+      console.log('[Agent] → Pet furniture-mitigation policy applied (covering furniture is fine; no cancellation policy)');
+      finalResult.typeOfMessageReceived = petFurnitureMitigationFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = petFurnitureMitigationFinal.proposedResponse;
+      finalResult.shouldReply = petFurnitureMitigationFinal.shouldReply;
+      finalResult.confidence = petFurnitureMitigationFinal.confidence;
+      finalResult.escalated = false;
+      if (petFurnitureMitigationFinal.notes) {
+        finalResult.notes = petFurnitureMitigationFinal.notes;
+      }
+    }
+
     const earlyCheckinNameFinal = this._applyEarlyCheckinNamePolicy(finalResult, enrichedContext);
     if (earlyCheckinNameFinal.applied) {
       finalResult.proposedResponse = earlyCheckinNameFinal.proposedResponse;
@@ -5530,6 +5744,20 @@ export class GuestMessagingAgent {
     const cancellationCategoryFinal = this._applyCancellationCategoryPolicy(finalResult, guestMessage);
     if (cancellationCategoryFinal.applied) {
       finalResult.typeOfMessageReceived = cancellationCategoryFinal.typeOfMessageReceived;
+    }
+
+    const petFurnitureAfterCancel = this._applyPetFurnitureMitigationPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (petFurnitureAfterCancel.applied) {
+      console.log('[Agent] → Pet furniture-mitigation policy applied after cancellation pass (covering furniture is fine)');
+      finalResult.typeOfMessageReceived = petFurnitureAfterCancel.typeOfMessageReceived;
+      finalResult.proposedResponse = petFurnitureAfterCancel.proposedResponse;
+      finalResult.shouldReply = petFurnitureAfterCancel.shouldReply;
+      finalResult.confidence = petFurnitureAfterCancel.confidence;
+      finalResult.escalated = false;
     }
 
     // Julia incident: already-cancelled bookings must not get policy links / cancel options.
@@ -6037,6 +6265,98 @@ export class GuestMessagingAgent {
             issues: [
               ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
               'Second-car parking or no-party clarification misclassified as EVENT_REQUEST (John Apt 2 2026-08-26).'
+            ],
+            deterministicGuard: true,
+          };
+        }
+      }
+    }
+
+    if (isPetFurnitureMitigation(guestMessage) && !isPetOverMaxAsk(guestMessage)) {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const harsh =
+        /help\/article\/475|pet rule is firm|dogs? can(?:not|'t) go on the beds|cannot go on the beds|strict cancellation/i.test(
+          draft
+        ) ||
+        /help\/article\/475|pet rule is firm|strict cancellation/i.test(revised);
+      const llmAlreadyFixed =
+        llmJudgeResult.verdict === 'REVISE' &&
+        revised &&
+        /fine with us/i.test(revised) &&
+        /cover the furniture/i.test(revised) &&
+        /no need to cancel/i.test(revised) &&
+        !/help\/article\/475/i.test(revised);
+      const missing =
+        harsh ||
+        firstDecision.shouldReply === false ||
+        draft === 'none' ||
+        !/fine with us/i.test(draft) ||
+        llmJudgeResult.verdict === 'REJECT';
+
+      if (llmAlreadyFixed) {
+        return llmJudgeResult;
+      }
+
+      if (missing) {
+        const policy = this._applyPetFurnitureMitigationPolicy(
+          { ...firstDecision },
+          context,
+          guestMessage
+        );
+        if (policy.applied) {
+          console.log('[Agent] → Deterministic judge guard: furniture-cover mitigation must not send cancellation/firm pet-rule (Elizabeth Apt 3)');
+          return {
+            ...llmJudgeResult,
+            verdict: 'REVISE',
+            revisedResponse: policy.proposedResponse,
+            notes: (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+              'Deterministic guard: covering furniture with linens is fine — do not send article/475 or a firm pet-on-bed refusal.',
+            issues: [
+              ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+              'Pet furniture mitigation misclassified as cancellation / firm bed-rule refusal (Elizabeth Apt 3 2026-08-27).',
+            ],
+            deterministicGuard: true,
+          };
+        }
+      }
+    }
+
+    if (isPetOverMaxAsk(guestMessage) && !isEventHostingAsk(guestMessage)) {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const eventMismatch = firstDecision.typeOfMessageReceived === 'EVENT_REQUEST' ||
+        /not able to accommodate events|gatherings|perfect venue for your celebration/i.test(draft);
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const llmAlreadyFixed = llmJudgeResult.verdict === 'REVISE' && revised &&
+        /maximum 2 dogs/i.test(revised) &&
+        !/not able to accommodate events/i.test(revised);
+      const missingPetAnswer = !/maximum 2 dogs/i.test(draft) ||
+        eventMismatch ||
+        firstDecision.shouldReply === false ||
+        draft === 'none' ||
+        llmJudgeResult.verdict === 'REJECT';
+
+      if (llmAlreadyFixed) {
+        return llmJudgeResult;
+      }
+
+      if (eventMismatch || missingPetAnswer) {
+        const policy = this._applyPetOverMaxPolicy(
+          { ...firstDecision },
+          context,
+          guestMessage
+        );
+        if (policy.applied) {
+          console.log('[Agent] → Deterministic judge guard: 3rd-dog / 2-dog-max misclassified as EVENT_REQUEST (Elizabeth Apt 3)');
+          return {
+            ...llmJudgeResult,
+            verdict: 'REVISE',
+            revisedResponse: policy.proposedResponse,
+            notes: (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+              'Deterministic guard: third dog / 2-dog max is PET_QUESTIONS — not an event request.',
+            issues: [
+              ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+              '3rd-dog / 2-dog-max ask misclassified as EVENT_REQUEST (Elizabeth Apt 3 2026-08-26).',
             ],
             deterministicGuard: true,
           };
