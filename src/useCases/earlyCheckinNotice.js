@@ -377,8 +377,10 @@ export async function handleEarlyCheckinNotice({
 
 async function notifyDecision(notifyOwner, payload) {
   if (typeof notifyOwner !== 'function') return;
+  const notice = buildEarlyCheckinGuestNotify(payload);
+  if (!notice) return;
   try {
-    await notifyOwner(buildEarlyCheckinGuestNotify(payload));
+    await notifyOwner(notice);
   } catch (err) {
     console.error('[earlyCheckinNotice] owner FCM failed', err?.message || err);
   }

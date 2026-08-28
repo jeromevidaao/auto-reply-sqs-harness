@@ -399,7 +399,7 @@ describe('handleEarlyCheckinNotice', () => {
     assert.equal(out.sent, false);
     assert.equal(out.sendSkipReason, 'after_4pm_et');
     assert.deepEqual(sent, []);
-    assert.match(fcm[0].title, /after 4pm ET/i);
+    assert.deepEqual(fcm, []);
   });
 
   it('simulation never sends and still reports the draft', async () => {
@@ -443,11 +443,12 @@ describe('handleEarlyCheckinNotice', () => {
     assert.equal(out.sent, false);
     assert.equal(out.decision.reason, 'no_checkin_today');
     assert.deepEqual(sent, []);
-    assert.match(fcm[0].title, /no check-in today/i);
+    assert.deepEqual(fcm, []);
   });
 
   it('does not resend when the thread already has the unit-ready line', async () => {
     const sent = [];
+    const fcm = [];
     const out = await handleEarlyCheckinNotice({
       event: readyEvent(),
       hospitableClient: airbnbClient(JAMIE, {
@@ -461,12 +462,13 @@ describe('handleEarlyCheckinNotice', () => {
       homeExchangeClient: {
         listConversations: async () => ({ data: { conversations: { edges: [] } } }),
       },
-      notifyOwner: async () => {},
+      notifyOwner: async (n) => fcm.push(n),
       now: atEt(11, 0),
     });
     assert.equal(out.sent, false);
     assert.equal(out.sendSkipReason, 'already_sent');
     assert.deepEqual(sent, []);
+    assert.deepEqual(fcm, []);
   });
 
   it('records the send on the cleaning row after a real Airbnb delivery', async () => {
@@ -559,7 +561,7 @@ describe('handleEarlyCheckinNotice', () => {
     assert.equal(out.sent, false);
     assert.equal(out.decision.reason, 'checkout_today');
     assert.deepEqual(sent, []);
-    assert.match(fcm[0].title, /checkout today/i);
+    assert.deepEqual(fcm, []);
   });
 
   it('noon vacant does not send when the unit is still in uncleanedUnits', async () => {
@@ -580,7 +582,7 @@ describe('handleEarlyCheckinNotice', () => {
     assert.equal(out.sent, false);
     assert.equal(out.decision.reason, 'uncleaned_unit');
     assert.deepEqual(sent, []);
-    assert.match(fcm[0].title, /not cleaned/i);
+    assert.deepEqual(fcm, []);
   });
 
   it('post-cleaning still sends when there is a same-day checkout (turnover)', async () => {
@@ -658,5 +660,54 @@ describe('handleEarlyCheckinNotice', () => {
     assert.match(n.title, /message sent to Jamie/);
     assert.match(n.body, /Pine Apt #2/);
     assert.equal(n.data.type, 'early_checkin_guest_notice');
+  });
+
+  it('does not build an owner FCM for expected unit-ready skips', () => {
+    const skipped = buildEarlyCheckinGuestNotify({
+      simulate: false,
+      decision: { send: false, reason: 'no_checkin_today' },
+      recipients: [],
+      listingId: LISTING_APT2,
+      listingName: 'Pine Apt #2',
+      sent: false,
+      sendSkipReason: 'no_checkin_today',
+    });
+    assert.equal(skipped, null);
+
+    const already = buildEarlyCheckinGuestNotify({
+      simulate: false,
+      decision: { send: true, reason: 'next_checkin_airbnb' },
+      recipients: [JAMIE],
+      listingId: LISTING_APT2,
+      listingName: 'Pine Apt #2',
+      sent: false,
+      sendSkipReason: 'already_sent',
+    });
+    assert.equal(already, null);
+
+    const after4 = buildEarlyCheckinGuestNotify({
+      simulate: false,
+      decision: { send: false, reason: 'after_4pm_et' },
+      recipients: [],
+      listingId: LISTING_APT2,
+      listingName: 'Pine Apt #2',
+      sent: false,
+      sendSkipReason: 'after_4pm_et',
+    });
+    assert.equal(after4, null);
+  });
+
+  it('still notifies the owner when the guest send fails', () => {
+    const n = buildEarlyCheckinGuestNotify({
+      simulate: false,
+      decision: { send: true, reason: 'next_checkin_airbnb' },
+      recipients: [JAMIE],
+      listingId: LISTING_APT2,
+      listingName: 'Pine Apt #2',
+      sent: false,
+      sendError: 'hospitable_timeout',
+    });
+    assert.match(n.title, /failed/i);
+    assert.match(n.body, /hospitable_timeout/);
   });
 });

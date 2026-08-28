@@ -339,42 +339,7 @@ export function buildEarlyCheckinGuestNotify({
       data,
     };
   }
-  if (decision?.reason === 'after_4pm_et' || sendSkipReason === 'after_4pm_et') {
-    return {
-      type: FCM_TYPE_EARLY_CHECKIN,
-      title: `Unit-ready skipped — after 4pm ET${sim}`,
-      body: `${unit}: at or after 4pm ET, so no early check-in message.`,
-      data,
-    };
-  }
-  if (decision?.reason === 'checkout_today' || sendSkipReason === 'checkout_today') {
-    return {
-      type: FCM_TYPE_EARLY_CHECKIN,
-      title: `Unit-ready skipped — checkout today${sim}`,
-      body: `${unit}: a guest is checking out today, so noon did not send "unit is ready".`,
-      data,
-    };
-  }
-  if (decision?.reason === 'uncleaned_unit' || sendSkipReason === 'uncleaned_unit') {
-    return {
-      type: FCM_TYPE_EARLY_CHECKIN,
-      title: `Unit-ready skipped — not cleaned${sim}`,
-      body: `${unit}: still in the uncleaned bucket, so noon did not send "unit is ready".`,
-      data,
-    };
-  }
-  if (decision?.reason === 'no_checkin_today' || sendSkipReason === 'no_checkin_today') {
-    return {
-      type: FCM_TYPE_EARLY_CHECKIN,
-      title: `Unit-ready skipped — no check-in today${sim}`,
-      body: `${unit}: no Airbnb or Home Exchange guest checking in today.`,
-      data,
-    };
-  }
-  return {
-    type: FCM_TYPE_EARLY_CHECKIN,
-    title: `Unit-ready guest notice skipped${sim}`,
-    body: `${unit}: ${decision?.reason || sendSkipReason || 'no_recipient'}`.slice(0, 900),
-    data,
-  };
+  // Expected no-ops (after 4pm, no check-in, already sent, uncleaned, …)
+  // stay in CloudWatch only — do not ping Android.
+  return null;
 }
