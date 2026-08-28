@@ -10,8 +10,14 @@
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from './httpRetry.js';
 
 export const RECENT_WELCOME_ACK_MS = 10 * 60 * 1000;
-/** Reuse ConversationContextTool's live GET if it is this fresh (skip extra Hospitable GET). */
-export const PRE_SEND_REUSE_MAX_AGE_MS = 8000;
+/**
+ * Always GET the live thread before POST (reuseMaxAgeMs = 0).
+ * Carlos 2026-08-28: the in-flight invoke must see the sibling guest
+ * message that arrived during the ~100s draft. Concurrent Lambdas on the
+ * same reservation are now dropped at the DDB lock, so this extra GET
+ * does not stampede Hospitable.
+ */
+export const PRE_SEND_REUSE_MAX_AGE_MS = 0;
 
 export function isGuestMessage(m) {
   const t = String(m?.sender_type || m?.sender?.type || m?.role || '').toLowerCase();
@@ -61,9 +67,13 @@ export function guestMessagesAfter(threadChrono, originalGuestMessage) {
   return threadChrono.slice(idx + 1).filter(isGuestMessage);
 }
 
+export function looksLikeWelcomeAck(text) {
+  return /you're welcome|you are welcome/i.test(String(text || ''));
+}
+
 export function isBareWelcomeAck(text) {
   let t = String(text || '').trim();
-  if (!/you're welcome|you are welcome/i.test(t)) return false;
+  if (!looksLikeWelcomeAck(t)) return false;
   t = t.replace(/^good (?:morning|afternoon|evening)[,!\s]*/i, '');
   t = t.replace(/you're welcome|you are welcome/gi, '');
   t = t.replace(/see you soon|see you then/gi, '');
@@ -77,7 +87,10 @@ export function recentHostWelcomeAck(threadChrono, { withinMs = RECENT_WELCOME_A
   const hosts = (Array.isArray(threadChrono) ? threadChrono : []).filter(isHostMessage);
   for (let i = hosts.length - 1; i >= 0; i--) {
     const m = hosts[i];
-    if (!isBareWelcomeAck(messageBody(m))) continue;
+    // Any recent "you're welcome" — not only the short ack. Carlos 2026-08-28
+    // first send was "You're welcome! So glad you had a five-star stay…"
+    // which isBareWelcomeAck would miss, so the sibling then sent another.
+    if (!looksLikeWelcomeAck(messageBody(m))) continue;
     const ts = Date.parse(m.created_at || m.created || '');
     if (!Number.isFinite(ts)) return true;
     return now - ts <= withinMs;
@@ -89,9 +102,9 @@ export function shouldSkipDuplicateSend(thread, proposedResponse, { now = Date.n
   const chrono = chronologicalThread(thread);
   const proposed = String(proposedResponse || '').trim();
   if (!proposed || proposed === 'none') return { skip: false };
-  // Short you're-welcome: only skip if one landed in the last ~10 min (Michael double-ack).
-  // Guests thank us again later in the stay — that must still send.
-  if (isBareWelcomeAck(proposed)) {
+  // Thank-you ack: skip if a host you're-welcome landed in the last ~10 min
+  // (Michael double-ack / Carlos five-star + thanks). A thanks hours later still sends.
+  if (looksLikeWelcomeAck(proposed)) {
     if (recentHostWelcomeAck(chrono, { now })) {
       return { skip: true, reason: 'recent_youre_welcome' };
     }

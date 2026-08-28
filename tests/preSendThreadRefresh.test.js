@@ -4,6 +4,7 @@ import {
   chronologicalThread,
   guestMessagesAfter,
   isBareWelcomeAck,
+  looksLikeWelcomeAck,
   recentHostWelcomeAck,
   shouldSkipDuplicateSend,
   runPreSendThreadRefresh,
@@ -54,6 +55,31 @@ describe('pre-send thread refresh (Michael double you-are-welcome)', () => {
     });
     assert.equal(dup.skip, true);
     assert.equal(dup.reason, 'recent_youre_welcome');
+  });
+
+  it('skips a short you-are-welcome after a longer five-star thanks (Carlos)', () => {
+    const thread = [
+      msg(
+        'host',
+        "You're welcome! So glad you had a five-star stay — we appreciate it.",
+        '2026-08-28T22:22:09Z'
+      ),
+      msg('guest', 'Thanks for everything. We had fun.', '2026-08-28T22:20:08Z'),
+      msg('guest', 'Five star stay.  Absolutely!!', '2026-08-28T22:20:00Z'),
+    ];
+    const dup = shouldSkipDuplicateSend(thread, "You're welcome, Carlos!", {
+      now: Date.parse('2026-08-28T22:23:02Z'),
+    });
+    assert.equal(dup.skip, true);
+    assert.equal(dup.reason, 'recent_youre_welcome');
+    assert.equal(
+      looksLikeWelcomeAck("You're welcome! So glad you had a five-star stay — we appreciate it."),
+      true
+    );
+    assert.equal(
+      isBareWelcomeAck("You're welcome! So glad you had a five-star stay — we appreciate it."),
+      false
+    );
   });
 
   it('allows a you-are-welcome hours later (next thanks)', () => {
@@ -183,6 +209,7 @@ describe('pre-send thread refresh (Michael double you-are-welcome)', () => {
       existingThread: newestFirst,
       liveFetchedAt: fetchedAt,
       now: fetchedAt + 1200,
+      reuseMaxAgeMs: 8000,
       reprocess: async () => {
         throw new Error('should not reprocess — Thanks is the latest guest turn');
       },
@@ -190,6 +217,31 @@ describe('pre-send thread refresh (Michael double you-are-welcome)', () => {
     assert.equal(gets, 0);
     assert.equal(out.reusedLiveThread, true);
     assert.equal(out.reprocessed, false);
+  });
+
+  it('always GETs before send by default (Carlos in-flight must see the new thanks)', async () => {
+    let gets = 0;
+    const client = {
+      async getThreadMessages() {
+        gets += 1;
+        return newestFirst;
+      },
+    };
+    const fetchedAt = Date.parse('2026-08-21T18:41:16Z');
+    const out = await runPreSendThreadRefresh({
+      hospitableClient: client,
+      reservationId: 'res-1',
+      originalGuestMessage: 'Thanks',
+      originalResult: {
+        proposedResponse: "You're welcome!",
+        shouldReply: true,
+      },
+      existingThread: [msg('guest', 'Thanks', t2)],
+      liveFetchedAt: fetchedAt,
+      now: fetchedAt + 1200,
+    });
+    assert.equal(gets, 1);
+    assert.equal(out.reusedLiveThread, false);
   });
 
   it('GETs when the live thread is stale (LLM took longer than reuse window)', async () => {

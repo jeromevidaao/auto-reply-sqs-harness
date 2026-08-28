@@ -1,20 +1,26 @@
 /**
- * Per-reservation in-Lambda mutex (Michael 2026-08-21 Hospitable 429 stampede).
+ * Per-reservation in-Lambda mutex (Michael 2026-08-21 Hospitable 429 stampede;
+ * Carlos 2026-08-28 double you're-welcome).
  *
  * grok_message is a standard queue (not FIFO). Rapid guest messages start
- * concurrent Lambdas on the same reservation; each GET/POST
- * /reservations/{id}/messages hits Hospitable's ~2/min cap.
+ * concurrent Lambdas on the same reservation.
+ *
+ * Do not wait for the holder. The in-flight invoke GETs the live thread
+ * before POST and folds newer guest turns into one reply. A sibling on the
+ * same reservation/conversation returns 200 so SQS deletes that message
+ * instead of drafting a second send. Parallel invokes on *different*
+ * reservations are fine.
  *
  * Lock lives on airbnb-harness-dedup (existing PutItem/GetItem IAM) under
- * webhookId = lock:resv:{id}. Waiters poll with conditional Put until the
- * holder releases or expiresAt passes. Timeout → proceed anyway so a crash
- * cannot stall the guest.
+ * webhookId = lock:resv:{id} or lock:conv:{id}. TTL must outlast the Lambda
+ * timeout (360s) so a still-running holder is not stolen.
  */
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
 
 export const RESERVATION_LOCK_TABLE = 'airbnb-harness-dedup';
-export const RESERVATION_LOCK_TTL_SEC = 180;
-export const RESERVATION_LOCK_WAIT_MS = 90_000;
+export const RESERVATION_LOCK_TTL_SEC = 420;
+/** Default: do not wait. A held lock means drop this SQS message. */
+export const RESERVATION_LOCK_WAIT_MS = 0;
 export const RESERVATION_LOCK_POLL_MS = 2000;
 
 export function lockKeyFor({ reservationId, conversationId } = {}) {
@@ -23,6 +29,15 @@ export function lockKeyFor({ reservationId, conversationId } = {}) {
   const conv = conversationId && String(conversationId).trim();
   if (conv) return `lock:conv:${conv}`;
   return null;
+}
+
+/**
+ * True when another invoke already holds this reservation/conversation.
+ * Caller must return 200 (delete SQS) and not draft/send.
+ * Missing DDB / missing id (`skipped`) still proceeds.
+ */
+export function isSameConversationInFlight(lock) {
+  return Boolean(lock && lock.acquired !== true && lock.skipped !== true);
 }
 
 function nowSec(ms) {
@@ -56,7 +71,7 @@ export async function acquireReservationLock({
     return { acquired: false, skipped: true, key, waitedMs: 0, reason: 'no_holder' };
   }
 
-  const deadline = now + waitMs;
+  const deadline = now + Math.max(0, waitMs);
   let waitedMs = 0;
   let attempt = 0;
 
@@ -93,11 +108,19 @@ export async function acquireReservationLock({
     }
 
     attempt += 1;
-    if (clock() + pollMs > deadline) {
-      return { acquired: false, key, waitedMs, reason: 'timeout', attempts: attempt };
+    if (waitMs <= 0 || clock() >= deadline) {
+      return {
+        acquired: false,
+        key,
+        waitedMs,
+        reason: waitedMs > 0 ? 'timeout' : 'held',
+        attempts: attempt,
+      };
     }
-    await sleeper(pollMs);
-    waitedMs += pollMs;
+    const remaining = deadline - clock();
+    const sleepFor = Math.min(pollMs, Math.max(1, remaining));
+    await sleeper(sleepFor);
+    waitedMs += sleepFor;
   }
 }
 

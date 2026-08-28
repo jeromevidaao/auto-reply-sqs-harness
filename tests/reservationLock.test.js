@@ -4,6 +4,7 @@ import {
   lockKeyFor,
   acquireReservationLock,
   releaseReservationLock,
+  isSameConversationInFlight,
 } from '../src/utils/reservationLock.js';
 
 function failedCondition() {
@@ -57,9 +58,11 @@ describe('reservationLock', () => {
     const noDdb = await acquireReservationLock({ reservationId: 'r1', holder: 'h' });
     assert.equal(noDdb.skipped, true);
     assert.equal(noDdb.reason, 'no_ddb');
+    assert.equal(isSameConversationInFlight(noDdb), false);
     const noId = await acquireReservationLock({ ddb: fakeDdb(), holder: 'h' });
     assert.equal(noId.skipped, true);
     assert.equal(noId.reason, 'no_id');
+    assert.equal(isSameConversationInFlight(noId), false);
   });
 
   it('acquires immediately on an empty key', async () => {
@@ -72,10 +75,47 @@ describe('reservationLock', () => {
     assert.equal(got.acquired, true);
     assert.equal(got.key, 'lock:resv:680feb40-0b25-49a6-a68d-45d5c6a52f18');
     assert.equal(got.waitedMs, 0);
+    assert.equal(isSameConversationInFlight(got), false);
     assert.equal(ddb.items.get(got.key).holder, 'req-1');
   });
 
-  it('second holder waits until the first releases (Michael stampede)', async () => {
+  it('second holder is blocked immediately — drop SQS (Carlos 2026-08-28)', async () => {
+    const ddb = fakeDdb();
+    const first = await acquireReservationLock({
+      ddb,
+      reservationId: '660075cd-d520-4de9-bece-9860625728d5',
+      holder: '65796ac5',
+    });
+    assert.equal(first.acquired, true);
+
+    let slept = 0;
+    const second = await acquireReservationLock({
+      ddb,
+      reservationId: '660075cd-d520-4de9-bece-9860625728d5',
+      holder: '300ed18e',
+      sleeper: async (ms) => {
+        slept += ms;
+      },
+    });
+    assert.equal(second.acquired, false);
+    assert.equal(second.reason, 'held');
+    assert.equal(second.waitedMs, 0);
+    assert.equal(slept, 0);
+    assert.equal(isSameConversationInFlight(second), true);
+    assert.equal(ddb.items.get(first.key).holder, '65796ac5');
+  });
+
+  it('two different reservations acquire in parallel', async () => {
+    const ddb = fakeDdb();
+    const a = await acquireReservationLock({ ddb, reservationId: 'res-a', holder: 'h-a' });
+    const b = await acquireReservationLock({ ddb, reservationId: 'res-b', holder: 'h-b' });
+    assert.equal(a.acquired, true);
+    assert.equal(b.acquired, true);
+    assert.equal(a.key, 'lock:resv:res-a');
+    assert.equal(b.key, 'lock:resv:res-b');
+  });
+
+  it('can still wait until the first releases when waitMs is set', async () => {
     const ddb = fakeDdb();
     const first = await acquireReservationLock({
       ddb,
@@ -109,7 +149,7 @@ describe('reservationLock', () => {
     assert.equal(ddb.items.get(first.key).holder, '93e4d630');
   });
 
-  it('times out and proceeds without the lock', async () => {
+  it('wait timeout stays held — caller must drop SQS, not proceed', async () => {
     const ddb = fakeDdb();
     await acquireReservationLock({ ddb, reservationId: 'r1', holder: 'h1' });
     const second = await acquireReservationLock({
@@ -122,6 +162,7 @@ describe('reservationLock', () => {
     });
     assert.equal(second.acquired, false);
     assert.equal(second.reason, 'timeout');
+    assert.equal(isSameConversationInFlight(second), true);
     assert.equal(ddb.items.get(second.key).holder, 'h1');
   });
 

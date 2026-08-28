@@ -61,7 +61,11 @@ import {
 } from '../src/utils/reservationAccept.js';
 import { hostAlreadySentEquivalent, looksLikeExistingWelcome } from '../src/utils/httpRetry.js';
 import { runPreSendThreadRefresh } from '../src/utils/preSendThreadRefresh.js';
-import { acquireReservationLock, releaseReservationLock } from '../src/utils/reservationLock.js';
+import {
+  acquireReservationLock,
+  releaseReservationLock,
+  isSameConversationInFlight,
+} from '../src/utils/reservationLock.js';
 import { persistGuestMessagingRun } from '../src/utils/runMonitor.js';
 import { S3Client } from '@aws-sdk/client-s3';
 import { isHomeExchangePayload, handleHomeExchangeMessage, extractHomeExchangeMessage } from '../src/useCases/homeExchange.js';
@@ -179,6 +183,53 @@ export const handler = async (event, context) => {
       extra: fields.extra || {},
     });
     return httpResponse;
+  }
+
+  async function skipSameConversationInFlight(lock, { platform, guestMessage, context } = {}) {
+    console.log(
+      `[Handler] ⛔ SAME CONVERSATION IN FLIGHT — dropping SQS message key=${lock?.key} reason=${lock?.reason} waitedMs=${lock?.waitedMs}`
+    );
+    return persistAndReturn(
+      {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          skipped: true,
+          reason: 'same_conversation_in_flight',
+          lockKey: lock?.key || null,
+          lockReason: lock?.reason || 'held',
+        }),
+      },
+      {
+        platform: platform || 'airbnb',
+        guestMessage: guestMessage || '',
+        context: context || {},
+        extra: {
+          sent: false,
+          shouldReply: false,
+          skipReason:
+            'Same conversation already being replied to — SQS message dropped so the in-flight handler can fold the new guest message into one reply',
+          category: 'IN_FLIGHT_DEDUP',
+          platform: platform || 'airbnb',
+        },
+      }
+    );
+  }
+
+  async function releaseHeldReservationLock(ddb, lock) {
+    if (!lock?.acquired) return;
+    try {
+      const rel = await releaseReservationLock({
+        ddb,
+        key: lock.key,
+        holder: requestId,
+      });
+      console.log(
+        `[Handler] reservation lock release ${rel.released ? 'ok' : rel.reason || 'failed'} key=${lock.key}`
+      );
+    } catch (e) {
+      console.warn('[Handler] reservation lock release failed:', e?.message || e);
+    }
   }
 
   if (act === 'homeexchange_expire_blocks') {
@@ -512,85 +563,112 @@ export const handler = async (event, context) => {
         }
       );
     }
-    const sharedCategoryAgent = process.env.GROK_API_KEY
-      ? new GuestMessagingAgent({
-          llm: 'auto',
-          notification: 'console',
-          enableReflection: false,
-          enableConversationJudge: false,
-          requireLiveConversationHistory: false,
-          ddbClient,
-          hospitableClient,
-        })
-      : null;
-    const heResult = await handleHomeExchangeMessage({
-      event,
-      hospitableClient,
-      ddbClient,
-      homeExchangeClient,
-      notifyOwner: notifyOwnerAndroid,
-      blockStore: createDdbBlockStore(ddbClient),
-      sharedCategoryAgent,
-      firstAckWriter: process.env.GROK_API_KEY ? createHeFirstAckWriter() : null,
-    });
-    const duration = Date.now() - startTime;
-    console.log('[Handler] HomeExchange result:', {
-      typeOfMessageReceived: heResult.typeOfMessageReceived,
-      shouldReply: heResult.shouldReply,
-      sendDisabled: heResult.sendDisabled,
-      sent: heResult.sent,
-      sendSkipReason: heResult.sendSkipReason || null,
-      sendError: heResult.sendError || null,
-      calendarOpen: heResult.calendar?.open ?? null,
-      cleaningFee: heResult.cleaningFee?.amount ?? null,
-      feeAccepted: heResult.feeAccepted ?? null,
-      alreadyThankedFee: heResult.alreadyThankedFee ?? null,
-      reason: heResult.reason,
-      preapprove: heResult.preapprove || null,
-    });
-    console.log('Proposed Response:\n' + (heResult.proposedResponse || '(none)'));
-    if (heResult.sendError) {
-      console.error('[Handler] HomeExchange send failed:', heResult.sendError);
-      throw new Error(`Failed to deliver HomeExchange reply: ${heResult.sendError}`);
-    }
-    console.log('\n⏱️  Total handler duration:', duration, 'ms (homeexchange)');
-    return persistAndReturn(
-      {
-        statusCode: 200,
-        body: JSON.stringify({
-          success: true,
-          requestId,
-          homeExchange: true,
-          sendDisabled: heResult.sendDisabled,
-          sent: heResult.sent,
-          decision: {
-            typeOfMessageReceived: heResult.typeOfMessageReceived,
-            proposedResponse: heResult.proposedResponse,
-            shouldReply: heResult.shouldReply,
-            escalated: false,
-          },
-          homeExchangeResult: heResult,
-        }),
-      },
-      {
-        platform: 'homeexchange',
-        act: act || 'homeexchange_message',
-        guestMessage: extractedHe.message,
-        context: extractedHe.context,
-        result: heResult,
-        extra: {
-          sent: !!heResult.sent,
-          shouldReply: !!heResult.shouldReply,
-          category: heResult.typeOfMessageReceived,
+    let heLock = { acquired: false };
+    try {
+      heLock = await acquireReservationLock({
+        ddb: ddbClient,
+        reservationId:
+          extractedHe.context?.reservationId || extractedHe.context?.reservation_id,
+        conversationId:
+          extractedHe.context?.conversation_id || extractedHe.context?.conversationId,
+        holder: requestId,
+      });
+      if (heLock.skipped) {
+        console.log(`[Handler] HE reservation lock skipped (${heLock.reason})`);
+      } else if (heLock.acquired) {
+        console.log(
+          `[Handler] HE reservation lock acquired key=${heLock.key} waitedMs=${heLock.waitedMs}`
+        );
+      } else if (isSameConversationInFlight(heLock)) {
+        return skipSameConversationInFlight(heLock, {
           platform: 'homeexchange',
-          reason: heResult.reason || heResult.sendSkipReason || null,
-          propertyName: heResult.propertyName || extractedHe.context?.propertyName || null,
-          proposedResponse: heResult.proposedResponse,
-          conversationHistory:
-            heResult.conversationHistory || extractedHe.context?.conversationHistory,
-        },
+          guestMessage: extractedHe.message,
+          context: extractedHe.context,
+        });
       }
-    );
+
+      const sharedCategoryAgent = process.env.GROK_API_KEY
+        ? new GuestMessagingAgent({
+            llm: 'auto',
+            notification: 'console',
+            enableReflection: false,
+            enableConversationJudge: false,
+            requireLiveConversationHistory: false,
+            ddbClient,
+            hospitableClient,
+          })
+        : null;
+      const heResult = await handleHomeExchangeMessage({
+        event,
+        hospitableClient,
+        ddbClient,
+        homeExchangeClient,
+        notifyOwner: notifyOwnerAndroid,
+        blockStore: createDdbBlockStore(ddbClient),
+        sharedCategoryAgent,
+        firstAckWriter: process.env.GROK_API_KEY ? createHeFirstAckWriter() : null,
+      });
+      const duration = Date.now() - startTime;
+      console.log('[Handler] HomeExchange result:', {
+        typeOfMessageReceived: heResult.typeOfMessageReceived,
+        shouldReply: heResult.shouldReply,
+        sendDisabled: heResult.sendDisabled,
+        sent: heResult.sent,
+        sendSkipReason: heResult.sendSkipReason || null,
+        sendError: heResult.sendError || null,
+        calendarOpen: heResult.calendar?.open ?? null,
+        cleaningFee: heResult.cleaningFee?.amount ?? null,
+        feeAccepted: heResult.feeAccepted ?? null,
+        alreadyThankedFee: heResult.alreadyThankedFee ?? null,
+        reason: heResult.reason,
+        preapprove: heResult.preapprove || null,
+      });
+      console.log('Proposed Response:\n' + (heResult.proposedResponse || '(none)'));
+      if (heResult.sendError) {
+        console.error('[Handler] HomeExchange send failed:', heResult.sendError);
+        throw new Error(`Failed to deliver HomeExchange reply: ${heResult.sendError}`);
+      }
+      console.log('\n⏱️  Total handler duration:', duration, 'ms (homeexchange)');
+      return persistAndReturn(
+        {
+          statusCode: 200,
+          body: JSON.stringify({
+            success: true,
+            requestId,
+            homeExchange: true,
+            sendDisabled: heResult.sendDisabled,
+            sent: heResult.sent,
+            decision: {
+              typeOfMessageReceived: heResult.typeOfMessageReceived,
+              proposedResponse: heResult.proposedResponse,
+              shouldReply: heResult.shouldReply,
+              escalated: false,
+            },
+            homeExchangeResult: heResult,
+          }),
+        },
+        {
+          platform: 'homeexchange',
+          act: act || 'homeexchange_message',
+          guestMessage: extractedHe.message,
+          context: extractedHe.context,
+          result: heResult,
+          extra: {
+            sent: !!heResult.sent,
+            shouldReply: !!heResult.shouldReply,
+            category: heResult.typeOfMessageReceived,
+            platform: 'homeexchange',
+            reason: heResult.reason || heResult.sendSkipReason || null,
+            propertyName: heResult.propertyName || extractedHe.context?.propertyName || null,
+            proposedResponse: heResult.proposedResponse,
+            conversationHistory:
+              heResult.conversationHistory || extractedHe.context?.conversationHistory,
+          },
+        }
+      );
+    } finally {
+      await releaseHeldReservationLock(ddbClient, heLock);
+    }
   }
 
   // Print the raw SQS message body explicitly for easy reference when debugging
@@ -1233,52 +1311,6 @@ export const handler = async (event, context) => {
     }
   }
 
-  // Ensure we have the real Grok key (fetch from SSM /grok/api-key if not already in env)
-  // Mock LLM is no longer supported at all (even for tests).
-  await getGrokApiKey();
-
-  if (!process.env.GROK_API_KEY) {
-    throw new Error('GROK_API_KEY is required. Mock LLM is disabled.');
-  }
-
-  // Optional: Google Maps key for live distance / Old Port / walk-drive answers (used by GoogleMapsTool).
-  // Falls back gracefully to mock data if missing (same pattern as old monolithic Lambda).
-  await getGoogleMapsApiKey();
-
-  // Host phones / WiFi / lockbox codes — SSM /host/contacts-json only (never in source).
-  await loadHostContacts();
-
-  // Reflection is now always enabled in production.
-  // This ensures the complete pipeline (Main LLM → Tools → Reflection → Judge) runs on every message.
-  const agent = new GuestMessagingAgent({
-    llm: 'auto',
-    notification: 'auto',
-
-    // Reflection (second-pass critique) is now always on in production.
-    // This ensures the full multipass pipeline (Main LLM → Tools → Reflection → Judge) runs on every message.
-    enableReflection: true,
-    reflectionCategories: [
-      'CANCELLATION_POLICY',
-      'CANCELLATION_NOTIFICATION',
-      'CANCELLATION_POLICY_EXCEPTION',
-      'NEW_RESERVATION_WELCOME',
-      'NEW_INQUIRY_WELCOME',
-      'GENERAL_ACKNOWLEDGMENT',   // common short "thanks / okay perfect" replies — now fully reflected for safety
-      'OTHER_MESSAGE'   // include generic messages so the full pipeline (including Reflection) is exercised on "other" traffic
-    ],
-
-    // Conversation Judge (anti-repetition, consistency, and policy enforcement)
-    // With only 4-5 messages per day, we run the judge on every message by default.
-    // Set ENABLE_CONVERSATION_JUDGE=false only if you want to disable it.
-    enableConversationJudge: process.env.ENABLE_CONVERSATION_JUDGE !== 'false',
-
-    // Clients for UnitReadinessTool (used for unit readiness / early check-in logic)
-    ddbClient,
-    hospitableClient,
-    kumoClient
-  });
-
-
   let reservationLock = { acquired: false };
   try {
     reservationLock = await acquireReservationLock({
@@ -1293,13 +1325,44 @@ export const handler = async (event, context) => {
       console.log(
         `[Handler] reservation lock acquired key=${reservationLock.key} waitedMs=${reservationLock.waitedMs}`
       );
-    } else {
-      console.warn(
-        `[Handler] reservation lock timeout after ${reservationLock.waitedMs}ms — proceeding without lock key=${reservationLock.key}`
-      );
+    } else if (isSameConversationInFlight(reservationLock)) {
+      return skipSameConversationInFlight(reservationLock, {
+        platform: 'airbnb',
+        guestMessage,
+        context: msgContext,
+      });
     }
 
-    const result = await agent.handleMessage(guestMessage, msgContext);
+    // Grok / maps / host contacts / agent only after we own this conversation.
+    await getGrokApiKey();
+
+    if (!process.env.GROK_API_KEY) {
+      throw new Error('GROK_API_KEY is required. Mock LLM is disabled.');
+    }
+
+    await getGoogleMapsApiKey();
+    await loadHostContacts();
+
+    const agent = new GuestMessagingAgent({
+      llm: 'auto',
+      notification: 'auto',
+      enableReflection: true,
+      reflectionCategories: [
+        'CANCELLATION_POLICY',
+        'CANCELLATION_NOTIFICATION',
+        'CANCELLATION_POLICY_EXCEPTION',
+        'NEW_RESERVATION_WELCOME',
+        'NEW_INQUIRY_WELCOME',
+        'GENERAL_ACKNOWLEDGMENT',
+        'OTHER_MESSAGE'
+      ],
+      enableConversationJudge: process.env.ENABLE_CONVERSATION_JUDGE !== 'false',
+      ddbClient,
+      hospitableClient,
+      kumoClient
+    });
+
+    let result = await agent.handleMessage(guestMessage, msgContext);
     const duration = Date.now() - startTime;
 
     // === DETAILED DECISION + TOOL TRACING ===
@@ -1858,19 +1921,6 @@ export const handler = async (event, context) => {
       }
     );
   } finally {
-    if (reservationLock.acquired) {
-      try {
-        const rel = await releaseReservationLock({
-          ddb: ddbClient,
-          key: reservationLock.key,
-          holder: requestId,
-        });
-        console.log(
-          `[Handler] reservation lock release ${rel.released ? 'ok' : rel.reason || 'failed'} key=${reservationLock.key}`
-        );
-      } catch (e) {
-        console.warn('[Handler] reservation lock release failed:', e?.message || e);
-      }
-    }
+    await releaseHeldReservationLock(ddbClient, reservationLock);
   }
 };
