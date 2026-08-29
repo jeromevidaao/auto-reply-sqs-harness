@@ -45,3 +45,54 @@ export function exchangeAlreadyApproved(exchange, conversation = null) {
   if (acc === true || acc === 1 || acc === '1') return true;
   return false;
 }
+
+/** HE exchange.type: 1 = GuestPoints (WITH-GP), 2 = reciprocal home swap. */
+export const HE_EXCHANGE_TYPE_GUESTPOINTS = 1;
+export const HE_EXCHANGE_TYPE_RECIPROCAL = 2;
+
+export function exchangeHomeId(exchange) {
+  if (!exchange || typeof exchange !== 'object') return null;
+  if (exchange.home?.id != null) return String(exchange.home.id);
+  if (exchange.home_id != null) return String(exchange.home_id);
+  if (exchange.home != null && typeof exchange.home !== 'object') return String(exchange.home);
+  return null;
+}
+
+export function isCancelledExchange(exchange) {
+  if (!exchange || typeof exchange !== 'object') return false;
+  if (exchange.canceleted_at || exchange.canceled_at || exchange.cancelled_at) return true;
+  const st = exchange.status;
+  return st === 5 || st === '5';
+}
+
+export function conversationAlreadyDeclined(conversation = null) {
+  const acc = conversation?.accepted;
+  if (acc === false || acc === 0 || acc === '0') return true;
+  const list = Array.isArray(conversation?.exchanges)
+    ? conversation.exchanges
+    : Array.isArray(conversation?.all_exchanges)
+      ? conversation.all_exchanges
+      : [];
+  if (list.length && list.every((ex) => isCancelledExchange(ex))) return true;
+  return false;
+}
+
+function messageLooksReciprocal(m) {
+  if (!m || typeof m !== 'object') return false;
+  if (m.type_auto === 16 || m.type_auto === '16') return true;
+  return /transformed the exchange into a reciprocal/i.test(
+    String(m.content || m.body || m.text || '')
+  );
+}
+
+/** True when this stay is a home swap (no GuestPoints), which Pine never accepts. */
+export function isReciprocalHeExchange(exchange, { conversation = null, history = [] } = {}) {
+  if (Number(exchange?.type) === HE_EXCHANGE_TYPE_RECIPROCAL) return true;
+  const list = Array.isArray(conversation?.exchanges)
+    ? conversation.exchanges
+    : Array.isArray(conversation?.all_exchanges)
+      ? conversation.all_exchanges
+      : [];
+  if (list.some((ex) => Number(ex?.type) === HE_EXCHANGE_TYPE_RECIPROCAL)) return true;
+  return (Array.isArray(history) ? history : []).some(messageLooksReciprocal);
+}

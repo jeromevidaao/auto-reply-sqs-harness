@@ -46,8 +46,8 @@ export function extractHeFirstMessageHooks(message = '') {
   if (!text) return hooks;
 
   if (
-    /(place|home|apartment|listing).{0,40}(looks?\s+great|beautiful|lovely|wonderful|perfect|ideal)/i.test(text) ||
-    /(looks?\s+great|beautiful|lovely|wonderful)/i.test(text)
+    /(place|home|apartment|listing).{0,40}(looks?\s+great|beautiful|lovely|wonderful|perfect|ideal|\bgem\b)/i.test(text) ||
+    /(looks?\s+great|beautiful|lovely|wonderful|\bis a gem\b)/i.test(text)
   ) {
     hooks.complimentPlace = true;
   }

@@ -117,6 +117,25 @@ describe('HomeExchangeClient retries', () => {
     assert.equal(patches, 1);
   });
 
+  it('PATCHes /v1/conversations/{id} accepted:0 to decline a pending request', async () => {
+    let patchUrl = null;
+    let patchBody = null;
+    const client = new HomeExchangeClient({
+      token: 'test',
+      http: {
+        get: async () => ({ data: { conversation: { id: 95598827, accepted: null, exchanges: [] } } }),
+        patch: async (url, body) => {
+          patchUrl = url;
+          patchBody = body;
+          return { data: { ok: true } };
+        },
+      },
+    });
+    await client.declineConversation('95598827');
+    assert.match(patchUrl, /\/v1\/conversations\/95598827$/);
+    assert.deepEqual(patchBody, { accepted: 0 });
+  });
+
   it('PATCHes /v1/exchanges/{conversationId}/approve with the get-exchanges array', async () => {
     const exchanges = [openExchange()];
     let patchUrl = null;

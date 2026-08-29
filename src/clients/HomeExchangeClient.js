@@ -6,7 +6,7 @@
  */
 import axios from 'axios';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import { anyExchangeApproved } from './homeExchangeExchange.js';
+import { anyExchangeApproved, conversationAlreadyDeclined } from './homeExchangeExchange.js';
 import {
   HE_MAX_ATTEMPTS,
   HE_TIMEOUT_MS,
@@ -80,7 +80,8 @@ export function alreadySentEquivalent(messages, proposedResponse) {
   const list = Array.isArray(messages) ? messages : [];
   const proposedIsFeeAsk = /cleaning fee/.test(proposed) && /after your stay/.test(proposed);
   const proposedIsDecline =
-    /those dates are not open/.test(proposed) && /can'?t accept the request/.test(proposed);
+    (/those dates are not open/.test(proposed) && /can'?t accept the request/.test(proposed)) ||
+    (/guestpoints/.test(proposed) && /can'?t accept (the|this) request/.test(proposed));
   const proposedIsPreapprove = /blocked those dates/.test(proposed);
   const proposedIsFinalizeThanks =
     /thank you for confirming/.test(proposed) && /looking forward to hosting you/.test(proposed);
@@ -123,8 +124,8 @@ export function alreadySentEquivalent(messages, proposedResponse) {
     }
     if (
       proposedIsDecline &&
-      /those dates are not open/.test(text) &&
-      /can'?t accept the request/.test(text)
+      ((/those dates are not open/.test(text) && /can'?t accept the request/.test(text)) ||
+        (/guestpoints/.test(text) && /can'?t accept (the|this) request/.test(text)))
     ) {
       return true;
     }
@@ -341,5 +342,53 @@ export class HomeExchangeClient {
   /** @deprecated use approveConversation */
   async approveExchange(_exchangeId, { conversationId } = {}) {
     return this.approveConversation(conversationId);
+  }
+
+  /**
+   * Host decline of a pending (not-started) request.
+   * PATCH /v1/conversations/{id} {accepted:false}.
+   * PATCH /v1/exchanges/{id}/cancel is only for already-started stays.
+   */
+  async declineConversation(conversationId) {
+    if (!conversationId) throw new Error('conversationId is required');
+    const token = await this.getToken();
+    const recover = async (err) => {
+      try {
+        const current = await this.getConversation(conversationId);
+        if (conversationAlreadyDeclined(current)) {
+          console.warn(
+            `[HomeExchangeClient] decline failed (${err?.message || err}) but conversation is already declined`
+          );
+          return { alreadyDeclined: true, recovered: true, conversation: current };
+        }
+      } catch (fetchErr) {
+        console.warn(
+          '[HomeExchangeClient] decline recover getConversation failed:',
+          fetchErr?.message || fetchErr
+        );
+      }
+      return false;
+    };
+    return this._withRetry(
+      'heDeclineConversation',
+      async () => {
+        const current = await this.getConversation(conversationId);
+        if (conversationAlreadyDeclined(current)) {
+          return { alreadyDeclined: true, conversation: current };
+        }
+        const response = await this._http.patch(
+          `${HE_API_BASE}/v1/conversations/${encodeURIComponent(conversationId)}`,
+          { accepted: 0 },
+          { headers: this._headers(token), timeout: HE_TIMEOUT_MS }
+        );
+        const data = response.data || {};
+        // v3 GET often leaves accepted=null; v1 PATCH body is the source of truth.
+        if (data.accepted === 0 || data.accepted === false) {
+          return { ok: true, declined: true, conversation: data };
+        }
+        return data.ok === false ? data : { ok: true, ...data };
+      },
+      { recover }
+    );
   }
 }

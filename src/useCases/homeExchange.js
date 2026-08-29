@@ -5,13 +5,19 @@
  * pipeline so existing categories cannot be changed by HE traffic.
  *
  * First guest message:
- *   1) Confirm the Hospitable calendar is open for the requested nights
- *      (request can be accepted).
- *   2) Load the unit cleaning fee from DynamoDB `listing`.
- *   3) Draft: acknowledge a specific detail from their first message
+ *   1) Treat as first engagement until we have sent a host user-chat
+ *      (HE system lines like type_auto=16 "transformed into a reciprocal"
+ *      bump message_count but must not skip this path — Nina 2026-08-29).
+ *   2) Reciprocal / home-swap (exchange.type=2, 0 GuestPoints) is always
+ *      declined. Pine only hosts GuestPoints stays. prefers_reciprocal is
+ *      already false; inbound swaps still arrive and must be refused.
+ *   3) Confirm Hospitable + the same HE home calendar are open.
+ *   4) Load the unit cleaning fee from DynamoDB `listing`.
+ *   5) Draft: acknowledge a specific detail from their first message
  *      (Airbnb-style first engagement), then dates-open + fee ask, or
- *      dates-not-open decline. Policy sentences stay deterministic.
- *   4) Send via the HomeExchange API (never Hospitable) when a client is provided.
+ *      dates-not-open / reciprocal decline. Policy sentences stay deterministic.
+ *   6) Send via the HomeExchange API (never Hospitable) when a client is provided.
+ *      On decline, also PATCH /v1/conversations/{id} {accepted:false}.
  *
  * Follow-up (e.g. fee accepted + extra dates like Caroline Sep 30–Oct 3):
  *   1) Parse asked dates from the guest text (year = next future occurrence).
@@ -82,6 +88,8 @@ import { alreadySentEquivalent } from '../clients/HomeExchangeClient.js';
 import {
   pickExchangeFromConversation,
   exchangeAlreadyApproved,
+  isReciprocalHeExchange,
+  conversationAlreadyDeclined,
 } from '../clients/homeExchangeExchange.js';
 import { buildBlockRecord, createDdbBlockStore } from './homeExchangeBlocks.js';
 import { notifyHeAutoReply, notifyHePreapproval } from './homeExchangeNotify.js';
@@ -817,21 +825,63 @@ export function extractHomeExchangeMessage(event) {
   return { message: '', context: {} };
 }
 
+export function isHeSystemMessage(m) {
+  if (!m || typeof m !== 'object') return false;
+  const t = m.type;
+  if (t === 1 || t === '1') return true;
+  const auto = m.type_auto;
+  if (auto != null && auto !== '' && Number(auto) > 0) return true;
+  return /transformed the exchange into a reciprocal|has finalized the exchange|has approved the exchange/i.test(
+    messageText(m)
+  );
+}
+
+export function looksLikeOurHeReply(m) {
+  const t = messageText(m);
+  if (!t.trim()) return false;
+  if (/those dates are not open/i.test(t) && /can'?t accept the request/i.test(t)) return true;
+  if (/cleaning fee after (?:you leave|your stay)/i.test(t)) return true;
+  if (/blocked those dates/i.test(t) && /pre-approval/i.test(t)) return true;
+  if (/we only host home exchange stays paid with guestpoints/i.test(t)) return true;
+  if (/thank you for confirming/i.test(t) && /looking forward to hosting you/i.test(t)) return true;
+  return false;
+}
+
+function isHostUserChat(m) {
+  if (!m || typeof m !== 'object') return false;
+  if (isHeSystemMessage(m)) return false;
+  const role = String(m.sender_type || m.sender?.type || m.role || '').toLowerCase();
+  if (role === 'host') return true;
+  if (role === 'guest' || role === 'exchanger') return false;
+  return looksLikeOurHeReply(m);
+}
+
+/**
+ * First HE engagement until we have sent a host user-chat.
+ * Do not trust poller isFirstMessage=false / message_count>1: HE adds
+ * system lines (reciprocal transform) on the same request.
+ */
 export function isFirstHomeExchangeMessage(context = {}, conversationHistory = []) {
-  if (context.isFirstMessage === true) return true;
-  if (context.isFirstMessage === false) return false;
-  if (Number(context.messageCount) === 1) return true;
-  if (Number(context.messageCount) > 1) return false;
   const history = Array.isArray(conversationHistory)
     ? conversationHistory
     : Array.isArray(context.conversationHistory)
       ? context.conversationHistory
       : [];
-  const priorGuest = history.filter((m) => {
-    const role = String(m.sender_type || m.sender?.type || m.role || '').toLowerCase();
-    return role === 'guest' || role === 'exchanger';
-  });
-  return priorGuest.length <= 1;
+  const weAlreadyReplied = history.some((m) => isHostUserChat(m) || looksLikeOurHeReply(m));
+  if (context.isFirstMessage === true) return true;
+  if (weAlreadyReplied) return false;
+  if (history.some((m) => guestAcceptedCleaningFee(messageText(m)))) return false;
+  if (history.length > 0) return true;
+  if (Number(context.messageCount) === 1) return true;
+  if (context.isFirstMessage === false) return false;
+  if (Number(context.messageCount) > 1) return false;
+  return true;
+}
+
+export function shouldDeclineHeRequest({ isFirst, reciprocal, calendar } = {}) {
+  if (!isFirst) return false;
+  if (reciprocal) return true;
+  return !!(calendar?.checked && !calendar.open);
 }
 
 function calendarDayAvailable(entry) {
@@ -1297,6 +1347,7 @@ export function buildHomeExchangeDraft({
   askedDates,
   shouldThankForFee,
   replacementAfterCancel,
+  reciprocal,
 } = {}) {
   const range = formatStayRange(checkIn, checkOut);
 
@@ -1313,6 +1364,30 @@ export function buildHomeExchangeDraft({
       askedDates,
       shouldThankForFee,
       replacementAfterCancel,
+    });
+  }
+
+  const rangeBit = range ? ` for ${range}` : '';
+  if (reciprocal) {
+    if (calendar?.checked && !calendar.open) {
+      return firstHeDraft({
+        guestName,
+        guestMessage,
+        reason: 'reciprocal_calendar_not_open',
+        policySentence:
+          `I checked our calendar${rangeBit} and those dates are not open, so we can't accept the request as it stands. ` +
+          `We also only host Home Exchange stays paid with GuestPoints — we don't do home swaps.`,
+      });
+    }
+    return firstHeDraft({
+      guestName,
+      guestMessage,
+      reason: 'reciprocal_not_accepted',
+      policySentence:
+        `We only host Home Exchange stays paid with GuestPoints, not reciprocal home swaps, so we can't accept this request as it stands.` +
+        (calendar?.checked && calendar.open
+          ? ` If you'd like to come on GuestPoints, send a new request for dates that are open on our calendar.`
+          : ''),
     });
   }
 
@@ -1474,8 +1549,10 @@ export function shouldAttemptPreapprove({
   thisTurnWantsPreapprove,
   extraNights,
   extraNightsOpen,
+  reciprocal,
 } = {}) {
   if (isFirst) return false;
+  if (reciprocal) return false;
   if (!feeAccepted) return false;
   // Thank-you / wifi / checkout after a prior fee-accept must not re-run pre-approve.
   if (thisTurnWantsPreapprove === false) return false;
@@ -1593,7 +1670,7 @@ export async function handleHomeExchangeMessage({
 
   let liveConversation = null;
   let liveExchange = null;
-  if (!isFirst && conversationId && homeExchangeClient?.getConversation) {
+  if (conversationId && homeExchangeClient?.getConversation) {
     try {
       liveConversation = await homeExchangeClient.getConversation(conversationId);
       liveExchange = pickExchangeFromConversation(liveConversation, homeId);
@@ -1602,6 +1679,11 @@ export async function handleHomeExchangeMessage({
       liveExchange = null;
     }
   }
+  const reciprocal =
+    isReciprocalHeExchange(liveExchange, {
+      conversation: liveConversation,
+      history: conversationHistory,
+    }) || Number(context.exchangeType) === 2;
   const exchangeCheckIn = dateOnly(liveExchange?.start_on || liveExchange?.startOn);
   const exchangeCheckOut = dateOnly(liveExchange?.end_on || liveExchange?.endOn);
   const askedDates = extractAskedStayDates(message, {
@@ -1644,8 +1726,8 @@ export async function handleHomeExchangeMessage({
       ? stayNights(stayWindows.previousCheckIn, stayWindows.previousCheckOut)
       : [];
 
-  const originalCheckIn = contextCheckIn;
-  const originalCheckOut = contextCheckOut;
+  const originalCheckIn = contextCheckIn || (isFirst ? exchangeCheckIn : null);
+  const originalCheckOut = contextCheckOut || (isFirst ? exchangeCheckOut : null);
   let checkIn = originalCheckIn;
   let checkOut = originalCheckOut;
   if (!isFirst) {
@@ -1766,6 +1848,7 @@ export async function handleHomeExchangeMessage({
     askedDates,
     shouldThankForFee: thankForFee,
     replacementAfterCancel,
+    reciprocal,
   });
   if (isFirst) {
     draft = await applyHeFirstAckWriter(draft, {
@@ -1830,6 +1913,7 @@ export async function handleHomeExchangeMessage({
       thisTurnWantsPreapprove,
       extraNights,
       extraNightsOpen,
+      reciprocal,
     }) &&
     (!(isExtension || resubmittedAfterCancel) || canApproveExtendedStay)
   ) {
@@ -1976,6 +2060,41 @@ export async function handleHomeExchangeMessage({
     sendSkipReason = draft.reason || 'send_not_enabled';
   }
 
+  let decline = {
+    attempted: false,
+    ok: false,
+    reason: null,
+    alreadyDeclined: false,
+  };
+  if (
+    shouldDeclineHeRequest({ isFirst, reciprocal, calendar }) &&
+    conversationId &&
+    homeExchangeClient &&
+    typeof homeExchangeClient.declineConversation === 'function' &&
+    !guestFinalized
+  ) {
+    if (liveConversation && conversationAlreadyDeclined(liveConversation)) {
+      decline = { attempted: false, ok: true, reason: 'already_declined', alreadyDeclined: true };
+    } else {
+      try {
+        const out = await homeExchangeClient.declineConversation(conversationId);
+        decline = {
+          attempted: true,
+          ok: true,
+          reason: out?.alreadyDeclined ? 'already_declined' : 'declined',
+          alreadyDeclined: !!out?.alreadyDeclined,
+        };
+      } catch (err) {
+        decline = {
+          attempted: true,
+          ok: false,
+          reason: err?.message || String(err),
+          alreadyDeclined: false,
+        };
+      }
+    }
+  }
+
   const notifyPayload = {
     guestName,
     checkIn: approveCheckIn || originalCheckIn || checkIn,
@@ -2049,6 +2168,8 @@ export async function handleHomeExchangeMessage({
     calendarError: hospitableWindow.calendarError,
     reservationsError: hospitableWindow.reservationsError,
     preapprove,
+    reciprocal,
+    decline,
     typeOfMessageReceived: draft.typeOfMessageReceived,
     shouldReply: draft.shouldReply,
     proposedResponse: draft.proposedResponse,

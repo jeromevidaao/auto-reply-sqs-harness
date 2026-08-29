@@ -9,6 +9,8 @@ import {
   resolveHeUnit,
   extractHeHomeId,
   isFirstHomeExchangeMessage,
+  shouldDeclineHeRequest,
+  looksLikeOurHeReply,
   stayNights,
   analyzeCalendarOpen,
   buildHomeExchangeDraft,
@@ -261,6 +263,34 @@ describe('HomeExchange first-message policy (deterministic, no LLM)', () => {
     assert.equal(isFirstHomeExchangeMessage({ isFirstMessage: true }), true);
     assert.equal(isFirstHomeExchangeMessage({ messageCount: 1 }), true);
     assert.equal(isFirstHomeExchangeMessage({ isFirstMessage: false }), false);
+  });
+
+  it('keeps first engagement when HE added a reciprocal system line (Nina)', () => {
+    const history = [
+      {
+        type: 0,
+        sender_type: 'guest',
+        content:
+          'Hello Ruby! Your home is a gem! If you should ever be interested in a house swap, keep us in mind!',
+      },
+      {
+        type: 1,
+        type_auto: 16,
+        sender_type: 'guest',
+        content: 'Nina has transformed the exchange into a reciprocal one',
+      },
+    ];
+    assert.equal(isFirstHomeExchangeMessage({ isFirstMessage: false, messageCount: 2 }, history), true);
+    assert.equal(
+      isFirstHomeExchangeMessage({ isFirstMessage: false, messageCount: 2 }, [
+        {
+          sender_type: 'host',
+          content:
+            'I checked our calendar for July 19–31, 2027 and those dates are not open, so we can\'t accept the request as it stands.',
+        },
+      ]),
+      false
+    );
   });
 
   it('asks for the DDB cleaning fee only when the calendar is open', () => {
@@ -851,6 +881,14 @@ describe('HomeExchange first-message personalization (Airbnb-style ack)', () => 
     assert.match(ack, /kind words about the place/i);
     assert.match(ack, /grandchildren/i);
     assert.match(ack, /Deering Park/i);
+  });
+
+  it('extracts a gem compliment as kind words about the place', () => {
+    const nina =
+      'Hello Ruby! Your home is a gem! If you should ever be interested in a house swap, keep us in mind!';
+    const hooks = extractHeFirstMessageHooks(nina);
+    assert.equal(hooks.complimentPlace, true);
+    assert.match(buildHeFirstAckClause(nina), /kind words about the place/i);
   });
 
   it('extracts Katie Halloween-in-Portland hooks', () => {
@@ -2976,5 +3014,196 @@ describe('HomeExchange Clara fee-accept + self-clean (Apt #3 Oct 19–21 2026)',
     assert.equal(result.reason, 'homeexchange_preapprove_calendar_closed');
     assert.match(sentBodies[0], /no longer open/i);
     assert.equal(/included/i.test(sentBodies[0] || ''), false);
+  });
+});
+
+describe('HomeExchange GuestPoints-only + first-request decline (Nina 2026-08-29)', () => {
+  const nina =
+    'Hello Ruby! Your home is a gem!\n\nIf you should ever be interested in a house swap, keep us in mind! I used to live in South Portland and still have family in Maine, so I love to return at least once a year sometime in July-Dec.\n\nBest to you,\nNina';
+
+  const ninaHistory = [
+    { id: '296103863', type: 0, sender_type: 'guest', content: nina },
+    {
+      id: '296103864',
+      type: 1,
+      type_auto: 16,
+      sender_type: 'guest',
+      content: '((firstName)) has transformed the exchange into a reciprocal one',
+    },
+  ];
+
+  const ninaConversation = {
+    id: 95598827,
+    accepted: null,
+    exchanges: [
+      {
+        id: 127810197,
+        type: 2,
+        status: 0,
+        guestpoint_amount: 0,
+        start_on: '2027-07-19T00:00:00+00:00',
+        end_on: '2027-07-31T00:00:00+00:00',
+        home: { id: 3285044 },
+      },
+      {
+        id: 127810198,
+        type: 2,
+        status: 0,
+        guestpoint_amount: 0,
+        start_on: '2027-07-19T00:00:00+00:00',
+        end_on: '2027-07-31T00:00:00+00:00',
+        home: { id: 3298786 },
+      },
+    ],
+  };
+
+  it('declines a first reciprocal request even when poller set isFirstMessage false', async () => {
+    const sent = [];
+    const declined = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        queryStringParameters: { act: HOMEEXCHANGE_ACT },
+        body: JSON.stringify({
+          action: 'homeexchange.message.created',
+          data: {
+            body: nina,
+            conversation_id: '95598827',
+            platform: HOMEEXCHANGE_PLATFORM,
+            source: HOMEEXCHANGE_PLATFORM,
+            guestName: 'Nina and John',
+            checkIn: '2027-07-19',
+            checkOut: '2027-07-31',
+            isFirstMessage: false,
+            messageCount: 2,
+            listing: { platform: 'homeexchange', platform_id: '3285044' },
+            conversationHistory: ninaHistory,
+          },
+        }),
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return stayNights('2027-07-19', '2027-07-31').map((date) => ({
+            date,
+            status: { available: true },
+          }));
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      homeExchangeClient: {
+        async listMessages() {
+          return ninaHistory;
+        },
+        async getConversation() {
+          return ninaConversation;
+        },
+        async getHomeCalendar() {
+          return heOpenRange('2027-03-21', '2027-06-01');
+        },
+        async sendMessage(conversationId, content) {
+          sent.push({ conversationId, content });
+          return { ok: true };
+        },
+        async declineConversation(conversationId) {
+          declined.push(conversationId);
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(result.isFirstMessage, true);
+    assert.equal(result.reciprocal, true);
+    assert.equal(result.calendar.open, false);
+    assert.equal(result.reason, 'reciprocal_calendar_not_open');
+    assert.equal(result.sent, true);
+    assert.equal(result.decline.ok, true);
+    assert.deepEqual(declined, ['95598827']);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].content, /Nina/);
+    assert.match(sent[0].content, /gem|kind words/i);
+    assert.match(sent[0].content, /not open/i);
+    assert.match(sent[0].content, /GuestPoints/);
+    assert.match(sent[0].content, /home swaps/i);
+    assert.equal(/\$120/.test(sent[0].content), false);
+    assert.equal(/after your stay/.test(sent[0].content), false);
+    assert.equal(shouldDeclineHeRequest({ isFirst: true, reciprocal: true, calendar: result.calendar }), true);
+    assert.equal(looksLikeOurHeReply({ content: sent[0].content }), true);
+  });
+
+  it('declines a reciprocal request even when the nights are open on the calendar', () => {
+    const draft = buildHomeExchangeDraft({
+      guestName: 'Nina and John',
+      guestMessage: nina,
+      checkIn: '2027-05-13',
+      checkOut: '2027-05-19',
+      calendar: { checked: true, open: true, unavailable: [] },
+      cleaningFee: { amount: 120 },
+      isFirst: true,
+      reciprocal: true,
+    });
+    assert.equal(draft.reason, 'reciprocal_not_accepted');
+    assert.match(draft.proposedResponse, /GuestPoints/);
+    assert.match(draft.proposedResponse, /can't accept this request/i);
+    assert.equal(/\$120/.test(draft.proposedResponse), false);
+    assert.equal(
+      shouldAttemptPreapprove({
+        isFirst: false,
+        feeAccepted: true,
+        originalCheckIn: '2027-05-13',
+        originalCheckOut: '2027-05-19',
+        originalCalendar: { checked: true, open: true },
+        reciprocal: true,
+      }),
+      false
+    );
+  });
+
+  it('still declines unavailable GuestPoints first requests via the conversation accepted=false call', async () => {
+    const declined = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Hi! We would love to spend Halloween weekend in Portland with friends — your place looks great.',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          isFirstMessage: true,
+          conversation_id: '95201321',
+          guestName: 'Katie',
+          checkIn: '2026-10-29',
+          checkOut: '2026-11-02',
+          listing: { platform: 'homeexchange', platform_id: '3285044' },
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [{ date: '2026-10-29', status: { available: false } }];
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      homeExchangeClient: {
+        async getHomeCalendar() {
+          return heOpenRange('2027-01-04', '2027-06-01');
+        },
+        async getConversation() {
+          return {
+            id: 95201321,
+            accepted: null,
+            exchanges: [{ id: 1, type: 1, status: 0, home: { id: 3285044 } }],
+          };
+        },
+        async sendMessage() {
+          return { ok: true };
+        },
+        async declineConversation(conversationId) {
+          declined.push(conversationId);
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(result.reason, 'calendar_not_open');
+    assert.equal(result.reciprocal, false);
+    assert.deepEqual(declined, ['95201321']);
+    assert.equal(result.decline.ok, true);
   });
 });
