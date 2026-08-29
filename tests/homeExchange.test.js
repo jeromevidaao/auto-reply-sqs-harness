@@ -3117,7 +3117,9 @@ describe('HomeExchange GuestPoints-only + first-request decline (Nina 2026-08-29
     assert.equal(result.reason, 'reciprocal_calendar_not_open');
     assert.equal(result.sent, true);
     assert.equal(result.decline.ok, true);
-    assert.deepEqual(declined, ['95598827']);
+    assert.equal(result.decline.attempted, false);
+    assert.equal(result.decline.reason, 'reciprocal_cannot_decline');
+    assert.deepEqual(declined, []);
     assert.equal(sent.length, 1);
     assert.match(sent[0].content, /Nina/);
     assert.match(sent[0].content, /gem|kind words/i);
@@ -3126,7 +3128,7 @@ describe('HomeExchange GuestPoints-only + first-request decline (Nina 2026-08-29
     assert.match(sent[0].content, /home swaps/i);
     assert.equal(/\$120/.test(sent[0].content), false);
     assert.equal(/after your stay/.test(sent[0].content), false);
-    assert.equal(shouldDeclineHeRequest({ isFirst: true, reciprocal: true, calendar: result.calendar }), true);
+    assert.equal(shouldDeclineHeRequest({ isFirst: true, reciprocal: true, calendar: result.calendar }), false);
     assert.equal(looksLikeOurHeReply({ content: sent[0].content }), true);
   });
 
@@ -3158,7 +3160,7 @@ describe('HomeExchange GuestPoints-only + first-request decline (Nina 2026-08-29
     );
   });
 
-  it('still declines unavailable GuestPoints first requests via the conversation accepted=false call', async () => {
+  it('still declines unavailable GuestPoints first requests via bff manual-decline', async () => {
     const declined = [];
     const result = await handleHomeExchangeMessage({
       event: {

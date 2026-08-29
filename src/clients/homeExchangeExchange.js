@@ -49,6 +49,12 @@ export function exchangeAlreadyApproved(exchange, conversation = null) {
 /** HE exchange.type: 1 = GuestPoints (WITH-GP), 2 = reciprocal home swap. */
 export const HE_EXCHANGE_TYPE_GUESTPOINTS = 1;
 export const HE_EXCHANGE_TYPE_RECIPROCAL = 2;
+export const HE_PINE_HOME_IDS = new Set(['3202475', '3285044', '3285159']);
+export const HE_STAY_REQUEST_DECLINED = new Set([
+  'MANUALLY_DECLINED',
+  'AUTOMATICALLY_DECLINED',
+  'PAST_DATES_DECLINE',
+]);
 
 export function exchangeHomeId(exchange) {
   if (!exchange || typeof exchange !== 'object') return null;
@@ -65,14 +71,41 @@ export function isCancelledExchange(exchange) {
   return st === 5 || st === '5';
 }
 
-export function conversationAlreadyDeclined(conversation = null) {
+export function conversationExchanges(conversation = null) {
+  const conv = conversation && typeof conversation === 'object' ? conversation : {};
+  if (Array.isArray(conv.exchanges)) return conv.exchanges;
+  if (Array.isArray(conv.all_exchanges)) return conv.all_exchanges;
+  return [];
+}
+
+export function pickTheirExchange(conversation = null) {
+  return (
+    conversationExchanges(conversation).find((ex) => {
+      const hid = exchangeHomeId(ex);
+      return hid && !HE_PINE_HOME_IDS.has(hid);
+    }) || null
+  );
+}
+
+export const HE_RECIPROCAL_CANNOT_DECLINE = 'reciprocal_cannot_decline';
+
+export function stayRequestIsDeclined(stayRequest = null) {
+  const st = String(stayRequest?.stayRequestStatus || '').toUpperCase();
+  return HE_STAY_REQUEST_DECLINED.has(st);
+}
+
+/** HE has no pending-decline for reciprocal stay requests (400 Invalid exchange type). */
+export function stayRequestIsReciprocal(stayRequest = null) {
+  const t = String(stayRequest?.stayType || '').toUpperCase();
+  return t === 'RECIPROCAL' || t === 'RECIPROCAL-WITH-GP';
+}
+
+export function conversationAlreadyDeclined(conversation = null, stayRequest = null) {
+  if (stayRequestIsDeclined(stayRequest)) return true;
+  if (stayRequestIsDeclined(conversation?.stayRequest)) return true;
   const acc = conversation?.accepted;
   if (acc === false || acc === 0 || acc === '0') return true;
-  const list = Array.isArray(conversation?.exchanges)
-    ? conversation.exchanges
-    : Array.isArray(conversation?.all_exchanges)
-      ? conversation.all_exchanges
-      : [];
+  const list = conversationExchanges(conversation);
   if (list.length && list.every((ex) => isCancelledExchange(ex))) return true;
   return false;
 }

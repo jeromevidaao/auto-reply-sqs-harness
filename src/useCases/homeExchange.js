@@ -8,16 +8,18 @@
  *   1) Treat as first engagement until we have sent a host user-chat
  *      (HE system lines like type_auto=16 "transformed into a reciprocal"
  *      bump message_count but must not skip this path — Nina 2026-08-29).
- *   2) Reciprocal / home-swap (exchange.type=2, 0 GuestPoints) is always
- *      declined. Pine only hosts GuestPoints stays. prefers_reciprocal is
- *      already false; inbound swaps still arrive and must be refused.
+ *   2) Reciprocal / home-swap (exchange.type=2, 0 GuestPoints): reply that
+ *      Pine only hosts GuestPoints stays. HE has no pending-decline for a
+ *      swap (manual-decline 400; converting to WITH-GP is not a decline).
+ *      prefers_reciprocal is already false; inbound swaps still arrive.
  *   3) Confirm Hospitable + the same HE home calendar are open.
  *   4) Load the unit cleaning fee from DynamoDB `listing`.
  *   5) Draft: acknowledge a specific detail from their first message
  *      (Airbnb-style first engagement), then dates-open + fee ask, or
  *      dates-not-open / reciprocal decline. Policy sentences stay deterministic.
  *   6) Send via the HomeExchange API (never Hospitable) when a client is provided.
- *      On decline, also PATCH /v1/conversations/{id} {accepted:false}.
+ *      Closed WITH-GP: also PATCH bff /exchange/{cid}/manual-decline.
+ *      Reciprocal: message only — do not convert or call manual-decline.
  *
  * Follow-up (e.g. fee accepted + extra dates like Caroline Sep 30–Oct 3):
  *   1) Parse asked dates from the guest text (year = next future occurrence).
@@ -90,6 +92,7 @@ import {
   exchangeAlreadyApproved,
   isReciprocalHeExchange,
   conversationAlreadyDeclined,
+  HE_RECIPROCAL_CANNOT_DECLINE,
 } from '../clients/homeExchangeExchange.js';
 import { buildBlockRecord, createDdbBlockStore } from './homeExchangeBlocks.js';
 import { notifyHeAutoReply, notifyHePreapproval } from './homeExchangeNotify.js';
@@ -880,7 +883,7 @@ export function isFirstHomeExchangeMessage(context = {}, conversationHistory = [
 
 export function shouldDeclineHeRequest({ isFirst, reciprocal, calendar } = {}) {
   if (!isFirst) return false;
-  if (reciprocal) return true;
+  if (reciprocal) return false;
   return !!(calendar?.checked && !calendar.open);
 }
 
@@ -2066,7 +2069,14 @@ export async function handleHomeExchangeMessage({
     reason: null,
     alreadyDeclined: false,
   };
-  if (
+  if (isFirst && reciprocal && !guestFinalized) {
+    decline = {
+      attempted: false,
+      ok: true,
+      reason: HE_RECIPROCAL_CANNOT_DECLINE,
+      alreadyDeclined: false,
+    };
+  } else if (
     shouldDeclineHeRequest({ isFirst, reciprocal, calendar }) &&
     conversationId &&
     homeExchangeClient &&
@@ -2078,12 +2088,21 @@ export async function handleHomeExchangeMessage({
     } else {
       try {
         const out = await homeExchangeClient.declineConversation(conversationId);
-        decline = {
-          attempted: true,
-          ok: true,
-          reason: out?.alreadyDeclined ? 'already_declined' : 'declined',
-          alreadyDeclined: !!out?.alreadyDeclined,
-        };
+        if (out?.skipped || out?.reason === HE_RECIPROCAL_CANNOT_DECLINE) {
+          decline = {
+            attempted: false,
+            ok: true,
+            reason: HE_RECIPROCAL_CANNOT_DECLINE,
+            alreadyDeclined: false,
+          };
+        } else {
+          decline = {
+            attempted: true,
+            ok: true,
+            reason: out?.alreadyDeclined ? 'already_declined' : 'declined',
+            alreadyDeclined: !!out?.alreadyDeclined,
+          };
+        }
       } catch (err) {
         decline = {
           attempted: true,

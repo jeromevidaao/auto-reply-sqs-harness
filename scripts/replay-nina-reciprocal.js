@@ -1,7 +1,8 @@
 /**
  * Replay Nina & John's HE first request (conv 95598827, Apt #2, July 2027,
  * reciprocal / 0 GuestPoints) through the isolated HomeExchange auto-reply
- * path. Sends the decline note and PATCHes conversation accepted:false.
+ * path. Sends the GuestPoints-only / dates-closed note. Does not convert
+ * the swap and does not call HE manual-decline (reciprocal cannot be declined).
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';

@@ -6,7 +6,14 @@
  */
 import axios from 'axios';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import { anyExchangeApproved, conversationAlreadyDeclined } from './homeExchangeExchange.js';
+import {
+  anyExchangeApproved,
+  conversationAlreadyDeclined,
+  HE_RECIPROCAL_CANNOT_DECLINE,
+  isReciprocalHeExchange,
+  stayRequestIsDeclined,
+  stayRequestIsReciprocal,
+} from './homeExchangeExchange.js';
 import {
   HE_MAX_ATTEMPTS,
   HE_TIMEOUT_MS,
@@ -15,6 +22,7 @@ import {
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 const HE_API_BASE = process.env.HE_API_BASE || 'https://api.homeexchange.com';
+const HE_BFF_BASE = process.env.HE_BFF_BASE || 'https://bff.homeexchange.com';
 const HE_TOKEN_SSM = process.env.HE_BEARER_SSM || '/homeexchange/bearer-token';
 const HE_WEB_VERSION = process.env.HE_WEB_VERSION || '20.29.1-rc.1';
 
@@ -344,26 +352,53 @@ export class HomeExchangeClient {
     return this.approveConversation(conversationId);
   }
 
+  _bffHeaders(token) {
+    return {
+      ...this._headers(token),
+      'x-frontend-client': 'true',
+    };
+  }
+
+  async getStayRequest(conversationId) {
+    if (!conversationId) throw new Error('conversationId is required');
+    const token = await this.getToken();
+    return this._withRetry('heGetStayRequest', async () => {
+      const response = await this._http.get(
+        `${HE_BFF_BASE}/exchange/v2/${encodeURIComponent(conversationId)}`,
+        { headers: this._bffHeaders(token), timeout: HE_TIMEOUT_MS }
+      );
+      const data = response.data?.data || response.data || {};
+      return data.stayRequest || null;
+    });
+  }
+
   /**
-   * Host decline of a pending (not-started) request.
-   * PATCH /v1/conversations/{id} {accepted:false}.
-   * PATCH /v1/exchanges/{id}/cancel is only for already-started stays.
+   * Decline a pending WITH-GP stay request:
+   * PATCH bff /exchange/{cid}/manual-decline {isPresetModified:true}.
+   *
+   * Reciprocal (type 2 / stayType RECIPROCAL): do **not** convert via
+   * change-to-non-reciprocal (that posts type_auto 15, not a decline) and
+   * do **not** PATCH manual-decline (400 Invalid exchange type). HE has no
+   * host decline for a pending swap. Reply on the thread instead; after a
+   * host reply the thread is "in conversation" and 4-day auto-decline stops.
+   * Legacy /v1/exchanges/{id}/cancel is only for started stays
+   * ("The exchange is not started yet"). {accepted:0} does not close it.
    */
   async declineConversation(conversationId) {
     if (!conversationId) throw new Error('conversationId is required');
     const token = await this.getToken();
     const recover = async (err) => {
       try {
-        const current = await this.getConversation(conversationId);
-        if (conversationAlreadyDeclined(current)) {
+        const sr = await this.getStayRequest(conversationId);
+        if (stayRequestIsDeclined(sr)) {
           console.warn(
-            `[HomeExchangeClient] decline failed (${err?.message || err}) but conversation is already declined`
+            `[HomeExchangeClient] decline failed (${err?.message || err}) but stay request is already declined`
           );
-          return { alreadyDeclined: true, recovered: true, conversation: current };
+          return { alreadyDeclined: true, recovered: true, stayRequest: sr };
         }
       } catch (fetchErr) {
         console.warn(
-          '[HomeExchangeClient] decline recover getConversation failed:',
+          '[HomeExchangeClient] decline recover getStayRequest failed:',
           fetchErr?.message || fetchErr
         );
       }
@@ -373,20 +408,37 @@ export class HomeExchangeClient {
       'heDeclineConversation',
       async () => {
         const current = await this.getConversation(conversationId);
-        if (conversationAlreadyDeclined(current)) {
-          return { alreadyDeclined: true, conversation: current };
+        if (isReciprocalHeExchange(null, { conversation: current })) {
+          return {
+            skipped: true,
+            reason: HE_RECIPROCAL_CANNOT_DECLINE,
+            conversation: current,
+          };
         }
-        const response = await this._http.patch(
-          `${HE_API_BASE}/v1/conversations/${encodeURIComponent(conversationId)}`,
-          { accepted: 0 },
-          { headers: this._headers(token), timeout: HE_TIMEOUT_MS }
+        let stayRequest = null;
+        try {
+          stayRequest = await this.getStayRequest(conversationId);
+        } catch {
+          stayRequest = null;
+        }
+        if (stayRequestIsReciprocal(stayRequest)) {
+          return {
+            skipped: true,
+            reason: HE_RECIPROCAL_CANNOT_DECLINE,
+            conversation: current,
+            stayRequest,
+          };
+        }
+        if (stayRequestIsDeclined(stayRequest) || conversationAlreadyDeclined(current, stayRequest)) {
+          return { alreadyDeclined: true, conversation: current, stayRequest };
+        }
+        await this._http.patch(
+          `${HE_BFF_BASE}/exchange/${encodeURIComponent(conversationId)}/manual-decline`,
+          { isPresetModified: true },
+          { headers: this._bffHeaders(token), timeout: HE_TIMEOUT_MS }
         );
-        const data = response.data || {};
-        // v3 GET often leaves accepted=null; v1 PATCH body is the source of truth.
-        if (data.accepted === 0 || data.accepted === false) {
-          return { ok: true, declined: true, conversation: data };
-        }
-        return data.ok === false ? data : { ok: true, ...data };
+        const sr = await this.getStayRequest(conversationId).catch(() => null);
+        return { ok: true, declined: true, stayRequest: sr };
       },
       { recover }
     );

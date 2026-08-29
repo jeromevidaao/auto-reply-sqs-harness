@@ -117,23 +117,76 @@ describe('HomeExchangeClient retries', () => {
     assert.equal(patches, 1);
   });
 
-  it('PATCHes /v1/conversations/{id} accepted:0 to decline a pending request', async () => {
-    let patchUrl = null;
-    let patchBody = null;
+  it('does not convert a reciprocal stay; skips decline', async () => {
+    const patches = [];
     const client = new HomeExchangeClient({
       token: 'test',
       http: {
-        get: async () => ({ data: { conversation: { id: 95598827, accepted: null, exchanges: [] } } }),
+        get: async (url) => {
+          if (String(url).includes('/exchange/v2/')) {
+            throw new Error('v2 should not be called for reciprocal skip');
+          }
+          return {
+            data: {
+              conversation: {
+                id: 95598827,
+                accepted: null,
+                exchanges: [
+                  { id: 127810197, type: 2, home: { id: 3285044 } },
+                  { id: 127810198, type: 2, home: { id: 3298786 } },
+                ],
+              },
+            },
+          };
+        },
         patch: async (url, body) => {
-          patchUrl = url;
-          patchBody = body;
+          patches.push({ url, body });
           return { data: { ok: true } };
         },
       },
     });
-    await client.declineConversation('95598827');
-    assert.match(patchUrl, /\/v1\/conversations\/95598827$/);
-    assert.deepEqual(patchBody, { accepted: 0 });
+    const out = await client.declineConversation('95598827');
+    assert.equal(out.skipped, true);
+    assert.equal(out.reason, 'reciprocal_cannot_decline');
+    assert.equal(out.declined, undefined);
+    assert.deepEqual(patches, []);
+  });
+
+  it('PATCHes bff manual-decline for a pending GuestPoints request', async () => {
+    const patches = [];
+    let stayStatus = 'NEW';
+    const client = new HomeExchangeClient({
+      token: 'test',
+      http: {
+        get: async (url) => {
+          if (String(url).includes('/exchange/v2/')) {
+            return {
+              data: { stayRequest: { stayRequestStatus: stayStatus, stayType: 'WITH-GP' } },
+            };
+          }
+          return {
+            data: {
+              conversation: {
+                id: 95201321,
+                accepted: null,
+                exchanges: [{ id: 1, type: 1, status: 0, home: { id: 3285044 } }],
+              },
+            },
+          };
+        },
+        patch: async (url, body) => {
+          patches.push({ url, body });
+          stayStatus = 'MANUALLY_DECLINED';
+          return { data: { ok: true } };
+        },
+      },
+    });
+    const out = await client.declineConversation('95201321');
+    assert.equal(out.declined, true);
+    assert.equal(patches.some((p) => /change-to-non-reciprocal/.test(p.url)), false);
+    const decline = patches.find((p) => /\/manual-decline$/.test(p.url));
+    assert.ok(decline);
+    assert.deepEqual(decline.body, { isPresetModified: true });
   });
 
   it('PATCHes /v1/exchanges/{conversationId}/approve with the get-exchanges array', async () => {
