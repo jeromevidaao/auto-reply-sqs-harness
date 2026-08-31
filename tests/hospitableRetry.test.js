@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import axios from 'axios';
 import { HospitableClient } from '../src/clients/HospitableClient.js';
 import {
   GROK_MESSAGE_MAX_RECEIVE_COUNT,
@@ -246,6 +247,70 @@ describe('hostAlreadySentEquivalent / looksLikeExistingWelcome', () => {
       'Good afternoon, Julie, thank you! Check-in is at 4pm with self-check-in and we have one dedicated off-street parking spot.';
     assert.equal(looksLikeExistingWelcome(existing, reworded), true);
     assert.equal(looksLikeExistingWelcome([{ sender_type: 'guest', body: 'We agree. Thank you.' }], reworded), false);
+  });
+});
+
+describe('HospitableClient.getReservations pagination', () => {
+  it('walks last_page so in-house guests on page 2 are not dropped', async () => {
+    const client = new HospitableClient();
+    client.getToken = async () => 'tok';
+    const orig = axios.get;
+    const pages = [];
+    axios.get = async (_url, cfg) => {
+      const page = cfg.params.page;
+      pages.push(page);
+      if (page === 1) {
+        return {
+          data: {
+            data: [{ id: 'old' }],
+            meta: { last_page: 2, total: 132, per_page: 100, current_page: 1 },
+          },
+        };
+      }
+      return {
+        data: {
+          data: [{ id: 'alexandra' }, { id: 'jack' }],
+          meta: { last_page: 2, total: 132, per_page: 100, current_page: 2 },
+        },
+      };
+    };
+    try {
+      const rows = await client.getReservations({
+        properties: ['p1'],
+        per_page: 100,
+        start_date: '2026-05-01',
+        end_date: '2026-10-15',
+      });
+      assert.deepEqual(pages, [1, 2]);
+      assert.deepEqual(rows.map((r) => r.id), ['old', 'alexandra', 'jack']);
+      assert.equal(pages.length === 1, false);
+    } finally {
+      axios.get = orig;
+    }
+  });
+
+  it('uses per_page not ignored limit (Hospitable default is 10)', async () => {
+    const client = new HospitableClient();
+    client.getToken = async () => 'tok';
+    const orig = axios.get;
+    let seen;
+    axios.get = async (_url, cfg) => {
+      seen = cfg.params;
+      return {
+        data: {
+          data: [{ id: 'a' }],
+          meta: { last_page: 1, total: 1, per_page: 100, current_page: 1 },
+        },
+      };
+    };
+    try {
+      await client.getReservations({ properties: ['p1'], limit: 20 });
+      assert.equal(seen.per_page, 20);
+      assert.equal(seen.limit, undefined);
+      assert.equal(seen.page, 1);
+    } finally {
+      axios.get = orig;
+    }
   });
 });
 

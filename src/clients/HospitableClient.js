@@ -148,19 +148,11 @@ export class HospitableClient {
    * Useful for more advanced logic.
    */
   async getReservationsForDateRange(listingId, startDate, endDate) {
-    return this._withRetry('getReservationsForDateRange', async () => {
-      const response = await axios.get(`${this.baseUrl}/reservations`, {
-        headers: await this._authHeaders(),
-        params: {
-          'properties[]': listingId,
-          'arrival_date[gte]': startDate,
-          'departure_date[lte]': endDate,
-          limit: 20
-        },
-        timeout: HOSPITABLE_READ_TIMEOUT_MS
-      });
-
-      return response.data?.data || [];
+    return this.getReservations({
+      properties: listingId,
+      start_date: startDate,
+      end_date: endDate,
+      per_page: 100,
     });
   }
 
@@ -168,13 +160,19 @@ export class HospitableClient {
    * Fetch reservations from Hospitable (the endpoint documented at
    * https://developer.hospitable.com/docs/public-api-docs/ih7nc1ovefrcs-get-reservations).
    *
+   * Walks every page. Page 1 alone is not occupancy: HeatPump 2026-08-31 had
+   * last_page=2 / 178 rows with in-house guests on page 2. Hospitable ignores
+   * `limit` and defaults per_page=10, so a single call also missed page 2 of
+   * the default window (18 rows).
+   *
    * The API requires at least one 'properties[]' filter in almost all cases.
    *
    * @param {Object} options
    * @param {string|string[]} options.properties - Listing UUID(s) (required by the API)
-   * @param {number} [options.limit=20]
+   * @param {number} [options.per_page=100]
+   * @param {number} [options.limit] - alias for per_page (capped at 100)
    * @param {string} [options.status] - e.g. 'accepted', 'confirmed'
-   * @param {string} [options.sort='-arrival_date']
+   * @param {string} [options.sort]
    * @returns {Promise<Array>} reservation objects (each includes conversation_id)
    */
   async getReservations(options = {}) {
@@ -182,40 +180,47 @@ export class HospitableClient {
       const token = await this.getToken();
       const {
         properties,
-        limit = 20,
+        limit,
+        per_page,
         status,
-        sort = '-arrival_date',
+        sort,
+        page: _ignoredPage,
         ...otherParams
       } = options;
 
+      const perPage = Math.min(100, Math.max(1, Number(per_page || limit) || 100));
       const params = {
-        limit,
-        sort,
-        ...otherParams
+        ...otherParams,
+        per_page: perPage,
       };
-
+      if (sort) params.sort = sort;
+      if (status) params.status = status;
       if (properties) {
-        // Support single string or array
         const props = Array.isArray(properties) ? properties : [properties];
-        props.forEach(p => {
-          // Axios will repeat the key for arrays
-        });
         params['properties[]'] = props;
       }
 
-      if (status) params.status = status;
+      const all = [];
+      let page = 1;
+      let lastPage = 1;
+      do {
+        const response = await axios.get(`${this.baseUrl}/reservations`, {
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          params: { ...params, page },
+          timeout: HOSPITABLE_READ_TIMEOUT_MS,
+        });
+        const batch = response.data?.data || [];
+        all.push(...batch);
+        const metaLast = Number(response.data?.meta?.last_page);
+        lastPage = Number.isFinite(metaLast) && metaLast >= 1 ? metaLast : 1;
+        page += 1;
+      } while (page <= lastPage && page <= 25);
 
-      const response = await axios.get(`${this.baseUrl}/reservations`, {
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        params,
-        timeout: HOSPITABLE_READ_TIMEOUT_MS
-      });
-
-      return response.data?.data || [];
+      return all;
     });
   }
 
