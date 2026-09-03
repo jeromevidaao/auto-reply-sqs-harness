@@ -44,7 +44,13 @@ import {
   HOMEEXCHANGE_PLATFORM,
   APT3_AIRBNB_LISTING_ID,
   buildHeFinalizeThankYouDraft,
+  isPineHeHome,
+  heGuestSideSkipResult,
 } from '../src/useCases/homeExchange.js';
+import {
+  conversationIsHeGuestSide,
+  pickPineHostExchange,
+} from '../src/clients/homeExchangeExchange.js';
 import {
   isHeSharedThankYouMessage,
   isHeCheckoutTimeQuestion,
@@ -3207,5 +3213,146 @@ describe('HomeExchange GuestPoints-only + first-request decline (Nina 2026-08-29
     assert.equal(result.reciprocal, false);
     assert.deepEqual(declined, ['95201321']);
     assert.equal(result.decline.ok, true);
+  });
+});
+
+describe('HomeExchange host-only (do not auto-reply when we are the guest)', () => {
+  it('detects outbound guest-side threads (Jen Kailua) vs Pine host / reciprocal', () => {
+    assert.equal(isPineHeHome('3202475'), true);
+    assert.equal(isPineHeHome('2778013'), false);
+    const jen = {
+      exchanges: [
+        {
+          guest: { id: 5703979, first_name: 'Ngoc Hong' },
+          host: { id: 4973688, first_name: 'Jen' },
+          home: { id: 2778013 },
+        },
+      ],
+    };
+    assert.equal(conversationIsHeGuestSide(jen), true);
+    assert.equal(pickPineHostExchange(jen), null);
+
+    const katie = {
+      exchanges: [{ guest: { id: 4052575 }, host: { id: 5703979 }, home: { id: 3285044 } }],
+    };
+    assert.equal(conversationIsHeGuestSide(katie), false);
+    assert.equal(String(pickPineHostExchange(katie).home.id), '3285044');
+
+    const marie = {
+      exchanges: [
+        { guest: { id: 1650779 }, host: { id: 5703979 }, home: { id: 3202475 } },
+        { guest: { id: 5703979 }, host: { id: 1650779 }, home: { id: 2222089 } },
+      ],
+    };
+    assert.equal(conversationIsHeGuestSide(marie), false);
+    assert.equal(String(pickPineHostExchange(marie).home.id), '3202475');
+  });
+
+  it('does not send when payload home is not a Pine listing', async () => {
+    let sent = 0;
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message: 'Unfortunately, it won’t be possible this time',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          conversationId: '95774853',
+          guestName: 'Jen',
+          homeId: '2778013',
+          listing: { platform: 'homeexchange', platform_id: '2778013' },
+        },
+      },
+      homeExchangeClient: {
+        async sendMessage() {
+          sent += 1;
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(result.sent, false);
+    assert.equal(result.shouldReply, false);
+    assert.equal(result.sendSkipReason, 'we_are_guest');
+    assert.equal(result.typeOfMessageReceived, 'HOMEEXCHANGE_GUEST_SIDE');
+    assert.equal(sent, 0);
+  });
+
+  it('does not send "You\'re welcome" when live thread is guest-side even if payload remapped to Apt #3', async () => {
+    const sentBodies = [];
+    const result = await handleHomeExchangeMessage({
+      event: {
+        message:
+          'Hello Ngoc Hong,\n\nThank you very much for your message.\n\nUnfortunately, it won’t be possible this time, but I wish you the best of luck in your search and perhaps we’ll connect again in the future!\n\nJen',
+        context: {
+          platform: HOMEEXCHANGE_PLATFORM,
+          conversationId: '95774853',
+          conversation_id: '95774853',
+          guestName: 'Jen',
+          listing: { platform: 'homeexchange', platform_id: '3202475' },
+          property: { id: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd', name: 'Pine Apt #3' },
+          airbnbListingId: APT3_AIRBNB_LISTING_ID,
+          isFirstMessage: false,
+        },
+      },
+      hospitableClient: {
+        async getPropertyCalendar() {
+          return [];
+        },
+        async getPropertyReservations() {
+          return [];
+        },
+      },
+      ddbClient: {
+        async send() {
+          return { Item: { listingId: 24259977, price: 125 } };
+        },
+      },
+      homeExchangeClient: {
+        async getConversation() {
+          return {
+            id: 95774853,
+            exchanges: [
+              {
+                id: 1,
+                start_on: '2026-12-28',
+                end_on: '2027-01-02',
+                guest: { id: 5703979, first_name: 'Ngoc Hong' },
+                host: { id: 4973688, first_name: 'Jen' },
+                home: { id: 2778013, descriptions: [{ title: 'Kailua Oasis: Steps to Beach' }] },
+              },
+            ],
+          };
+        },
+        async listMessages() {
+          return [
+            { content: 'Hi Jen - I hope everything is going well', author: { id: 5703979 } },
+            {
+              content: 'Thank you very much for your message. Unfortunately, it won’t be possible this time',
+              author: { id: 4973688, first_name: 'Jen' },
+            },
+          ];
+        },
+        async sendMessage(conversationId, content) {
+          sentBodies.push({ conversationId, content });
+          return { ok: true };
+        },
+      },
+      sharedCategoryRunner: async () => ({
+        typeOfMessageReceived: 'THANK_YOU',
+        shouldReply: true,
+        proposedResponse: "You're welcome, Jen!",
+        reason: 'shared_thank_you',
+      }),
+    });
+    assert.equal(result.sent, false);
+    assert.equal(result.shouldReply, false);
+    assert.equal(result.sendSkipReason, 'we_are_guest');
+    assert.equal(sentBodies.length, 0);
+  });
+
+  it('heGuestSideSkipResult is send-disabled', () => {
+    const skip = heGuestSideSkipResult({ conversationId: '95774853', guestName: 'Jen', homeId: '2778013' });
+    assert.equal(skip.sendDisabled, true);
+    assert.equal(skip.sent, false);
+    assert.equal(skip.shouldReply, false);
+    assert.equal(skip.sendSkipReason, 'we_are_guest');
   });
 });

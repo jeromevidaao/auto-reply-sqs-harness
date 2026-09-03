@@ -79,6 +79,12 @@
  *   Every successful HE guest send (and send-fail after retries) FCM the owner
  *   phone. Airbnb auto-replies are not notified this way.
  *
+ * Host-only: never auto-reply when we are the guest on someone else's listing
+ * (Jen Kailua 2026-09-02: host declined our stay request; poller remapped the
+ * unknown home to Apt #3 and sent "You're welcome, Jen!"). Skip unless the
+ * live conversation includes a Pine home we host. Reciprocal (our home +
+ * theirs) still replies because we are hosting.
+ *
  * Shared categories (after HE-specific draft is not sendable):
  *   Thank-you, check-in 4pm, checkout 10am, parking, wifi, laundry, etc.
  *   Airbnb-only welcome / cancellation / payment stay off this path.
@@ -89,6 +95,9 @@ import { GetCommand } from '@aws-sdk/lib-dynamodb';
 import { alreadySentEquivalent } from '../clients/HomeExchangeClient.js';
 import {
   pickExchangeFromConversation,
+  pickPineHostExchange,
+  conversationIsHeGuestSide,
+  exchangeHomeId,
   exchangeAlreadyApproved,
   isReciprocalHeExchange,
   conversationAlreadyDeclined,
@@ -151,6 +160,40 @@ export const LISTING_TABLE = 'listing';
 export function resolveHeUnit(homeId) {
   const key = homeId != null ? String(homeId).trim() : '';
   return HE_UNIT_BY_HOME[key] || HE_UNIT_BY_HOME[HE_HOME_ID];
+}
+
+export function isPineHeHome(homeId) {
+  const key = homeId != null ? String(homeId).trim() : '';
+  return !!HE_UNIT_BY_HOME[key];
+}
+
+/** Skip send: we are the guest on someone else's listing, not the Pine host. */
+export function heGuestSideSkipResult({
+  conversationId = null,
+  message = '',
+  guestName = null,
+  homeId = null,
+} = {}) {
+  return {
+    platform: HOMEEXCHANGE_PLATFORM,
+    sendDisabled: true,
+    sent: false,
+    sendError: null,
+    sendSkipReason: 'we_are_guest',
+    conversationId,
+    isFirstMessage: false,
+    guestFinalized: false,
+    guestMessage: message,
+    guestName,
+    checkIn: null,
+    checkOut: null,
+    homeId: homeId != null ? String(homeId) : null,
+    typeOfMessageReceived: 'HOMEEXCHANGE_GUEST_SIDE',
+    shouldReply: false,
+    proposedResponse: null,
+    reason: 'we_are_guest',
+    escalated: false,
+  };
 }
 
 export function extractHeHomeId(src = {}) {
@@ -1631,6 +1674,15 @@ export async function handleHomeExchangeMessage({
   const message = extracted.message;
   const context = extracted.context || {};
   const conversationId = context.conversation_id || context.conversationId || null;
+  const payloadHome = extractHeHomeId(context);
+  if (payloadHome && !isPineHeHome(payloadHome)) {
+    return heGuestSideSkipResult({
+      conversationId,
+      message,
+      guestName: context.guestName || context.sender?.first_name || null,
+      homeId: payloadHome,
+    });
+  }
   const providedHistory = Array.isArray(context.conversationHistory)
     ? context.conversationHistory
     : [];
@@ -1676,11 +1728,21 @@ export async function handleHomeExchangeMessage({
   if (conversationId && homeExchangeClient?.getConversation) {
     try {
       liveConversation = await homeExchangeClient.getConversation(conversationId);
-      liveExchange = pickExchangeFromConversation(liveConversation, homeId);
+      liveExchange =
+        pickPineHostExchange(liveConversation) ||
+        pickExchangeFromConversation(liveConversation, homeId);
     } catch {
       liveConversation = null;
       liveExchange = null;
     }
+  }
+  if (conversationIsHeGuestSide(liveConversation)) {
+    return heGuestSideSkipResult({
+      conversationId,
+      message,
+      guestName,
+      homeId: exchangeHomeId(liveExchange) || payloadHome || homeId,
+    });
   }
   const reciprocal =
     isReciprocalHeExchange(liveExchange, {

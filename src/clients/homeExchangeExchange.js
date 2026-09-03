@@ -87,6 +87,26 @@ export function pickTheirExchange(conversation = null) {
   );
 }
 
+/** Stay on one of our Pine listings (we are the host). Reciprocal threads have this plus their home. */
+export function pickPineHostExchange(conversation = null) {
+  return (
+    conversationExchanges(conversation).find((ex) => {
+      const hid = exchangeHomeId(ex);
+      return hid && HE_PINE_HOME_IDS.has(hid);
+    }) || null
+  );
+}
+
+/**
+ * True when the live thread has stay(s) and none are a Pine listing we host.
+ * Outbound requests (we are the guest — Jen Kailua 2026-09-02) must not auto-reply.
+ */
+export function conversationIsHeGuestSide(conversation = null) {
+  const list = conversationExchanges(conversation);
+  if (!list.length) return false;
+  return !pickPineHostExchange(conversation);
+}
+
 export const HE_RECIPROCAL_CANNOT_DECLINE = 'reciprocal_cannot_decline';
 
 export function stayRequestIsDeclined(stayRequest = null) {

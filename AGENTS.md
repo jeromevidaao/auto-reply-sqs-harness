@@ -71,6 +71,8 @@ Runtime hardening (`src/utils/replyPolicy.js`): high confidence (≥0.9) + senda
 
 New guest messages from HomeExchange are enqueued onto the same `grok_message` SQS queue (`act=homeexchange_message`, `platform=homeexchange`) by `cleaningbutton-api` `hePollNewMessages`.
 
+**Host-only (Jen 2026-09-02):** Auto-reply **only when we are the host of a Pine listing** (`3202475` / `3285044` / `3285159`). If we are the guest (outbound stay request to someone else's home), do **not** enqueue / do **not** send — still FCM the owner that they replied. Reciprocal threads that include our Pine home still auto-reply. The poller remapping unknown homes to Apt #3 is what sent “You're welcome, Jen!” after she declined our Kailua request.
+
 **Isolation:** the Lambda handler branches on `isHomeExchangePayload` *before* `GuestMessagingAgent` / Hospitable send. Airbnb `act=message` / `platform=airbnb` traffic is unchanged. Calendar-sync `act=new_reservation_home_exchange` is also unchanged.
 
 **First HE guest message (e.g. Caroline 2026-08-14, May 13–19 2027, Apt 3; Katie 2026-08-17 Apt 2; Nina 2026-08-29 Apt 2):**
