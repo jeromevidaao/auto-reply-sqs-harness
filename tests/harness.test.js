@@ -186,6 +186,32 @@ describe('skip LLM judge', () => {
       false
     );
   });
+
+  it('does not skip when the thread already has conversation history', () => {
+    assert.equal(
+      shouldSkipLlmJudge({
+        decision: { typeOfMessageReceived: 'THERMOSTAT_HEATPUMP', deterministicRewrite: true },
+        claimCheck: { ok: true },
+        context: {
+          conversationHistory: [
+            { sender_type: 'host', body: 'Use the remotes on the wall in each room.' },
+          ],
+        },
+      }),
+      false
+    );
+  });
+
+  it('does not skip HVAC even on a first how-to', () => {
+    assert.equal(
+      shouldSkipLlmJudge({
+        decision: { typeOfMessageReceived: 'THERMOSTAT_HEATPUMP', deterministicRewrite: true },
+        claimCheck: { ok: true },
+        context: {},
+      }),
+      false
+    );
+  });
 });
 
 describe('first-pass prompt compose', () => {

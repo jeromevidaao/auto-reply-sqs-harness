@@ -9,6 +9,7 @@
 import { isAdditionalParkingAsk, isEventHostingDenial, isTripPurposeEventMention } from '../tools/parking/additionalParking.js';
 import { isPetOverMaxAsk, isUnlikelyEventIdiom } from '../tools/pets/petOverMax.js';
 import { isPetFurnitureMitigation } from '../tools/pets/petFurnitureMitigation.js';
+import { hasPriorConversation } from '../utils/threadHistory.js';
 
 const EVENT_DECLINE_RE = /not able to accommodate events or gatherings/i;
 const POLICY_475_RE = /help\/article\/475/i;
@@ -186,7 +187,9 @@ function categoryList(decision = {}) {
 
 /**
  * Skip the LLM reviewer when a deterministic policy already rewrote the draft
- * and programmatic claims are clean. Never skip cancellations or failed history.
+ * and programmatic claims are clean. Never skip cancellations, failed history,
+ * or any thread that already has conversation history — the judge must see the
+ * full thread to catch repetition (Ted Apt 3 HVAC follow-up).
  */
 export function shouldSkipLlmJudge({
   decision = {},
@@ -198,6 +201,8 @@ export function shouldSkipLlmJudge({
   if (context.forceCancellationEscalation) return false;
   const traces = context.conversationTraces || {};
   if (traces.historyFetchFailed) return false;
+  if (hasPriorConversation(context)) return false;
+  if (cats.some((c) => c === 'THERMOSTAT_HEATPUMP' || c === 'THERMOSTAT')) return false;
   if (!decision.deterministicRewrite && !claimCheck.revisedResponse) return false;
   if (claimCheck.ok === true) return true;
   if (claimCheck.okAfterFixes === true && claimCheck.revisedResponse) return true;

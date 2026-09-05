@@ -107,18 +107,21 @@ async function kumoGetDevice(serial, accessToken) {
   return res.data;
 }
 
-async function kumoSetDevice(serial, mode, tempF, accessToken) {
-  const tempC = fToC(tempF);
+async function kumoSetDevice(serial, { mode, tempF, power = 1 } = {}, accessToken) {
+  const commands = {
+    power,
+    fanSpeed: 'auto',
+    airDirection: 'swing',
+  };
+  if (mode) commands.operationMode = mode;
+  if (typeof tempF === 'number') {
+    const tempC = fToC(tempF);
+    commands.spCool = tempC;
+    commands.spHeat = tempC;
+  }
   const payload = {
     deviceSerial: serial,
-    commands: {
-      power: 1,
-      operationMode: mode, // 'cool' | 'heat' | 'auto' | 'autoHeat' etc. as supported by the unit
-      spCool: tempC,
-      spHeat: tempC,
-      fanSpeed: 'auto',
-      airDirection: 'swing'
-    }
+    commands,
   };
   await axios({
     method: 'POST',
@@ -238,7 +241,7 @@ export class KumoCloudClient {
     }
   }
 
-  async setAllUnits(listingId, mode, tempF) {
+  async setAllUnits(listingId, mode, tempF, { power = 1 } = {}) {
     const deviceIds = KUMO_DEVICES_BY_LISTING[listingId];
     if (!deviceIds || deviceIds.length === 0) {
       return { listingId, success: false, error: 'no mapping for listing', unitsSet: 0 };
@@ -256,7 +259,7 @@ export class KumoCloudClient {
           continue;
         }
         try {
-          await kumoSetDevice(serial, mode, tempF, token);
+          await kumoSetDevice(serial, { mode, tempF, power }, token);
           results.push({ deviceId, serial, success: true });
           ok++;
         } catch (setErr) {
@@ -264,13 +267,14 @@ export class KumoCloudClient {
         }
       }
 
-      console.log(`[KumoCloudClient] setAllUnits ${listingId} → mode=${mode} tempF=${tempF} : ${ok}/${deviceIds.length} ok`);
+      console.log(`[KumoCloudClient] setAllUnits ${listingId} → mode=${mode} tempF=${tempF} power=${power} : ${ok}/${deviceIds.length} ok`);
 
       return {
         listingId,
         success: ok > 0,
         mode,
         tempF,
+        power,
         unitsSet: ok,
         total: deviceIds.length,
         results
@@ -278,6 +282,10 @@ export class KumoCloudClient {
     } catch (err) {
       return { listingId, success: false, error: err.message, unitsSet: 0 };
     }
+  }
+
+  async setAllUnitsOff(listingId) {
+    return this.setAllUnits(listingId, 'off', null, { power: 0 });
   }
 
   /**

@@ -752,6 +752,140 @@ describe('EventRequestTool (no LLM)', () => {
     assert.match(snip, /master bedroom is on cool/i);
   });
 
+  it('HeatPumpTool turns all units off when the guest asks to turn it off remotely', async () => {
+    const { HeatPumpTool } = await import('../src/tools/hvac/HeatPumpTool.js');
+    const listingId = '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd';
+    const live = {
+      listingId,
+      unitCount: 3,
+      summary: { modes: ['heat'], mixedModes: false, avgRoomTempF: 70 },
+      units: [
+        { deviceId: '7636c887-e946-4f55-9bd8-be9e0baa0bcd', roomName: 'living room', operationMode: 'heat', power: 1 },
+        { deviceId: '18df3129-0790-490e-9545-cacd399f71b7', roomName: 'master bedroom', operationMode: 'heat', power: 1 },
+        { deviceId: '30dc168d-698e-4218-b8d4-17d93cd15358', roomName: 'small bedroom', operationMode: 'heat', power: 1 },
+      ],
+    };
+    let offCalled = false;
+    const fakeKumo = {
+      getStatusForListing: async () => live,
+      setAllUnitsOff: async () => {
+        offCalled = true;
+        return { success: true, power: 0, unitsSet: 3 };
+      },
+      ensureConsistentForComplaint: async () => {
+        throw new Error('must not auto-set heat/cool on a turn-off ask');
+      },
+    };
+    const tool = new HeatPumpTool({ kumoClient: fakeKumo });
+    const msg = 'Hi sorry about that. I thought I had turned it off. I may have set it to heat. We are currently away. Are you able to turn it off remotely or is it ok to leave as is for now';
+    const result = await tool.execute(msg, { listingId, guestName: 'Ted' });
+    assert.equal(offCalled, true);
+    assert.equal(result.actionTaken.turnedOff, true);
+    assert.match(result.suggestedResponseSnippet, /I turned the wall units off/);
+    assert.doesNotMatch(result.suggestedResponseSnippet, /nest/i);
+    assert.doesNotMatch(result.suggestedResponseSnippet, /make sure you are using/i);
+  });
+
+  it('thermostat policy does not re-stamp Nest when prior host HVAC advice exists', async () => {
+    const thermostatTool = new ThermostatTool();
+    const listingId = '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd';
+    const msg = 'Hi sorry about that. I thought I had turned it off. I may have set it to heat. We are currently away. Are you able to turn it off remotely or is it ok to leave as is for now';
+    const thermo = await thermostatTool.execute(msg, { listingId, guestName: 'Ted' });
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyThermostatPolicy(
+      {
+        typeOfMessageReceived: 'THERMOSTAT_HEATPUMP',
+        proposedResponse: 'Ted, Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.',
+      },
+      {
+        listingId,
+        earlyThermostatInfo: thermo,
+        conversationTraces: {
+          priorHostHVACAdvice: 'Use the remotes on the wall in each room',
+          repeatedInstructionRisk: true,
+        },
+        heatPumpInfo: {
+          guestMessageRelevant: true,
+          suggestedResponseSnippet: 'Yes, I turned the wall units off for you. Enjoy your time away — just message us when you\'d like them back on.',
+          actionTaken: { turnedOff: true },
+        },
+      },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.match(applied.proposedResponse, /I turned the wall units off/);
+    assert.doesNotMatch(applied.proposedResponse, /nest/i);
+    assert.doesNotMatch(applied.proposedResponse, /make sure you are using/i);
+  });
+
+  it('judge prompt includes the full thread not a short newest-first slice', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const history = [];
+    for (let i = 1; i <= 12; i++) {
+      history.push({
+        sender_type: i % 2 ? 'guest' : 'host',
+        body: `turn-${i}-unique-body`,
+        created_at: `2026-09-04T${String(10 + i).padStart(2, '0')}:00:00Z`,
+      });
+    }
+    const prompt = await agent._buildConversationJudgePrompt(
+      { typeOfMessageReceived: 'THERMOSTAT_HEATPUMP', proposedResponse: 'Hello' },
+      {},
+      { conversationHistory: history, originalMessage: 'Are you able to turn it off remotely' }
+    );
+    assert.match(prompt, /FULL CONVERSATION HISTORY/);
+    assert.match(prompt, /turn-1-unique-body/);
+    assert.match(prompt, /turn-12-unique-body/);
+  });
+
+  it('deterministic HVAC judge guard revises Nest lecture into turn-off confirm', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'We are currently away. Are you able to turn it off remotely or is it ok to leave as is for now';
+    const guarded = agent._applyDeterministicJudgeGuards(
+      { verdict: 'APPROVE', notes: 'ok', issues: [] },
+      {
+        typeOfMessageReceived: 'THERMOSTAT_HEATPUMP',
+        proposedResponse: 'Ted, Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.',
+      },
+      {
+        conversationTraces: { priorHostHVACAdvice: 'Use the remotes on the wall in each room', repeatedInstructionRisk: true },
+        heatPumpInfo: {
+          actionTaken: { turnedOff: true },
+          suggestedResponseSnippet: 'Yes, I turned the wall units off for you. Enjoy your time away — just message us when you\'d like them back on.',
+        },
+      },
+      msg
+    );
+    assert.equal(guarded.verdict, 'REVISE');
+    assert.equal(guarded.deterministicGuard, true);
+    assert.match(guarded.revisedResponse, /I turned the wall units off/);
+    assert.doesNotMatch(guarded.revisedResponse, /nest/i);
+  });
+
+  it('normalizes Hospitable newest-first threads so the latest host turn is last', async () => {
+    const { normalizeThreadChronological } = await import('../src/utils/threadHistory.js');
+    const newestFirst = [
+      { body: 'latest host remotes note', sender_type: 'host', created_at: '2026-09-05T15:14:19Z' },
+      { body: 'middle guest', sender_type: 'guest', created_at: '2026-09-04T18:00:00Z' },
+      { body: 'oldest welcome', sender_type: 'host', created_at: '2026-09-01T12:00:00Z' },
+    ];
+    const chrono = normalizeThreadChronological(newestFirst);
+    assert.equal(chrono[0].body, 'oldest welcome');
+    assert.equal(chrono[chrono.length - 1].body, 'latest host remotes note');
+    const slicedWrong = newestFirst.slice(-2).map((m) => m.body);
+    assert.ok(slicedWrong.includes('oldest welcome'));
+    assert.equal(chrono.slice(-1)[0].body, 'latest host remotes note');
+  });
+
   it('host mixed-mode notice names the odd room first and omits Nest and unit number', async () => {
     const { buildHostMixedModeNotice } = await import('../src/tools/hvac/headLayout.js');
     const body = buildHostMixedModeNotice({
@@ -1552,7 +1686,7 @@ describe('PostCheckoutParkingTool (mocked Hospitable, no LLM)', () => {
         ]
       }
     );
-    assert.match(prompt, /RECENT CONVERSATION HISTORY/);
+    assert.match(prompt, /FULL CONVERSATION HISTORY/);
     assert.match(prompt, /Check-in is at 4pm with self-check-in and parking/);
     assert.match(prompt, /POST-WELCOME THANK-YOU/);
   });

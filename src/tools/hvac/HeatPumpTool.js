@@ -1,4 +1,5 @@
 import { BaseTool } from '../BaseTool.js';
+import { guestAsksHostToTurnOff } from './hvacIntent.js';
 import {
   describeLiveModes,
   guestRoomName,
@@ -77,6 +78,11 @@ export class HeatPumpTool extends BaseTool {
       // Graceful no-op when not wired (local tests without mock, or before full deploy)
       result.detected = true;
       result.message = 'KumoCloudClient not provided to HeatPumpTool (no live data).';
+      if (guestAsksHostToTurnOff(guestMessage)) {
+        result.actionTaken = { turnedOff: false, reason: 'no_kumo_client' };
+        result.suggestedResponseSnippet = this._buildTurnedOffSnippet(guestName, { success: false });
+        return result;
+      }
       result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName, listingId);
       return result;
     }
@@ -86,11 +92,50 @@ export class HeatPumpTool extends BaseTool {
       const status = await this.kumoClient.getStatusForListing(listingId);
       result.liveStatus = this._withRoomNames(status);
       result.detected = true;
+    } catch (err) {
+      result.error = err.message;
+      result.detected = true;
+    }
 
+    if (guestAsksHostToTurnOff(guestMessage)) {
+      try {
+        if (typeof this.kumoClient.setAllUnitsOff === 'function') {
+          const offResult = await this.kumoClient.setAllUnitsOff(listingId);
+          result.actionTaken = {
+            turnedOff: !!offResult.success,
+            setResult: offResult,
+            reason: 'guest_asked_turn_off',
+          };
+          result.suggestedResponseSnippet = this._buildTurnedOffSnippet(guestName, offResult);
+          return result;
+        }
+        result.actionTaken = { turnedOff: false, reason: 'guest_asked_turn_off_no_off_method' };
+        result.suggestedResponseSnippet = this._buildTurnedOffSnippet(guestName, { success: false });
+        return result;
+      } catch (offErr) {
+        result.error = offErr.message;
+        result.actionTaken = { turnedOff: false, reason: 'guest_asked_turn_off_error' };
+        result.suggestedResponseSnippet = this._buildTurnedOffSnippet(guestName, { success: false });
+        return result;
+      }
+    }
+
+    if (!result.liveStatus) {
+      result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName, listingId);
+      return result;
+    }
+
+    try {
       // Auto-remediation only on clear comfort complaints (already gated by seemsRelevant).
       const fix = await this.kumoClient.ensureConsistentForComplaint(listingId, guestMessage);
       result.actionTaken = fix;
-      result.suggestedResponseSnippet = this._buildLiveSnippet(guestName, result.liveStatus, fix, listingId);
+      result.suggestedResponseSnippet = this._buildLiveSnippet(
+        guestName,
+        result.liveStatus,
+        fix,
+        listingId,
+        context
+      );
     } catch (err) {
       result.error = err.message;
       result.detected = true;
@@ -165,8 +210,10 @@ export class HeatPumpTool extends BaseTool {
       /\bwarm up\b/,
       /\bstuffy\b/,
       /\bnot blowing\b/,
+      /\bturn(?:ing)? (?:it|them).{0,20}off\b/,
+      /\bturned it off\b/,
     ];
-    return hvacPatterns.some((p) => p.test(m));
+    return hvacPatterns.some((p) => p.test(m)) || guestAsksHostToTurnOff(m);
   }
 
   _roomsFor(listingId, units = []) {
@@ -192,9 +239,26 @@ export class HeatPumpTool extends BaseTool {
     return `${name}${mixedModeRule(rooms)} Use the remotes on the wall in each room. Let me know the exact settings you see and I'll check the units.`.trim();
   }
 
-  _buildLiveSnippet(guestName, status, fix, listingId) {
+  _buildTurnedOffSnippet(guestName, offResult = {}) {
+    const name = guestName ? `${guestName}, ` : '';
+    if (offResult && offResult.success === false) {
+      return `${name}Yes, I can turn them off remotely — I wasn't able to complete that just now, but I'll take care of it and follow up.`.trim();
+    }
+    return `${name}Yes, I turned the wall units off for you. Enjoy your time away — just message us when you'd like them back on.`.trim();
+  }
+
+  _priorHostHvacAdvice(context = {}) {
+    return !!(
+      context.conversationTraces?.priorHostHVACAdvice ||
+      context.priorHostHVACAdvice ||
+      context.conversationTraces?.repeatedInstructionRisk
+    );
+  }
+
+  _buildLiveSnippet(guestName, status, fix, listingId, context = {}) {
     const name = guestName ? `${guestName}, ` : '';
     const parts = [];
+    const priorAdvice = this._priorHostHvacAdvice(context);
 
     const summary = status?.summary || {};
     const units = status?.units || [];
@@ -218,14 +282,19 @@ export class HeatPumpTool extends BaseTool {
       parts.push('You can still adjust with the remotes on the wall in each room.');
       parts.push('Let me know in a few minutes if the air is moving and the temperature is improving!');
     } else if (status && !status.error) {
-      if (liveMix) parts.push(liveMix);
-      parts.push(mixedModeRule(rooms));
-      if (!mixed) {
-        parts.push('Use the remotes on the wall in each room.');
+      if (priorAdvice) {
+        parts.push('I checked the live status of the units.');
+        parts.push('Let me know if you want me to set them for you.');
       } else {
-        parts.push('Use the remotes on the wall in each room so every unit is on the same mode.');
+        if (liveMix) parts.push(liveMix);
+        parts.push(mixedModeRule(rooms));
+        if (!mixed) {
+          parts.push('Use the remotes on the wall in each room.');
+        } else {
+          parts.push('Use the remotes on the wall in each room so every unit is on the same mode.');
+        }
+        parts.push('I also checked the live status — let me know if you want me to set them for you.');
       }
-      parts.push('I also checked the live status — let me know if you want me to set them for you.');
     } else {
       parts.push(this._buildSoftInstructionSnippet(guestName, listingId).replace(`${name}`, ''));
     }

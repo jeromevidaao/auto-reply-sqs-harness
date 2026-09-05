@@ -23,6 +23,11 @@ import {
 } from './tools/pets/petFurnitureMitigation.js';
 import { ConversationHistoryRequiredError } from './errors/ConversationHistoryRequiredError.js';
 import { headLayoutForListing } from './tools/hvac/headLayout.js';
+import { guestAsksHostToTurnOff } from './tools/hvac/hvacIntent.js';
+import {
+  formatConversationHistoryLines,
+  normalizeThreadChronological,
+} from './utils/threadHistory.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 import {
   loadHostContacts,
@@ -3511,13 +3516,30 @@ export class GuestMessagingAgent {
       hp?.actionTaken?.fixed ||
       hp?.actionTaken?.before?.summary?.mixedModes
     );
+    const turnedOff = !!(hp?.actionTaken?.turnedOff);
+    const askedOff = guestAsksHostToTurnOff(guestMessage);
+    const priorHvac = !!(
+      context.conversationTraces?.priorHostHVACAdvice ||
+      context.priorHostHVACAdvice ||
+      context.conversationTraces?.repeatedInstructionRisk
+    );
 
     let body = null;
-    // Mixed-mode / auto-fix: room-by-room HeatPump snippet (no Nest).
-    // How-to questions keep ThermostatTool Nest/remotes wording.
-    if (mixedOrFixed && hp?.suggestedResponseSnippet) {
+    // Guest asked us to turn units off remotely — confirm the live action (Ted Apt 3).
+    if ((turnedOff || askedOff) && hp?.suggestedResponseSnippet && /turned the wall units off/i.test(hp.suggestedResponseSnippet)) {
       body = hp.suggestedResponseSnippet;
+    } else if (mixedOrFixed && hp?.suggestedResponseSnippet) {
+      // Mixed-mode / auto-fix: room-by-room HeatPump snippet (no Nest).
+      body = hp.suggestedResponseSnippet;
+    } else if (priorHvac) {
+      // Already explained remotes / Nest / same-mode in this thread. Do not stamp the how-to lecture.
+      if (hp?.suggestedResponseSnippet && !/nest/i.test(hp.suggestedResponseSnippet) && (turnedOff || hp?.actionTaken?.fixed)) {
+        body = hp.suggestedResponseSnippet;
+      } else {
+        return { applied: false };
+      }
     } else if (!complete && thermo?.recommendedResponse) {
+      // How-to questions keep ThermostatTool Nest/remotes wording (first time in the thread).
       body = thermo.recommendedResponse;
     } else if (!complete && thermo?.suggestedResponseSnippet) {
       body = thermo.suggestedResponseSnippet;
@@ -4306,10 +4328,9 @@ export class GuestMessagingAgent {
     }
 
     if (context.conversationHistory?.length) {
-      lines.push('- Recent conversation (newest last):');
-      context.conversationHistory.slice(-6).forEach(m => {
-        const who = m.sender_type === 'guest' ? 'Guest' : 'Host';
-        lines.push(`  ${who}: ${m.body}`);
+      lines.push('- FULL conversation history (oldest first → newest last). Read every prior host turn before drafting — do not repeat facts already sent:');
+      formatConversationHistoryLines(context.conversationHistory).forEach((row) => {
+        lines.push(`  ${row}`);
       });
     }
 
@@ -4489,7 +4510,9 @@ export class GuestMessagingAgent {
           summary: h.liveStatus.summary,
           units: (h.liveStatus.units || []).map(u => ({mode: u.operationMode, roomF: u.roomTempF, spCoolF: u.spCoolF}))
         }) : 'no liveStatus'}`);
-        if (h.actionTaken && h.actionTaken.fixed) {
+        if (h.actionTaken?.turnedOff) {
+          lines.push('- ACTION TAKEN by HeatPumpTool: guest asked to turn the units off remotely. ALL wall units were turned OFF. proposedResponse MUST confirm that you turned them off. Do NOT mention Nest. Do NOT repeat remotes-on-the-wall or same-mode instructions already sent in this thread. Prefer the tool snippet.');
+        } else if (h.actionTaken && h.actionTaken.fixed) {
           lines.push(`- ACTION TAKEN by HeatPumpTool: fixed all units to ${h.actionTaken.recommendedMode} @ ${h.actionTaken.recommendedTempF}°F. Before modes: ${(h.actionTaken.before?.summary?.modes || []).join('/')}. Tell the guest you checked the units and performed the fix.`);
         } else if (h.actionTaken) {
           lines.push(`- Heat pump check performed (no fix needed or not applicable): ${h.actionTaken.reason || 'consistent'}`);
@@ -4497,11 +4520,23 @@ export class GuestMessagingAgent {
         if (h.suggestedResponseSnippet) {
           lines.push(`- Suggested HVAC snippet from tool: ${h.suggestedResponseSnippet}`);
         }
-        lines.push('- IMPORTANT FOR THIS RESPONSE: Name which rooms are on heat vs cool (living room / master bedroom / small bedroom, or bedroom / kitchen for 1B). Say all wall units need the same mode (all heat or all cool). Do NOT mention the Nest. Do NOT mention the apartment number. Prefer the tool snippet. If you performed a fix, also include "I checked", "set all", and "cool down".');
+        const priorHvacAdvice = !!(context.conversationTraces?.priorHostHVACAdvice || context.conversationTraces?.repeatedInstructionRisk);
+        if (h.actionTaken?.turnedOff) {
+          lines.push('- IMPORTANT FOR THIS RESPONSE: Confirm you turned the wall units off. Do NOT mention Nest, remotes, same-mode, or the apartment number.');
+        } else if (priorHvacAdvice) {
+          lines.push('- CRITICAL ANTI-REPETITION: A prior host message in this thread already explained the wall remotes / same-mode rule (and must not mention Nest again). Do NOT repeat that lecture. Answer only the new ask (e.g. turn off remotely) and any fresh tool action.');
+        } else {
+          lines.push('- IMPORTANT FOR THIS RESPONSE: Name which rooms are on heat vs cool (living room / master bedroom / small bedroom, or bedroom / kitchen for 1B). Say all wall units need the same mode (all heat or all cool). Do NOT mention the Nest. Do NOT mention the apartment number. Prefer the tool snippet. If you performed a fix, also include "I checked", "set all", and "cool down".');
+        }
       } else if (context.earlyThermostatInfo?.guestMessageRelevant) {
-        lines.push(`- IMPORTANT FOR THIS RESPONSE: Your proposedResponse MUST contain the phrases "make sure you are using" and "remotes on the wall".`);
-        if (context.earlyThermostatInfo.recommendedResponse) {
-          lines.push(`- Recommended HVAC response (greeting prefix optional): "${context.earlyThermostatInfo.recommendedResponse}"`);
+        const priorHvacAdvice = !!(context.conversationTraces?.priorHostHVACAdvice || context.conversationTraces?.repeatedInstructionRisk);
+        if (priorHvacAdvice) {
+          lines.push('- CRITICAL: Prior host HVAC/remotes advice already sent in this thread. Do NOT mention Nest. Do NOT repeat "make sure you are using" / remotes-on-the-wall / same-mode lectures. Answer the new question only.');
+        } else {
+          lines.push(`- IMPORTANT FOR THIS RESPONSE: Your proposedResponse MUST contain the phrases "make sure you are using" and "remotes on the wall".`);
+          if (context.earlyThermostatInfo.recommendedResponse) {
+            lines.push(`- Recommended HVAC response (greeting prefix optional): "${context.earlyThermostatInfo.recommendedResponse}"`);
+          }
         }
       }
     }
@@ -5019,8 +5054,10 @@ export class GuestMessagingAgent {
     // (Evals/simulator often pass explicit history; prod relies on this live enrichment.)
     const tracesForHistory = enrichedContext.conversationTraces || {};
     if (tracesForHistory.recentConversationMessages && tracesForHistory.recentConversationMessages.length > 0) {
-      enrichedContext.conversationHistory = tracesForHistory.recentConversationMessages;
+      enrichedContext.conversationHistory = normalizeThreadChronological(tracesForHistory.recentConversationMessages);
       console.log('[Agent] → Populated conversationHistory from live fetch (' + tracesForHistory.recentConversationMessages.length + ' messages) for LLM prompt + judge');
+    } else if (Array.isArray(enrichedContext.conversationHistory) && enrichedContext.conversationHistory.length > 0) {
+      enrichedContext.conversationHistory = normalizeThreadChronological(enrichedContext.conversationHistory);
     } else {
       // Always log when we did NOT get live history (the silent-fail case the user asked to prevent).
       const src = tracesForHistory.historySource || 'none';
@@ -5226,6 +5263,9 @@ export class GuestMessagingAgent {
       }
     } else {
       console.log('[Agent] → Skipping heat pump tool (message not HVAC-relevant)');
+    }
+    if (heatPumpInfo) {
+      enrichedContext.heatPumpInfo = heatPumpInfo;
     }
 
     // === Cancellation handling (high-risk policy area) ===
@@ -6213,11 +6253,8 @@ export class GuestMessagingAgent {
     }
 
     if (context.conversationHistory?.length) {
-      lines.push('=== RECENT CONVERSATION HISTORY (newest last) ===');
-      context.conversationHistory.slice(-6).forEach(m => {
-        const who = m.sender_type === 'guest' ? 'Guest' : 'Host';
-        lines.push(`${who}: ${m.body}`);
-      });
+      lines.push('=== FULL CONVERSATION HISTORY (entire thread, oldest first → newest last). You MUST read every turn. ===');
+      formatConversationHistoryLines(context.conversationHistory).forEach((row) => lines.push(row));
       lines.push('');
     }
 
@@ -6231,10 +6268,92 @@ export class GuestMessagingAgent {
    * This is more powerful than basic reflection for catching the agent repeating itself.
    */
   /**
+   * Ted Apt 3 (2026-09-05): guest asked to turn HVAC off remotely after we already explained
+   * remotes / same-mode. Draft must confirm the off action and must not re-lecture Nest/remotes.
+   */
+  _applyHvacThreadJudgeGuard(llmJudgeResult = {}, firstDecision = {}, context = {}, guestMessage = '') {
+    const traces = context.conversationTraces || {};
+    const hp = context.heatPumpInfo || {};
+    const askedOff = guestAsksHostToTurnOff(guestMessage);
+    const priorHvac = !!(traces.priorHostHVACAdvice || traces.repeatedInstructionRisk || context.priorHostHVACAdvice);
+    const draft = (firstDecision.proposedResponse || '').trim();
+    const revised = (llmJudgeResult.revisedResponse || '').trim();
+    const nestLecture = /nest thermostat/i;
+    const makeSureRemotes = /make sure you are using/i;
+    const snippet = hp.suggestedResponseSnippet || '';
+    const turnedOffSnippet = /turned the wall units off/i.test(snippet) ? snippet : null;
+
+    if (askedOff && (hp.actionTaken?.turnedOff || turnedOffSnippet)) {
+      const candidate = (llmJudgeResult.verdict === 'REVISE' && revised) ? revised : draft;
+      const confirmsOff = /turned the wall units off|turned (?:them|it|the units) off/i.test(candidate);
+      const repeatsLecture = nestLecture.test(candidate) || makeSureRemotes.test(candidate);
+      if (confirmsOff && !repeatsLecture) {
+        return null;
+      }
+      const body = turnedOffSnippet ||
+        'Yes, I turned the wall units off for you. Enjoy your time away — just message us when you\'d like them back on.';
+      console.log('[Agent] → Deterministic judge guard: guest asked to turn HVAC off remotely (Ted Apt 3)');
+      return {
+        ...llmJudgeResult,
+        verdict: 'REVISE',
+        revisedResponse: body,
+        notes:
+          (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+          'Deterministic guard: guest asked to turn the units off remotely — confirm they are off; do not repeat Nest/remotes.',
+        issues: [
+          ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+          'Guest asked to turn HVAC off remotely. Draft must confirm we turned the wall units off and must not repeat Nest/remotes/same-mode already sent in this thread (Ted Apt 3 2026-09-05).',
+        ],
+        deterministicGuard: true,
+      };
+    }
+
+    if (!priorHvac) return null;
+
+    const candidate = (llmJudgeResult.verdict === 'REVISE' && revised) ? revised : draft;
+    if (!nestLecture.test(candidate) && !makeSureRemotes.test(candidate)) {
+      return null;
+    }
+    if (llmJudgeResult.verdict === 'REVISE' && revised && !nestLecture.test(revised) && !makeSureRemotes.test(revised)) {
+      return null;
+    }
+
+    let stripped = candidate
+      .replace(/[^.]*nest thermostat[^.]*\.?/gi, '')
+      .replace(/[^.]*make sure you are using[^.]*\.?/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if (askedOff && turnedOffSnippet) {
+      stripped = turnedOffSnippet;
+    } else if (!stripped || stripped.length < 12) {
+      stripped = turnedOffSnippet ||
+        'Thanks for the note — I can take care of the wall units from here. Let us know if you need anything else!';
+    }
+
+    console.log('[Agent] → Deterministic judge guard: strip repeated Nest/remotes HVAC lecture');
+    return {
+      ...llmJudgeResult,
+      verdict: 'REVISE',
+      revisedResponse: stripped,
+      notes:
+        (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+        'Deterministic guard: prior host HVAC advice already sent — strip Nest/remotes lecture.',
+      issues: [
+        ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+        'Repeated prior host HVAC instruction (Nest / remotes on the wall) that was already sent in this thread.',
+      ],
+      deterministicGuard: true,
+    };
+  }
+
+  /**
    * Deterministic backstop when the LLM judge APPROVEs (or lacks history) but the draft clearly
    * re-sends welcome logistics on a post-welcome thank-you. Does not depend on Grok seeing history.
    */
   _applyDeterministicJudgeGuards(llmJudgeResult = {}, firstDecision = {}, context = {}, guestMessage = '') {
+    const hvacGuard = this._applyHvacThreadJudgeGuard(llmJudgeResult, firstDecision, context, guestMessage);
+    if (hvacGuard) return hvacGuard;
+
     if (this._isSmokeAlarmAllClear(guestMessage, context)) {
       const draft = (firstDecision.proposedResponse || '').trim();
       const revised = (llmJudgeResult.revisedResponse || '').trim();
@@ -6603,11 +6722,8 @@ export class GuestMessagingAgent {
     }
 
     if (context.conversationHistory?.length) {
-      lines.push('=== RECENT CONVERSATION HISTORY (newest last) ===');
-      context.conversationHistory.slice(-8).forEach((m) => {
-        const who = m.sender_type === 'guest' ? 'Guest' : 'Host';
-        lines.push(`${who}: ${m.body}`);
-      });
+      lines.push('=== FULL CONVERSATION HISTORY (entire thread, oldest first → newest last). You MUST read every turn before rewriting. ===');
+      formatConversationHistoryLines(context.conversationHistory).forEach((row) => lines.push(row));
       lines.push('');
     }
 
@@ -6754,11 +6870,8 @@ export class GuestMessagingAgent {
     }
 
     if (context.conversationHistory?.length) {
-      lines.push('=== RECENT CONVERSATION HISTORY (newest last) ===');
-      context.conversationHistory.slice(-8).forEach(m => {
-        const who = m.sender_type === 'guest' ? 'Guest' : 'Host';
-        lines.push(`${who}: ${m.body}`);
-      });
+      lines.push('=== FULL CONVERSATION HISTORY (entire thread, oldest first → newest last). You MUST use every host and guest turn to judge whether this draft is appropriate. Never judge from the current guest message alone. ===');
+      formatConversationHistoryLines(context.conversationHistory).forEach((row) => lines.push(row));
       lines.push('');
     } else if (traces.lastHostMessagePreview) {
       lines.push('=== PRIOR HOST MESSAGE PREVIEW (no full history in judge context) ===');

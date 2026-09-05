@@ -1,0 +1,67 @@
+{
+  "id": "ted-away-turn-off-hvac",
+  "description": "Production miss 2026-09-05 Apt 3 Ted Evans: after mixed-mode FYI (remotes + same-mode, no Nest), guest said they were away and asked if we can turn HVAC off remotely. Auto repeated remotes + Nest and did not turn units off. Must turn off and confirm; judge has full thread so it cannot miss the prior host message.",
+  "productionMiss": true,
+  "guestMessage": "Hi sorry about that. I thought I had turned it off. I may have set it to heat. We are currently away. Are you able to turn it off remotely or is it ok to leave as is for now",
+  "context": {
+    "guestName": "Ted",
+    "checkIn": "2026-09-04",
+    "checkOut": "2026-09-07",
+    "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "propertyName": "Apt 3",
+    "reservationId": "2f6de039-8426-4bad-9de4-1f0e9695361d",
+    "bookingTimestamp": "2026-08-20T10:00:00Z",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hi, we may arrive a bit early with luggage."
+      },
+      {
+        "sender_type": "host",
+        "body": "Hi Ted, Richard can help with luggage — I'll send his number."
+      },
+      {
+        "sender_type": "host",
+        "body": "Hi Ted, quick note about the heat and AC. The small bedroom is on heat, and the living room and master bedroom are on cool. All of the wall units (living room, master bedroom, and small bedroom) need to be on the same mode — either all heat or all cool. If one is on heat and another is on cool, they will not work. You can still pick a different temperature in each room. Use the remotes on the wall in each room. Let us know if you need anything!"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Hi sorry about that. I thought I had turned it off. I may have set it to heat. We are currently away. Are you able to turn it off remotely or is it ok to leave as is for now"
+      }
+    ],
+    "conversationTraces": {
+      "priorHostHVACAdvice": "Use the remotes on the wall in each room. All of the wall units need to be on the same mode.",
+      "repeatedInstructionRisk": true,
+      "historySource": "provided_only",
+      "recentMessageCount": 4
+    },
+    "heatPumpInfo": {
+      "detected": true,
+      "guestMessageRelevant": true,
+      "liveStatus": {
+        "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+        "unitCount": 3,
+        "summary": { "modes": ["heat"], "mixedModes": false, "avgRoomTempF": 70 },
+        "units": [
+          { "operationMode": "heat", "power": 1, "roomName": "living room" },
+          { "operationMode": "heat", "power": 1, "roomName": "master bedroom" },
+          { "operationMode": "heat", "power": 1, "roomName": "small bedroom" }
+        ]
+      },
+      "actionTaken": {
+        "turnedOff": true,
+        "reason": "guest_asked_turn_off",
+        "setResult": { "success": true, "power": 0, "unitsSet": 3 }
+      },
+      "suggestedResponseSnippet": "Yes, I turned the wall units off for you. Enjoy your time away — just message us when you'd like them back on."
+    }
+  },
+  "rubric": {
+    "expectedCategory": "THERMOSTAT_HEATPUMP",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "requiredPhrases": ["I turned the wall units off"],
+    "forbiddenPhrases": ["Nest", "make sure you are using", "Apt 3", "Apt 2"]
+  },
+  "notes": "Ted Apt 3 2026-09-05. Prior host mixed-mode FYI already covered remotes + same-mode. Guest asked to turn off remotely while away. Must confirm I turned the wall units off. Do not mention Nest. Do not repeat remotes lecture. Do not re-send live — host already replied."
+}

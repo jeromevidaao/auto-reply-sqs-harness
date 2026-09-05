@@ -5,6 +5,10 @@ import {
   analyzeGreetingContext,
   resolveNowForGreeting,
 } from '../../utils/timeGreeting.js';
+import {
+  THREAD_HISTORY_FETCH_LIMIT,
+  normalizeThreadChronological,
+} from '../../utils/threadHistory.js';
 
 /**
  * ConversationContextTool
@@ -113,18 +117,18 @@ export class ConversationContextTool extends BaseTool {
             ? `Fetching reservation messages via GET /reservations/${reservationId}/messages (conversation_id=${conversationId || 'none'})`
             : `Fetching inquiry messages via GET /inquiries/${conversationId}?include=messages`
         );
-        // Fetch a generous recent window so that "full history" for short/medium threads (e.g. the Taylor readiness + thanks case)
-        // and prior host statements are reliably included. We still only surface recent slices to the LLM to control tokens,
-        // but the raw list is used for scans (earlyUnitReadyOffered, greeting, duplicate, etc.) and copied to conversationHistory.
+        // Hospitable returns newest-first. Normalize to chronological (oldest first) so
+        // first-pass / judge "newest last" slices are actually the latest turns, not the oldest.
+        // Fetch a large window — the Conversation Judge always receives the full list.
         const messages = await this.hospitableClient.getThreadMessages(
           {
             reservationId: fetchViaReservation ? reservationId : null,
             conversationId: fetchViaReservation ? null : conversationId,
             isInquiry: isInquiry,
           },
-          20
+          THREAD_HISTORY_FETCH_LIMIT
         );
-        allRecentMessages = messages || [];
+        allRecentMessages = normalizeThreadChronological(messages || []);
         recentHostMessages = allRecentMessages
           .filter(m => (m.sender_type === 'host' || m.sender?.type === 'host'))
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -281,7 +285,10 @@ export class ConversationContextTool extends BaseTool {
       /does not control the (AC|heat|temperature)/i,
       /use the .*remotes? on the wall/i,
       /make sure you are using.*(heat pump )?remotes?/i,
-      /please don't use the nest/i
+      /please don't use the nest/i,
+      /need to be on the same mode/i,
+      /all heat or all cool/i,
+      /if one is on heat and another is on cool/i,
     ];
     let priorHostHVACAdvice = null;
     const priorHostInstructions = [];
