@@ -1347,6 +1347,7 @@ export const handler = async (event, context) => {
       llm: 'auto',
       notification: 'auto',
       enableReflection: true,
+      enableMergedReviewer: process.env.ENABLE_MERGED_REVIEWER !== 'false',
       reflectionCategories: [
         'CANCELLATION_POLICY',
         'CANCELLATION_NOTIFICATION',

@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 /**
- * Eval runner with rubrics and prompt mode support (v0.3).
+ * Eval runner with rubrics and prompt mode support (v0.4).
+ *
+ * Default path is production `handleMessage` (routed first pass + claim check +
+ * merged reviewer). `--first-pass-only` restores the old processMessage-only eval.
  *
  * Usage:
- *   npm run eval                    # default modular prompt
+ *   npm run eval
  *   npm run eval -- --fail-fast
+ *   npm run eval -- --first-pass-only
  *   npm run eval -- --only=cassidy-post-checkout-parking,late-checkout-10am-cleaning
  *   npm run eval -- --mode=raw --raw-prompt=prompts/system/raw/production-current.md
  */
@@ -31,6 +35,7 @@ async function main() {
   const mode = args.find(a => a.startsWith('--mode='))?.split('=')[1] || 'modular';
   const rawPromptPath = args.find(a => a.startsWith('--raw-prompt='))?.split('=')[1];
   const failFast = args.includes('--fail-fast');
+  const firstPassOnly = args.includes('--first-pass-only');
   const onlyArg = args.find(a => a.startsWith('--only='))?.split('=')[1];
   const onlySet = onlyArg
     ? new Set(
@@ -41,7 +46,9 @@ async function main() {
       )
     : null;
 
-  console.log(`🧪 Running evaluation suite (mode: ${mode})\n`);
+  console.log(
+    `🧪 Running evaluation suite (mode: ${mode}, path: ${firstPassOnly ? 'processMessage first-pass-only' : 'handleMessage production'})\n`
+  );
 
   // Eval must never need production SSM. Use synthetic host contacts (555 numbers).
   process.env.ALLOW_HOST_CONTACT_TEST_DEFAULTS = '1';
@@ -70,10 +77,14 @@ async function main() {
 
   const agentOptions = {
     llm: 'auto',
+    notification: 'console',
     projectRoot: path.resolve(__dirname, '..'),
     useModularPrompt: mode === 'modular',
     // Eval provides conversationHistory in scenarios; no live Hospitable fetch.
     requireLiveConversationHistory: false,
+    enableReflection: !firstPassOnly,
+    enableMergedReviewer: true,
+    enableConversationJudge: !firstPassOnly,
   };
 
   if (mode === 'raw' && rawPromptPath) {
@@ -101,7 +112,10 @@ async function main() {
       ...scenario.context
     };
 
-    const result = await agent.processMessage(scenario.message || scenario.guestMessage, context);
+    const guestMessage = scenario.message || scenario.guestMessage;
+    const result = firstPassOnly
+      ? await agent.processMessage(guestMessage, context)
+      : await agent.handleMessage(guestMessage, context);
 
     // Basic rubric scoring
     const rubric = scenario.rubric || {};
@@ -195,6 +209,14 @@ async function main() {
     const passedScenario = score === maxScore && maxScore > 0;
 
     console.log(`   ${passedScenario ? '✅' : '❌'} Score: ${score}/${maxScore} — ${result.typeOfMessageReceived}`);
+    if (result.selectedCategoryFiles?.length) {
+      console.log(`      categories: ${result.selectedCategoryFiles.join(', ')} (${result.promptChars || '?'} chars)`);
+    }
+    if (result.conversationJudge?.skipped) {
+      console.log('      reviewer: skipped (deterministic rewrite + claim check)');
+    } else if (result.conversationJudge?.verdict) {
+      console.log(`      reviewer: ${result.conversationJudge.verdict}${result.reflection?.decision ? ` / reflection=${result.reflection.decision}` : ''}`);
+    }
     if (notes.length > 0) console.log(`      Notes: ${notes.join('; ')}`);
 
     if (passedScenario) {

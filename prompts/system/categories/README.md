@@ -59,12 +59,21 @@ Each file corresponds to one or more `typeOfMessageReceived` categories used by 
 
 ## Usage
 
-The `GuestMessagingAgent` loads all `.md` files in this directory and includes them in the composed system prompt.
+**First pass** (`src/harness/categoryRouter.js`) does **not** load every file.
+
+- Never: `conversation-judge.md`, `reflection.md` (reviewer-only)
+- Always: `thank-you-message.md`, `fyi-statements.md`
+- Plus at most 4 routed files from keyword + tool signals
+- Fallback ops pack (`welcome-messages`, `checkout`, `self-checkin`, `parking`) only when nothing matches
+
+**Reviewer pass** concatenates `conversation-judge.md` + `reflection.md` (`composeReviewerPrompt`) on `grok-3-mini`.
 
 When adding new categories:
 1. Create a new `.md` file with clear rules and example responses.
-2. Update this README.
-3. (Optional) Create a corresponding `Tool` if the logic is complex or needs side effects.
+2. Add a router rule in `src/harness/categoryRouter.js` (file + test regex / tool signal).
+3. Update this README.
+4. (Optional) Create a corresponding `Tool` if the logic is complex or needs side effects.
+5. Add a claim-check rule in `src/harness/claimCheck.js` if the category has tool-grounded facts.
 
 ## Extraction Status
 

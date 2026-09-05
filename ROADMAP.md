@@ -51,6 +51,16 @@ This document tracks the concrete next steps for the harness. We will grow it it
 - [x] Eval now at 42 scenarios / 214/214 rubric score — all pass locally with mock LLM (npm test + npm run eval both fully green)
 - Extremely strong emphasis on porting real historical / operational scenarios directly mined from the old monolithic production code
 
+### Phase 2b — Slim first pass + merged reviewer (2026-09-04)
+
+- [x] Routed first-pass prompt (2 core + ≤4 category files; never load judge/reflection into the writer)
+- [x] Merge reflection into the conversation judge (one reviewer LLM call)
+- [x] Draft = `grok-4.3` temp 0.2; reviewer = `grok-3-mini` temp 0.1
+- [x] Programmatic claim check vs tools (calendar, 4pm-vs-ready, pets, parking, 475, event false positives)
+- [x] Skip LLM judge when a deterministic policy already rewrote the draft and claims pass
+- [x] Eval default path is `handleMessage` (production stack); `--first-pass-only` for debug
+- [x] Modules live under `src/harness/` (router, compose, claims, models)
+
 ### Phase 2 — Solid Multipass System (Current Focus)
 - [x] ConversationContextTool added for early trace enrichment (pre-approval detection, recent host messages)
 - [x] Richer traces now injected into main LLM prompt, Reflection, and Conversation Judge

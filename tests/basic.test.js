@@ -3537,9 +3537,19 @@ describe('GuestMessagingAgent', { skip: !hasGrokKey }, () => {
       useModularPrompt: true
     });
 
-    const prompt = await modularAgent.loadPrompt({});
+    const prompt = await modularAgent.loadPrompt({
+      guestMessage: 'I need to cancel my reservation due to an emergency.',
+    });
     assert.ok(prompt.includes('Category Rules'), 'Modular prompt should include category rules');
     assert.ok(prompt.includes('cancellation') || prompt.includes('Cancellation'), 'Should include cancellation category');
+    assert.ok(
+      !prompt.includes('# Conversation Judge (Anti-Repetition'),
+      'First-pass prompt must not include conversation-judge.md'
+    );
+    assert.ok(
+      !prompt.includes('# Reflection / Critique Pass'),
+      'First-pass prompt must not include reflection.md'
+    );
   });
 
   it('can load raw production prompt when fullPromptPath is provided', async () => {

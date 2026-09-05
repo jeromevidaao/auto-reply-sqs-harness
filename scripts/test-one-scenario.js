@@ -51,7 +51,10 @@ async function main() {
     llm: 'auto',
     projectRoot,
     useModularPrompt: true,
-    enableReflection: enableReflection,
+    enableReflection: true,
+    enableMergedReviewer: !enableReflection,
+    enableConversationJudge: true,
+    requireLiveConversationHistory: false,
     reflectionCategories: [
       'CANCELLATION_POLICY',
       'CANCELLATION_NOTIFICATION',
