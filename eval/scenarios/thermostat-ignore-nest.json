@@ -9,13 +9,19 @@
     "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
     "propertyName": "Sunny Apt 2",
     "bookingTimestamp": "2026-05-15T11:00:00Z",
-    "conversationHistory": []
+    "conversationHistory": [],
+    "earlyThermostatInfo": {
+      "detected": true,
+      "guestMessageRelevant": true,
+      "recommendedResponse": "Casey, Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat. We've gone ahead and turned on the heat pump for you and set it to 72°F. It should warm up within 20-30 minutes. You can also adjust it yourself using the remotes on the wall in each room. All of the wall units (living room, master bedroom, and small bedroom) need to be on the same mode — either all heat or all cool. If one is on heat and another is on cool, they will not work.",
+      "suggestedResponseSnippet": "Casey, Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat. We've gone ahead and turned on the heat pump for you and set it to 72°F. It should warm up within 20-30 minutes. You can also adjust it yourself using the remotes on the wall in each room. All of the wall units (living room, master bedroom, and small bedroom) need to be on the same mode — either all heat or all cool. If one is on heat and another is on cool, they will not work."
+    }
   },
   "rubric": {
     "expectedCategory": "THERMOSTAT_HEATPUMP",
     "shouldReply": true,
     "forbiddenPhrases": ["Nest thermostat controls"],
-    "requiredPhrases": ["remotes on the wall", "make sure you are using"]
+    "requiredPhrases": ["remotes on the wall", "make sure you are using", "same mode", "living room", "master bedroom", "small bedroom"]
   },
   "notes": "High value real scenario. Language softened post-incident (guest correctly on remotes; root cause was mixed mode on the Kumo heads themselves). Live status+auto-fix support added later."
 }

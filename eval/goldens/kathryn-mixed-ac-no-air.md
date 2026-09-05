@@ -21,4 +21,5 @@
 - Contains "I checked the heat pumps" (or equivalent) + "set all" + "auto at 65" (or the mode/temp the tool chose) + "cool down"
 - Does NOT contain accusatory "don't use the Nest" phrasing
 - Mentions that the system cannot cool+heat at the same time (or equivalent diagnosis)
+- Names the rooms: living room, master bedroom, small bedroom, and that they must all be on the same mode
 - shouldReply: true

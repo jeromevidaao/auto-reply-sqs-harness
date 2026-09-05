@@ -13,4 +13,5 @@
 **Rubric requirements**:
 - Must use neutral phrasing ("make sure you are using the ... remotes")
 - Must direct to wall remotes
+- Must name Apt 2 rooms (living room, master bedroom, small bedroom) and say they need the same mode (all heat or all cool)
 - Must not contain accusatory "don't use the Nest" or "it doesn't control" as the primary instruction (the softer version is preferred)

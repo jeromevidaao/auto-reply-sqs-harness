@@ -1,4 +1,10 @@
 import { BaseTool } from '../BaseTool.js';
+import {
+  describeLiveModes,
+  guestRoomName,
+  headLayoutForListing,
+  mixedModeRule,
+} from './headLayout.js';
 
 /**
  * HeatPumpTool (live KumoCloud)
@@ -71,25 +77,25 @@ export class HeatPumpTool extends BaseTool {
       // Graceful no-op when not wired (local tests without mock, or before full deploy)
       result.detected = true;
       result.message = 'KumoCloudClient not provided to HeatPumpTool (no live data).';
-      result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName);
+      result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName, listingId);
       return result;
     }
 
     try {
       // Only fetch live status for relevant messages
       const status = await this.kumoClient.getStatusForListing(listingId);
-      result.liveStatus = status;
+      result.liveStatus = this._withRoomNames(status);
       result.detected = true;
 
       // Auto-remediation only on clear comfort complaints (already gated by seemsRelevant).
       const fix = await this.kumoClient.ensureConsistentForComplaint(listingId, guestMessage);
       result.actionTaken = fix;
-      result.suggestedResponseSnippet = this._buildLiveSnippet(guestName, status, fix);
+      result.suggestedResponseSnippet = this._buildLiveSnippet(guestName, result.liveStatus, fix, listingId);
     } catch (err) {
       result.error = err.message;
       result.detected = true;
       // Still give the guest the safe instruction even if live fetch failed
-      result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName);
+      result.suggestedResponseSnippet = this._buildSoftInstructionSnippet(guestName, listingId);
     }
 
     return result;
@@ -163,48 +169,71 @@ export class HeatPumpTool extends BaseTool {
     return hvacPatterns.some((p) => p.test(m));
   }
 
-  _buildSoftInstructionSnippet(guestName) {
-    const name = guestName ? `${guestName}, ` : '';
-    return `${name}Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat. Let me know the exact settings you see on the remotes and I'll check the units.`;
+  _roomsFor(listingId, units = []) {
+    const fromLive = (units || [])
+      .map((u) => u.roomName || guestRoomName(u.deviceId))
+      .filter(Boolean);
+    if (fromLive.length) return fromLive;
+    return headLayoutForListing(listingId)?.rooms || [];
   }
 
-  _buildLiveSnippet(guestName, status, fix) {
+  _withRoomNames(status) {
+    if (!status || typeof status !== 'object') return status;
+    const units = (status.units || []).map((u) => ({
+      ...u,
+      roomName: u.roomName || guestRoomName(u.deviceId),
+    }));
+    return { ...status, units };
+  }
+
+  _buildSoftInstructionSnippet(guestName, listingId) {
+    const name = guestName ? `${guestName}, ` : '';
+    const rooms = this._roomsFor(listingId);
+    const nest =
+      'Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.';
+    return `${name}${nest} ${mixedModeRule(rooms)} Let me know the exact settings you see on the remotes and I'll check the units.`.trim();
+  }
+
+  _buildLiveSnippet(guestName, status, fix, listingId) {
     const name = guestName ? `${guestName}, ` : '';
     const parts = [];
 
     const summary = status?.summary || {};
     const units = status?.units || [];
+    const beforeUnits = fix?.before?.units || units;
+    const rooms = this._roomsFor(listingId, units.length ? units : beforeUnits);
+    const liveMix = describeLiveModes(beforeUnits);
+    const mixed = !!(summary.mixedModes || fix?.before?.summary?.mixedModes);
 
     if (fix && fix.fixed && fix.setResult) {
       const m = fix.recommendedMode || 'auto';
       const t = fix.recommendedTempF || 65;
-      const beforeModes = (fix.before?.summary?.modes || []).join('/');
       const roomInfo = summary.avgRoomTempF ? ` (room ~${summary.avgRoomTempF}°F)` : '';
 
       parts.push(`Please make sure you are using the heat pump remotes on the wall in each room. I checked the heat pumps for you${roomInfo}.`);
-
-      if (beforeModes) {
-        parts.push(`Before, the modes were ${beforeModes}.`);
+      if (liveMix) {
+        parts.push(liveMix);
       }
-      if (summary.mixedModes || (fix.before && fix.before.summary && fix.before.summary.mixedModes)) {
-        parts.push('One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time across heads.');
+      parts.push(mixedModeRule(rooms));
+      if (mixed && !liveMix) {
+        parts.push('One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time.');
       }
-
-      parts.push(`I've set all ${units.length || 'the'} units to ${m} at ${t}°F now so it should cool down shortly. You can still adjust with the wall remotes if you want.`);
+      const unitCount = units.length || rooms.length || 'the';
+      parts.push(`I've set all ${unitCount} units to ${m} at ${t}°F now so it should cool down shortly. You can still adjust with the wall remotes if you want.`);
       parts.push('Let me know in a few minutes if the air is moving and the temperature is improving!');
     } else if (status && !status.error) {
-      // We have live data but did not need to (or could not) fix — still be helpful
-      if (summary.mixedModes) {
-        parts.push('Thanks for the details. I can see the heat pumps are in mixed modes right now, which prevents proper cooling/heating.');
+      if (mixed) {
+        parts.push('Thanks for the details.');
+        if (liveMix) parts.push(liveMix);
+        parts.push(mixedModeRule(rooms));
       }
-      parts.push(this._buildSoftInstructionSnippet(guestName).replace(`${name}`, name)); // reuse base
+      parts.push(this._buildSoftInstructionSnippet(guestName, listingId).replace(`${name}`, ''));
       parts.push('I also checked the live status of the units — let me know the exact remote settings you\'re seeing and I can dig deeper or adjust them for you.');
     } else {
-      // fallback
-      parts.push(this._buildSoftInstructionSnippet(guestName));
+      parts.push(this._buildSoftInstructionSnippet(guestName, listingId).replace(`${name}`, ''));
     }
 
-    return `${name}${parts.join(' ')}`.trim();
+    return `${name}${parts.join(' ')}`.replace(/\s+/g, ' ').trim();
   }
 }
 

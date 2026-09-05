@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { guestRoomName } from '../tools/hvac/headLayout.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 
@@ -7,10 +8,17 @@ const KUMO_BASE_URL = 'https://app-prod.kumocloud.com';
 const KUMO_APP_VERSION = '3.0.9';
 
 // Listing UUID → list of internal device IDs (the keys we have serials for)
+const APT1B_DEVICES = ['ff674e71-10cb-495c-9afb-959c434062aa', 'c221f8d8-cb87-4edf-9221-62f23759bb1a'];
+const APT2_DEVICES = ['a8a8d290-25ac-4f28-8c24-e2d6c3e7f3c5', '3f8d9e08-5e9b-49f7-a793-7d68bed5ed39', '86e24a6a-0988-4f91-a258-8704f70a22f1'];
+const APT3_DEVICES = ['7636c887-e946-4f55-9bd8-be9e0baa0bcd', '18df3129-0790-490e-9545-cacd399f71b7', '30dc168d-698e-4218-b8d4-17d93cd15358'];
+
 const KUMO_DEVICES_BY_LISTING = {
-  'c899481f-2e5b-402d-80c4-3167fd824d96': ['ff674e71-10cb-495c-9afb-959c434062aa', 'c221f8d8-cb87-4edf-9221-62f23759bb1a'], // Studio 1B / 53 Pine #1B
-  '114663c5-0709-4eff-a868-fa9ebd6ed42d': ['a8a8d290-25ac-4f28-8c24-e2d6c3e7f3c5', '3f8d9e08-5e9b-49f7-a793-7d68bed5ed39', '86e24a6a-0988-4f91-a258-8704f70a22f1'], // Apt 2 (Sunny)
-  '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd': ['18df3129-0790-490e-9545-cacd399f71b7', '30dc168d-698e-4218-b8d4-17d93cd15358', '7636c887-e946-4f55-9bd8-be9e0baa0bcd'], // Apt 3
+  'c899481f-2e5b-402d-80c4-3167fd824d96': APT1B_DEVICES,
+  '20904545': APT1B_DEVICES,
+  '114663c5-0709-4eff-a868-fa9ebd6ed42d': APT2_DEVICES,
+  '20150380': APT2_DEVICES,
+  '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd': APT3_DEVICES,
+  '24259977': APT3_DEVICES,
 };
 
 // Internal deviceId (from above) → deviceSerial (used in Kumo v3 API paths + send-command)
@@ -176,6 +184,7 @@ export class KumoCloudClient {
           units.push({
             deviceId,
             serial,
+            roomName: guestRoomName(deviceId),
             power: raw.power,
             operationMode: raw.operationMode,
             roomTempC: roomC,

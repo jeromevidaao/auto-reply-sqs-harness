@@ -20,5 +20,9 @@
 - Queen sofa bed in the living room sleeps 2.
 - Sheets, blankets, pillows, and extra towels for the sofa bed are stored in the storage compartment under the sofa (lift up the long part of the sofa to access).
 
+**Heat / AC (three wall units)**:
+- Living room, master bedroom, and small bedroom each have their own wall unit and remote.
+- All three must be on the **same mode** — either all heat or all cool. Mixed heat+cool will not work. Temperatures can still differ by room.
+
 **Other Notes**:
 - (Add more Apt 3 specifics here as discovered)

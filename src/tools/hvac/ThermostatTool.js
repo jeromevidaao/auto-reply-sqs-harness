@@ -1,4 +1,5 @@
 import { BaseTool } from '../BaseTool.js';
+import { headLayoutForListing, mixedModeRule } from './headLayout.js';
 
 /**
  * ThermostatTool
@@ -29,7 +30,8 @@ export class ThermostatTool extends BaseTool {
         system: 'KumoCloud heat pump (2 indoor heads)',
         warning: "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.",
         howTo: [
-          'Use the dedicated heat pump remotes mounted on the wall in each room.',
+          'Use the dedicated heat pump remotes mounted on the wall in the bedroom and the kitchen.',
+          'All of the wall units (bedroom and kitchen) need to be on the same mode — either all heat or all cool. If one is on heat and another is on cool, they will not work.',
           'If you want us to pre-set the temperature before arrival, just let us know.',
         ],
         proactiveHeat: "We've gone ahead and turned on the heat pump for you and set it to 72°F. It should warm up within 20-30 minutes. You can also adjust it yourself using the remotes on the wall in each room.",
@@ -42,8 +44,8 @@ export class ThermostatTool extends BaseTool {
         system: 'KumoCloud heat pump (3 indoor heads)',
         warning: "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.",
         howTo: [
-          'Each room has its own heat pump remote on the wall.',
-          'You can control the temperature independently in different areas.',
+          'There are wall units in the living room, the master bedroom, and the small bedroom. Each has its own heat pump remote on the wall.',
+          'All of the wall units (living room, master bedroom, and small bedroom) need to be on the same mode — either all heat or all cool. If one is on heat and another is on cool, they will not work. You can still set a different temperature in each room.',
         ],
         proactiveHeat: "We've gone ahead and turned on the heat pump for you and set it to 72°F. It should warm up within 20-30 minutes. You can also adjust it yourself using the remotes on the wall in each room.",
         proactiveCool: "We've gone ahead and turned on the AC for you and set it to 68°F. It should cool down within 20-30 minutes. You can also adjust it yourself using the remotes on the wall in each room.",
@@ -55,14 +57,18 @@ export class ThermostatTool extends BaseTool {
         system: 'KumoCloud heat pump (3 indoor heads)',
         warning: "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.",
         howTo: [
-          'Look for the heat pump remotes on the wall in the main living area and bedrooms.',
-          'Each remote controls the unit in that room.',
+          'There are wall units in the living room, the master bedroom, and the small bedroom. Look for the heat pump remotes on the wall in each of those rooms.',
+          'All of the wall units (living room, master bedroom, and small bedroom) need to be on the same mode — either all heat or all cool. If one is on heat and another is on cool, they will not work. You can still set a different temperature in each room.',
         ],
         proactiveHeat: "We've gone ahead and turned on the heat pump for you and set it to 72°F. It should warm up within 20-30 minutes. You can also adjust it yourself using the remotes on the wall in each room.",
         proactiveCool: "We've gone ahead and turned on the AC for you and set it to 68°F. It should cool down within 20-30 minutes. You can also adjust it yourself using the remotes on the wall in each room.",
         notes: 'Apt 3 has multiple indoor heads with individual wall remotes.',
       },
     };
+    // Airbnb numeric listing ids resolve to the same copy as Hospitable UUIDs.
+    this.instructionsByListing['20904545'] = this.instructionsByListing['c899481f-2e5b-402d-80c4-3167fd824d96'];
+    this.instructionsByListing['20150380'] = this.instructionsByListing['114663c5-0709-4eff-a868-fa9ebd6ed42d'];
+    this.instructionsByListing['24259977'] = this.instructionsByListing['60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd'];
   }
 
   async execute(input, context = {}) {
@@ -93,8 +99,8 @@ export class ThermostatTool extends BaseTool {
       notes: unitInfo.notes,
       guestMessageRelevant: seemsRelevant,
       intent,
-      suggestedResponseSnippet: this._buildHelpfulSnippet(unitInfo, context.guestName),
-      recommendedResponse: this._buildRecommendedResponse(unitInfo, guestMessage, context.guestName),
+      suggestedResponseSnippet: this._buildHelpfulSnippet(unitInfo, context.guestName, listingId),
+      recommendedResponse: this._buildRecommendedResponse(unitInfo, guestMessage, context.guestName, listingId),
     };
   }
 
@@ -171,7 +177,17 @@ export class ThermostatTool extends BaseTool {
     return 'general';
   }
 
-  _buildHelpfulSnippet(unitInfo, guestName) {
+  _mixedModeLine(listingId, unitInfo) {
+    const rooms = headLayoutForListing(listingId)?.rooms || [];
+    const rule = mixedModeRule(rooms);
+    const already = [...(unitInfo.howTo || []), unitInfo.warning || ''].join(' ');
+    if (rule && !/same mode/i.test(already)) {
+      return rule;
+    }
+    return null;
+  }
+
+  _buildHelpfulSnippet(unitInfo, guestName, listingId) {
     const name = guestName ? `${guestName}, ` : '';
     const parts = [];
 
@@ -180,21 +196,27 @@ export class ThermostatTool extends BaseTool {
     }
 
     parts.push(...unitInfo.howTo);
+    const extra = this._mixedModeLine(listingId, unitInfo);
+    if (extra) parts.push(extra);
 
     return `${name}${parts.join(' ')}`.trim();
   }
 
-  _buildRecommendedResponse(unitInfo, guestMessage, guestName) {
+  _buildRecommendedResponse(unitInfo, guestMessage, guestName, listingId) {
     const name = guestName ? `${guestName}, ` : '';
     const intent = this._detectIntent(guestMessage);
     const parts = [unitInfo.warning];
 
     if (intent === 'heat' && unitInfo.proactiveHeat) {
       parts.push(unitInfo.proactiveHeat);
+      parts.push(mixedModeRule(headLayoutForListing(listingId)?.rooms || []));
     } else if (intent === 'cool' && unitInfo.proactiveCool) {
       parts.push(unitInfo.proactiveCool);
+      parts.push(mixedModeRule(headLayoutForListing(listingId)?.rooms || []));
     } else {
       parts.push(...unitInfo.howTo);
+      const extra = this._mixedModeLine(listingId, unitInfo);
+      if (extra) parts.push(extra);
     }
 
     return `${name}${parts.join(' ')}`.trim();

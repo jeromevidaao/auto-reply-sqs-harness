@@ -129,8 +129,8 @@ Follow-up extra-date questions (Caroline Sep 30–Oct 3) still draft/send a date
   - ThermostatTool provides per-unit static instructions + neutral language: "Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat."
   - HeatPumpTool (new) connects to the real KumoCloud v3 API using the same device serials + login as the prior production system.
   - On AC/heat complaints it fetches live per-head status (mode, roomTempF, setpoints).
-  - It detects mixed modes (e.g. one head "heat" + others "cool" on Apt 2 Sunny — this is why "both remotes on but no air all night" and the unit at 80F).
-  - It **auto-sets all heads** for the listing to a consistent mode (cool/auto 65°F for AC issues; heat 72°F for heating issues) and surfaces the before/after + suggested snippet so the reply can say "I checked the 3 heat pumps... one was on heat... I've set all of them to auto at 65°F now so it should cool down."
+  - It detects mixed modes (e.g. one head "heat" + others "cool" on Apt 2 Sunny — this is why "both remotes on but no air all night" and the unit at 80F). Guest copy **names the rooms** (Apt 2/3: living room, master bedroom, small bedroom; 1B: bedroom + kitchen) and states they must all be the **same mode** (all heat or all cool) or they will not work.
+  - It **auto-sets all heads** for the listing to a consistent mode (cool/auto 65°F for AC issues; heat 72°F for heating issues) and surfaces the before/after + suggested snippet so the reply can say "I checked the 3 heat pumps... the living room was on heat... all wall units need to be on the same mode... I've set all of them to auto at 65°F now so it should cool down."
   - Works for both summer (cool) and winter (heat).
   - The first-pass LLM sees the live status + actionTaken via _buildUserPrompt enrichment; reflection/judge also receive it.
   - No more assuming the guest is "using the Nest wrongly" when they report using the remotes correctly.

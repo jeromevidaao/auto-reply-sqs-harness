@@ -22,6 +22,7 @@ import {
   isPetFurnitureMitigation,
 } from './tools/pets/petFurnitureMitigation.js';
 import { ConversationHistoryRequiredError } from './errors/ConversationHistoryRequiredError.js';
+import { headLayoutForListing } from './tools/hvac/headLayout.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 import {
   loadHostContacts,
@@ -3501,13 +3502,17 @@ export class GuestMessagingAgent {
     const draft = (parsed.proposedResponse || '').trim();
     const lower = draft.toLowerCase();
     const hasRequired = lower.includes('make sure you are using') && lower.includes('remotes on the wall');
+    const hasSameMode = /same mode/.test(lower) && /all heat/.test(lower) && /all cool/.test(lower);
+    const rooms = headLayoutForListing(context.listingId)?.rooms || [];
+    const hasRoomNames = rooms.length === 0 || rooms.every((room) => lower.includes(room));
+    const complete = hasRequired && hasSameMode && hasRoomNames;
 
     let body = null;
     if (hp?.suggestedResponseSnippet) {
       body = hp.suggestedResponseSnippet;
-    } else if (!hasRequired && thermo?.recommendedResponse) {
+    } else if (!complete && thermo?.recommendedResponse) {
       body = thermo.recommendedResponse;
-    } else if (!hasRequired && thermo?.suggestedResponseSnippet) {
+    } else if (!complete && thermo?.suggestedResponseSnippet) {
       body = thermo.suggestedResponseSnippet;
     }
 

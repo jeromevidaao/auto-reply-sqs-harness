@@ -664,6 +664,89 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(applied.applied, true);
     assert.ok(applied.proposedResponse.includes('make sure you are using'));
     assert.ok(applied.proposedResponse.includes('remotes on the wall'));
+    assert.ok(applied.proposedResponse.includes('same mode'));
+    assert.ok(applied.proposedResponse.includes('living room'));
+    assert.ok(applied.proposedResponse.includes('master bedroom'));
+    assert.ok(applied.proposedResponse.includes('small bedroom'));
+  });
+
+  it('thermostat policy fills same-mode room names even when remotes wording is already present', async () => {
+    const thermostatTool = new ThermostatTool();
+    const listingId = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
+    const thermo = await thermostatTool.execute("How do I turn up the heat? It's cold in here.", {
+      listingId,
+      guestName: 'Casey'
+    });
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const applied = agent._applyThermostatPolicy(
+      {
+        typeOfMessageReceived: 'THERMOSTAT_HEATPUMP',
+        proposedResponse: 'Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.',
+      },
+      { earlyThermostatInfo: thermo, listingId },
+      "How do I turn up the heat? It's cold in here."
+    );
+    assert.equal(applied.applied, true);
+    assert.ok(applied.proposedResponse.includes('same mode'));
+    assert.ok(applied.proposedResponse.includes('living room'));
+    assert.ok(applied.proposedResponse.includes('master bedroom'));
+  });
+
+  it('names Apt 3 rooms and mixed-mode rule in ThermostatTool how-to', async () => {
+    const thermostatTool = new ThermostatTool();
+    const thermo = await thermostatTool.execute("How do I turn on the heat? It's freezing in here.", {
+      listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+      guestName: 'Ted',
+    });
+    const howTo = (thermo.howTo || []).join(' ');
+    assert.match(howTo, /living room/);
+    assert.match(howTo, /master bedroom/);
+    assert.match(howTo, /small bedroom/);
+    assert.match(howTo, /same mode/);
+    assert.match(thermo.recommendedResponse, /same mode/);
+    assert.match(thermo.recommendedResponse, /living room/);
+  });
+
+  it('HeatPumpTool mixed-mode snippet names which rooms are heat vs cool', async () => {
+    const { HeatPumpTool } = await import('../src/tools/hvac/HeatPumpTool.js');
+    const listingId = '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd';
+    const live = {
+      listingId,
+      unitCount: 3,
+      summary: { modes: ['heat', 'cool'], mixedModes: true, avgRoomTempF: 70 },
+      units: [
+        { deviceId: '7636c887-e946-4f55-9bd8-be9e0baa0bcd', roomName: 'living room', operationMode: 'heat', power: 1, roomTempF: 72 },
+        { deviceId: '18df3129-0790-490e-9545-cacd399f71b7', roomName: 'master bedroom', operationMode: 'cool', power: 1, roomTempF: 70 },
+        { deviceId: '30dc168d-698e-4218-b8d4-17d93cd15358', roomName: 'small bedroom', operationMode: 'heat', power: 1, roomTempF: 66 },
+      ],
+    };
+    const fakeKumo = {
+      getStatusForListing: async () => live,
+      ensureConsistentForComplaint: async () => ({
+        fixed: true,
+        recommendedMode: 'auto',
+        recommendedTempF: 65,
+        before: live,
+        setResult: { success: true },
+      }),
+    };
+    const tool = new HeatPumpTool({ kumoClient: fakeKumo });
+    const result = await tool.execute("The AC is on but there's no air and it's too hot", {
+      listingId,
+      guestName: 'Ted',
+    });
+    const snip = result.suggestedResponseSnippet || '';
+    assert.match(snip, /living room/i);
+    assert.match(snip, /master bedroom/i);
+    assert.match(snip, /small bedroom/i);
+    assert.match(snip, /same mode/);
+    assert.match(snip, /on heat/);
+    assert.match(snip, /on cool/);
+    assert.match(snip, /set all/);
+    assert.match(snip, /auto at 65/);
   });
 
   it('detects pure first-post-booking intro (Cheryl case) despite history fetch failed', () => {

@@ -39,9 +39,9 @@
           "avgRoomTempF": 79
         },
         "units": [
-          {"operationMode": "cool", "roomTempF": 78, "power": 1},
-          {"operationMode": "heat", "roomTempF": 80, "power": 1},
-          {"operationMode": "cool", "roomTempF": 79, "power": 1}
+          {"operationMode": "cool", "roomTempF": 78, "power": 1, "roomName": "living room", "deviceId": "a8a8d290-25ac-4f28-8c24-e2d6c3e7f3c5"},
+          {"operationMode": "heat", "roomTempF": 80, "power": 1, "roomName": "master bedroom", "deviceId": "3f8d9e08-5e9b-49f7-a793-7d68bed5ed39"},
+          {"operationMode": "cool", "roomTempF": 79, "power": 1, "roomName": "small bedroom", "deviceId": "86e24a6a-0988-4f91-a258-8704f70a22f1"}
         ]
       },
       "actionTaken": {
@@ -55,14 +55,14 @@
         },
         "reason": "mixed modes or wrong season mode for complaint"
       },
-      "suggestedResponseSnippet": "Please make sure you are using the heat pump remotes on the wall in each room. Kathryn, I checked the heat pumps for you (room ~79°F). Before, the modes were cool/heat. One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time across heads. I've set all the units to auto at 65°F now so it should cool down shortly. You can still adjust with the wall remotes if you want. Let me know in a few minutes if the air is moving and the temperature is improving!"
+      "suggestedResponseSnippet": "Please make sure you are using the heat pump remotes on the wall in each room. I checked the heat pumps for you (room ~79°F). The living room and small bedroom are on cool, and the master bedroom is on heat. All of the wall units (living room, master bedroom, and small bedroom) need to be on the same mode — either all heat or all cool. If one is on heat and another is on cool, they will not work. I've set all 3 units to auto at 65°F now so it should cool down shortly. You can still adjust with the wall remotes if you want. Let me know in a few minutes if the air is moving and the temperature is improving!"
     }
   },
   "rubric": {
     "expectedCategory": "THERMOSTAT_HEATPUMP",
     "shouldReply": true,
     "forbiddenPhrases": ["don't use the Nest", "it doesn't control the AC. Use the heat pump remotes"],
-    "requiredPhrases": ["make sure you are using", "remotes on the wall", "I checked", "set all", "auto at 65", "cool down"]
+    "requiredPhrases": ["make sure you are using", "remotes on the wall", "I checked", "set all", "auto at 65", "cool down", "living room", "master bedroom", "small bedroom", "same mode"]
   },
   "notes": "Exact follow-up from the Kathryn Booker incident (June 2026). The first auto-reply wrongly assumed Nest misuse. Live HeatPumpTool + neutral phrasing + auto-fix of mixed modes is the required behavior. ConversationHistory now includes earlier host 'don't use Nest / use remotes' message (from full thread paste) so the new judge anti-repetition rule (rule 3: do not re-state prior host factual instructions/advice) + ConversationContextTool priorHostHVACAdvice/repeatedInstructionRisk traces are exercised. For this immediate follow-up the neutral 'make sure you are using' + 'I checked/set all/auto at 65/cool down' is still required (improvement over the earlier bad phrasing + adds the live fix value); in later same-thread AC complaints the judge must force removal of any re-duplicated control reminder."
 }

@@ -35,6 +35,10 @@ This is **not** the same as Apt 3's unit lockbox for normal check-in. Normal Apt
 - Queen sofa bed in the living room sleeps 2.
 - Sheets, blankets, pillows, and extra towels for the sofa bed are stored in the storage compartment under the sofa (lift up the long part of the sofa to access).
 
+**Heat / AC (three wall units)**:
+- Living room, master bedroom, and small bedroom each have their own wall unit and remote.
+- All three must be on the **same mode** — either all heat or all cool. Mixed heat+cool will not work. Temperatures can still differ by room.
+
 **Crib / Pack and Play**:
 - Graco Pack and Play is pre-placed in the unit.
 - When a **current** guest (already checked in / just entered) asks **where** it is: it should be in the **closet of the smaller bedroom**. Tell them that, then "Let us know if you cannot find it." Do not answer as if they are asking whether we have one.
