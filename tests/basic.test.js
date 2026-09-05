@@ -782,6 +782,7 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(offCalled, true);
     assert.equal(result.actionTaken.turnedOff, true);
     assert.match(result.suggestedResponseSnippet, /I turned the wall units off/);
+    assert.doesNotMatch(result.suggestedResponseSnippet, /message us when you'd like them back on/i);
     assert.doesNotMatch(result.suggestedResponseSnippet, /nest/i);
     assert.doesNotMatch(result.suggestedResponseSnippet, /make sure you are using/i);
   });
@@ -809,7 +810,7 @@ describe('EventRequestTool (no LLM)', () => {
         },
         heatPumpInfo: {
           guestMessageRelevant: true,
-          suggestedResponseSnippet: 'Yes, I turned the wall units off for you. Enjoy your time away — just message us when you\'d like them back on.',
+          suggestedResponseSnippet: 'Yes, I turned the wall units off for you. Enjoy your time away.',
           actionTaken: { turnedOff: true },
         },
       },
@@ -860,7 +861,7 @@ describe('EventRequestTool (no LLM)', () => {
         conversationTraces: { priorHostHVACAdvice: 'Use the remotes on the wall in each room', repeatedInstructionRisk: true },
         heatPumpInfo: {
           actionTaken: { turnedOff: true },
-          suggestedResponseSnippet: 'Yes, I turned the wall units off for you. Enjoy your time away — just message us when you\'d like them back on.',
+          suggestedResponseSnippet: 'Yes, I turned the wall units off for you. Enjoy your time away.',
         },
       },
       msg

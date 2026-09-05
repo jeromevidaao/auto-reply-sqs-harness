@@ -6291,7 +6291,7 @@ export class GuestMessagingAgent {
         return null;
       }
       const body = turnedOffSnippet ||
-        'Yes, I turned the wall units off for you. Enjoy your time away — just message us when you\'d like them back on.';
+        'Yes, I turned the wall units off for you. Enjoy your time away.';
       console.log('[Agent] → Deterministic judge guard: guest asked to turn HVAC off remotely (Ted Apt 3)');
       return {
         ...llmJudgeResult,

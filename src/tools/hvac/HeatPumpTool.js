@@ -244,7 +244,7 @@ export class HeatPumpTool extends BaseTool {
     if (offResult && offResult.success === false) {
       return `${name}Yes, I can turn them off remotely — I wasn't able to complete that just now, but I'll take care of it and follow up.`.trim();
     }
-    return `${name}Yes, I turned the wall units off for you. Enjoy your time away — just message us when you'd like them back on.`.trim();
+    return `${name}Yes, I turned the wall units off for you. Enjoy your time away.`.trim();
   }
 
   _priorHostHvacAdvice(context = {}) {

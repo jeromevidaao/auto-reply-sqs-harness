@@ -53,7 +53,7 @@
         "reason": "guest_asked_turn_off",
         "setResult": { "success": true, "power": 0, "unitsSet": 3 }
       },
-      "suggestedResponseSnippet": "Yes, I turned the wall units off for you. Enjoy your time away — just message us when you'd like them back on."
+      "suggestedResponseSnippet": "Yes, I turned the wall units off for you. Enjoy your time away."
     }
   },
   "rubric": {
