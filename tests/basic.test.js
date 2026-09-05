@@ -747,6 +747,28 @@ describe('EventRequestTool (no LLM)', () => {
     assert.match(snip, /on cool/);
     assert.match(snip, /set all/);
     assert.match(snip, /auto at 65/);
+    assert.doesNotMatch(snip, /nest/i);
+    assert.doesNotMatch(snip, /apt\s*3/i);
+    assert.match(snip, /master bedroom is on cool/i);
+  });
+
+  it('host mixed-mode notice names the odd room first and omits Nest and unit number', async () => {
+    const { buildHostMixedModeNotice } = await import('../src/tools/hvac/headLayout.js');
+    const body = buildHostMixedModeNotice({
+      guestName: 'Ted',
+      rooms: ['living room', 'master bedroom', 'small bedroom'],
+      units: [
+        { roomName: 'living room', operationMode: 'cool' },
+        { roomName: 'master bedroom', operationMode: 'cool' },
+        { roomName: 'small bedroom', operationMode: 'heat' },
+      ],
+    });
+    assert.match(body, /^Hi Ted,/);
+    assert.match(body, /small bedroom is on heat/i);
+    assert.match(body, /living room and master bedroom are on cool/i);
+    assert.match(body, /same mode/);
+    assert.doesNotMatch(body, /nest/i);
+    assert.doesNotMatch(body, /apt\s*3/i);
   });
 
   it('detects pure first-post-booking intro (Cheryl case) despite history fetch failed', () => {

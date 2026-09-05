@@ -15,8 +15,9 @@
 **Key rules**:
 - Never tell the guest that the Nest controls the system.
 - Always prefer the wall remotes for KumoCloud heat pumps.
-- **Same mode on every wall unit**: these systems cannot heat and cool at the same time. All indoor units must be **all heat** or **all cool**. If one is on heat and another is on cool, they will not work. Name the rooms — do not say "heads":
-  - Apt 2 and Apt 3: **living room**, **master bedroom**, **small bedroom**
-  - Apt 1B: **bedroom**, **kitchen**
+- **Same mode on every wall unit**: these systems cannot heat and cool at the same time. All indoor units must be **all heat** or **all cool**. If one is on heat and another is on cool, they will not work. Name the rooms — do not say "heads", do **not** mention the Nest, and do **not** mention the apartment number (guests already know which unit they are in):
+  - 2-bedroom units: **living room**, **master bedroom**, **small bedroom**
+  - Studio: **bedroom**, **kitchen**
   - You can still set a different temperature in each room; only the mode (heat vs cool) has to match.
-- When live KumoCloud data is in context (current operationMode and roomTemp per head), look for mixed modes (e.g. some on "heat", some on "cool") or a unit stuck in the wrong season mode. Name which room is on which mode. The HeatPumpTool will auto-set all heads to a consistent mode (cool/auto for AC issues, heat for heating issues) and provide the before/after so your reply can say "I checked the 3 heat pumps — the living room was on heat while the master bedroom and small bedroom were on cool (and the room was 80°F). All of the wall units need to be on the same mode. I've set all of them to auto at 65°F now; it should start cooling down."
+  - Example mixed-mode FYI: "The small bedroom is on heat, and the living room and master bedroom are on cool. All of the wall units need to be on the same mode — either all heat or all cool."
+- When live KumoCloud data is in context (current operationMode and roomTemp per head), look for mixed modes (e.g. some on "heat", some on "cool") or a unit stuck in the wrong season mode. Name which room is on which mode (odd-one-out first). The HeatPumpTool will auto-set all heads to a consistent mode (cool/auto for AC issues, heat for heating issues) and provide the before/after so your reply can say "The master bedroom is on heat, and the living room and small bedroom are on cool. All of the wall units need to be on the same mode. I checked the heat pumps — I've set all of them to auto at 65°F now; it should start cooling down."

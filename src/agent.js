@@ -3506,14 +3506,23 @@ export class GuestMessagingAgent {
     const rooms = headLayoutForListing(context.listingId)?.rooms || [];
     const hasRoomNames = rooms.length === 0 || rooms.every((room) => lower.includes(room));
     const complete = hasRequired && hasSameMode && hasRoomNames;
+    const mixedOrFixed = !!(
+      hp?.liveStatus?.summary?.mixedModes ||
+      hp?.actionTaken?.fixed ||
+      hp?.actionTaken?.before?.summary?.mixedModes
+    );
 
     let body = null;
-    if (hp?.suggestedResponseSnippet) {
+    // Mixed-mode / auto-fix: room-by-room HeatPump snippet (no Nest).
+    // How-to questions keep ThermostatTool Nest/remotes wording.
+    if (mixedOrFixed && hp?.suggestedResponseSnippet) {
       body = hp.suggestedResponseSnippet;
     } else if (!complete && thermo?.recommendedResponse) {
       body = thermo.recommendedResponse;
     } else if (!complete && thermo?.suggestedResponseSnippet) {
       body = thermo.suggestedResponseSnippet;
+    } else if (!complete && hp?.suggestedResponseSnippet) {
+      body = hp.suggestedResponseSnippet;
     }
 
     if (!body) {
@@ -4488,7 +4497,7 @@ export class GuestMessagingAgent {
         if (h.suggestedResponseSnippet) {
           lines.push(`- Suggested HVAC snippet from tool: ${h.suggestedResponseSnippet}`);
         }
-        lines.push(`- IMPORTANT FOR THIS RESPONSE: Your proposedResponse MUST contain the phrases 'make sure you are using' and 'remotes on the wall' (neutral control reminder) as well as 'cool down' when describing the temperature effect after the fix.`);
+        lines.push('- IMPORTANT FOR THIS RESPONSE: Name which rooms are on heat vs cool (living room / master bedroom / small bedroom, or bedroom / kitchen for 1B). Say all wall units need the same mode (all heat or all cool). Do NOT mention the Nest. Do NOT mention the apartment number. Prefer the tool snippet. If you performed a fix, also include "I checked", "set all", and "cool down".');
       } else if (context.earlyThermostatInfo?.guestMessageRelevant) {
         lines.push(`- IMPORTANT FOR THIS RESPONSE: Your proposedResponse MUST contain the phrases "make sure you are using" and "remotes on the wall".`);
         if (context.earlyThermostatInfo.recommendedResponse) {

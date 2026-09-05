@@ -54,6 +54,13 @@ export function formatRoomList(rooms = []) {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
 }
 
+export function guestModeWord(mode) {
+  const m = String(mode || '').toLowerCase();
+  if (m === 'cold' || m === 'cool' || m === 'cooling') return 'cool';
+  if (m === 'heat' || m === 'heating' || m === 'autoheat') return 'heat';
+  return m;
+}
+
 /** One sentence guests can follow: all rooms same mode, or mixed will not work. */
 export function mixedModeRule(rooms = []) {
   const where = rooms.length ? ` (${formatRoomList(rooms)})` : '';
@@ -64,13 +71,13 @@ export function mixedModeRule(rooms = []) {
 }
 
 /**
- * "The living room is on heat, and the master bedroom is on cool."
- * Falls back to empty string when modes/rooms are missing.
+ * Odd-one-out first: "The small bedroom is on heat, and the living room and master bedroom are on cool."
+ * Empty string when modes/rooms are missing.
  */
 export function describeLiveModes(units = []) {
   const byMode = new Map();
   for (const u of units || []) {
-    const mode = String(u?.operationMode || '').toLowerCase();
+    const mode = guestModeWord(u?.operationMode);
     if (!mode) continue;
     const name = u.roomName || guestRoomName(u.deviceId) || null;
     if (!byMode.has(mode)) byMode.set(mode, []);
@@ -79,14 +86,33 @@ export function describeLiveModes(units = []) {
   if (byMode.size === 0) return '';
   const allNames = [...byMode.values()].flat();
   if (allNames.every((n) => n === 'one unit')) return '';
-  const clauses = [];
-  for (const [mode, names] of byMode.entries()) {
+  const entries = [...byMode.entries()].sort((a, b) => a[1].length - b[1].length);
+  const clauses = entries.map(([mode, names]) => {
     const verb = names.length === 1 ? 'is' : 'are';
-    clauses.push(`the ${formatRoomList(names)} ${verb} on ${mode}`);
-  }
+    return `the ${formatRoomList(names)} ${verb} on ${mode}`;
+  });
   if (clauses.length === 1) {
     return clauses[0].charAt(0).toUpperCase() + clauses[0].slice(1) + '.';
   }
   const last = clauses.pop();
   return `${clauses.join(', ')}, and ${last}.`.replace(/^the /, 'The ');
+}
+
+/**
+ * Host-initiated mixed-mode FYI. No Nest, no unit number.
+ * Example: small bedroom on heat, living room + master bedroom on cool.
+ */
+export function buildHostMixedModeNotice({ guestName, units = [], rooms = [] } = {}) {
+  const hi = guestName ? `Hi ${guestName}, ` : 'Hi, ';
+  const situation = describeLiveModes(units);
+  const namedRooms = rooms.length
+    ? rooms
+    : (units || []).map((u) => u.roomName || guestRoomName(u.deviceId)).filter(Boolean);
+  const parts = [`${hi}quick note about the heat and AC.`];
+  if (situation) parts.push(situation);
+  parts.push(mixedModeRule(namedRooms));
+  parts.push('You can still pick a different temperature in each room.');
+  parts.push('Use the remotes on the wall in each room.');
+  parts.push('Let us know if you need anything!');
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
 }

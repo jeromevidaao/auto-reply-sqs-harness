@@ -189,9 +189,7 @@ export class HeatPumpTool extends BaseTool {
   _buildSoftInstructionSnippet(guestName, listingId) {
     const name = guestName ? `${guestName}, ` : '';
     const rooms = this._roomsFor(listingId);
-    const nest =
-      'Please make sure you are using the heat pump remotes on the wall in each room — the Nest thermostat (if you see one) does not control the AC or heat.';
-    return `${name}${nest} ${mixedModeRule(rooms)} Let me know the exact settings you see on the remotes and I'll check the units.`.trim();
+    return `${name}${mixedModeRule(rooms)} Use the remotes on the wall in each room. Let me know the exact settings you see and I'll check the units.`.trim();
   }
 
   _buildLiveSnippet(guestName, status, fix, listingId) {
@@ -200,7 +198,9 @@ export class HeatPumpTool extends BaseTool {
 
     const summary = status?.summary || {};
     const units = status?.units || [];
-    const beforeUnits = fix?.before?.units || units;
+    const beforeUnits = (fix?.before?.units && fix.before.units.length)
+      ? fix.before.units
+      : units;
     const rooms = this._roomsFor(listingId, units.length ? units : beforeUnits);
     const liveMix = describeLiveModes(beforeUnits);
     const mixed = !!(summary.mixedModes || fix?.before?.summary?.mixedModes);
@@ -210,25 +210,22 @@ export class HeatPumpTool extends BaseTool {
       const t = fix.recommendedTempF || 65;
       const roomInfo = summary.avgRoomTempF ? ` (room ~${summary.avgRoomTempF}°F)` : '';
 
-      parts.push(`Please make sure you are using the heat pump remotes on the wall in each room. I checked the heat pumps for you${roomInfo}.`);
-      if (liveMix) {
-        parts.push(liveMix);
-      }
+      if (liveMix) parts.push(liveMix);
       parts.push(mixedModeRule(rooms));
-      if (mixed && !liveMix) {
-        parts.push('One (or more) was in the wrong mode for what you need — the system cannot cool and heat at the same time.');
-      }
+      parts.push(`I checked the heat pumps for you${roomInfo}.`);
       const unitCount = units.length || rooms.length || 'the';
-      parts.push(`I've set all ${unitCount} units to ${m} at ${t}°F now so it should cool down shortly. You can still adjust with the wall remotes if you want.`);
+      parts.push(`I've set all ${unitCount} units to ${m} at ${t}°F now so it should cool down shortly.`);
+      parts.push('You can still adjust with the remotes on the wall in each room.');
       parts.push('Let me know in a few minutes if the air is moving and the temperature is improving!');
     } else if (status && !status.error) {
-      if (mixed) {
-        parts.push('Thanks for the details.');
-        if (liveMix) parts.push(liveMix);
-        parts.push(mixedModeRule(rooms));
+      if (liveMix) parts.push(liveMix);
+      parts.push(mixedModeRule(rooms));
+      if (!mixed) {
+        parts.push('Use the remotes on the wall in each room.');
+      } else {
+        parts.push('Use the remotes on the wall in each room so every unit is on the same mode.');
       }
-      parts.push(this._buildSoftInstructionSnippet(guestName, listingId).replace(`${name}`, ''));
-      parts.push('I also checked the live status of the units — let me know the exact remote settings you\'re seeing and I can dig deeper or adjust them for you.');
+      parts.push('I also checked the live status — let me know if you want me to set them for you.');
     } else {
       parts.push(this._buildSoftInstructionSnippet(guestName, listingId).replace(`${name}`, ''));
     }
