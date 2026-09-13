@@ -645,6 +645,11 @@ export class GuestMessagingAgent {
       confidence = latestCheckoutPolicy.confidence;
     }
 
+    // Defense: never leave a false "You're welcome" opener when guest did not thank.
+    if (parsed.proposedResponse) {
+      parsed.proposedResponse = this._stripFalseYoureWelcome(parsed.proposedResponse, guestMessage);
+    }
+
     // Amber 2026-08-17: thanks + shuttle/taxi + rainy-day indoor ask must send.
     const transportActivitiesPolicy = this._applyThanksPlusTransportActivitiesPolicy(
       parsed,
@@ -2466,6 +2471,10 @@ export class GuestMessagingAgent {
   }
 
   _applyPostWelcomeThankYouPolicy(parsed, context = {}, guestMessage = '') {
+    // Never demote post-stay review promise / gratitude into a bare You're-welcome (Rebecca).
+    if (this._isPostStayGratitudeOrReviewPromise(guestMessage, context)) {
+      return { applied: false };
+    }
     if (!this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
       return { applied: false };
     }
@@ -3113,6 +3122,21 @@ export class GuestMessagingAgent {
    * Multi-intent thanks + "latest time we are able to check out" (optional day name).
    * Production miss: low confidence / no auto-reply. Always force shouldReply + 10am.
    */
+  /**
+   * Strip a leading "You're welcome" when the guest never thanked us.
+   * Julia Downtown Studio 2026-09-13: Grok opened checkout answer with false gratitude.
+   */
+  _stripFalseYoureWelcome(proposedResponse = '', guestMessage = '') {
+    const text = String(proposedResponse || '');
+    if (!text || text === 'none') return text;
+    if (this._hasThankYouIntent(guestMessage)) return text;
+    const stripped = text
+      .replace(/^(?:you(?:'|\u2019)re|you are) welcome(?:,\s*[\w'\u2019.-]+)?[!.,]?\s+/i, '')
+      .trim();
+    // Keep original if strip would gut the draft.
+    return stripped.length >= 8 ? stripped : text;
+  }
+
   _applyLatestCheckoutTimePolicy(parsed = {}, context = {}, guestMessage = '') {
     const msg = String(guestMessage || '').trim();
     if (!msg) return { applied: false };
@@ -3125,19 +3149,27 @@ export class GuestMessagingAgent {
       /latest (time|check[\s-]?out).*(check\s*out|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i.test(
         msg
       );
-    if (!asksLatestCheckout) return { applied: false };
+    // Julia 2026-09-13: "What time is checkout on Sunday?" (no "latest", no thanks)
+    const asksCheckoutTime =
+      asksLatestCheckout ||
+      (/check[\s-]?out/i.test(msg) &&
+        /(what time|when is|when do|how late|latest|last time)/i.test(msg));
+    if (!asksCheckoutTime) return { applied: false };
 
     const draft = String(parsed.proposedResponse || '');
     const has10am = /10\s*(:00)?\s*am/i.test(draft);
     const hasStrict =
       /checkout is strictly|check[\s-]?out is (strictly )?(at )?10/i.test(draft);
-    const thanks = /thank/i.test(msg);
+    const thanks = this._hasThankYouIntent(msg);
+    const hasFalseWelcome =
+      !thanks && /you(?:'|\u2019)re welcome|you are welcome/i.test(draft);
     const needsRewrite =
       !draft ||
       draft === 'none' ||
       draft.length < 12 ||
       !has10am ||
       !hasStrict ||
+      hasFalseWelcome ||
       parsed.shouldReply === false ||
       (parsed.confidence != null && Number(parsed.confidence) < 0.95);
 
@@ -3147,7 +3179,7 @@ export class GuestMessagingAgent {
         typeOfMessageReceived: thanks
           ? ['THANK_YOU_MESSAGE', 'CHECKOUT']
           : 'CHECKOUT',
-        proposedResponse: draft,
+        proposedResponse: this._stripFalseYoureWelcome(draft, msg),
         shouldReply: true,
         confidence: 1.0,
       };
@@ -3911,30 +3943,72 @@ export class GuestMessagingAgent {
    * Post-stay gratitude / review promise (Henry review incident 2026-07-27).
    * Guest already checked out and is thanking us / promising a review — never treat as lockout.
    */
+  /**
+   * Host recently asked the guest for a review / 5 stars (post-stay ask).
+   * Used so checkout-day "loved Portland" + thanks still maps to REVIEW_PROMISE.
+   */
+  _hostRecentlyAskedForReview(context = {}) {
+    const bodies = [];
+    const history = Array.isArray(context.conversationHistory) ? context.conversationHistory : [];
+    for (const m of history) {
+      const role = String(m?.sender_type || m?.role || m?.sender?.type || m?.sender || '').toLowerCase();
+      if (!(role === 'host' || role === 'host_message' || role === 'owner')) continue;
+      bodies.push(String(m?.body || m?.message || m?.text || m?.content || ''));
+    }
+    const traces = context.conversationTraces || {};
+    if (traces.lastHostMessagePreview) bodies.push(String(traces.lastHostMessagePreview));
+    return bodies.some((b) => {
+      const lower = b.toLowerCase();
+      return (
+        /\breview\b/.test(lower) &&
+        /(5\s*[- ]?star|five\s*star|would mean|appreciate|leave (?:us )?a|if you (?:have|get) a moment|glowing)/i.test(
+          lower
+        )
+      );
+    });
+  }
+
   _isPostStayGratitudeOrReviewPromise(guestMessage = '', context = {}) {
     const msg = String(guestMessage || '').trim();
     if (!msg) return false;
     const lower = msg.toLowerCase();
 
-    // Stay is over (checkout day already passed in America/New_York calendar).
+    // Checkout day or later (America/New_York calendar). Inclusive of checkout day —
+    // Rebecca incident: same-day checkout thanks+city-love used to miss pastCheckout.
     const checkOut = (context.checkOut || '').slice(0, 10);
     const today = this._todayDateStr(context);
+    const onOrAfterCheckout = !!(checkOut && today && checkOut <= today);
     const pastCheckout = !!(checkOut && today && checkOut < today);
 
     const reviewPromise =
       /\breview\b/.test(lower) &&
-      /(submit|leave|write|post|send|get a|glowing|5\s*[- ]?star|five\s*star|will|today|tomorrow|coming)/i.test(lower);
+      /(submit|leave|write|post|send|get a|glowing|5\s*[- ]?star|five\s*star|will|i'?ll|we'?ll|today|tomorrow|coming)/i.test(
+        lower
+      );
+    const cityLove =
+      /loved\s+portland|love\s+portland|had a (?:lovely|wonderful|great|amazing) time in portland|portland was (?:lovely|wonderful|great|amazing)/i.test(
+        lower
+      ) || /loved (?:the )?(?:city|town|trip|stay|visit)|fell in love with/i.test(lower);
     const postStayThanks =
       /thank|thanks|appreciate/i.test(lower) &&
       /(terrific|great|wonderful|amazing|lovely|excellent)\s+(trip|stay)|looking forward to the next|had a (great|wonderful|terrific|amazing|lovely)|hope to (?:be )?back|until next time/i.test(
         lower
       );
+    const thanksOnly = /thank|thanks|appreciate/i.test(lower);
+    const hostAskedReview = this._hostRecentlyAskedForReview(context);
 
-    // Strong review/thanks language after checkout, or explicit review promise anytime after stay started ending.
-    if (pastCheckout && (reviewPromise || postStayThanks)) return true;
-    if (reviewPromise && /thank|thanks|appreciate|terrific|great trip|great stay|looking forward/i.test(lower)) {
+    // Strong review/thanks language on/after checkout day (inclusive — Rebecca same-day miss).
+    if (onOrAfterCheckout && (reviewPromise || postStayThanks)) return true;
+    // Explicit review promise + thanks/gratitude anytime (incl. checkout day).
+    if (reviewPromise && /thank|thanks|appreciate|terrific|great trip|great stay|looking forward|loved/i.test(lower)) {
       return true;
     }
+    // Host just asked for a review; guest thanks + city love (no "review" word) on/after checkout.
+    if (onOrAfterCheckout && hostAskedReview && thanksOnly && cityLove) {
+      return true;
+    }
+    // Keep pastCheckout alias behavior for older call sites / clarity.
+    if (pastCheckout && (reviewPromise || postStayThanks)) return true;
     return false;
   }
 
@@ -5147,6 +5221,7 @@ export class GuestMessagingAgent {
     const recentHostCats = this._messageCategories(finalDecision);
     const isThankYouCategory =
       recentHostCats.includes('THANK_YOU_MESSAGE') || recentHostCats.includes('THANKS');
+    const isReviewPromiseCategory = recentHostCats.includes('REVIEW_PROMISE');
     // Amber 2026-08-17: type was ['THANKS','TRANSPORT_QUESTION','ACTIVITIES_QUESTION'].
     // `type !== 'THANK_YOU_MESSAGE'` is always true for arrays, so we wiped a
     // sendable shuttle + rainy-day draft because the host had said good morning 5 min earlier.
@@ -5155,6 +5230,8 @@ export class GuestMessagingAgent {
       finalDecision.shouldReply &&
       !this._isPostWelcomeThankYouFollowUp(guestMessage, enrichedContext) &&
       !isThankYouCategory &&
+      !isReviewPromiseCategory &&
+      !this._isPostStayGratitudeOrReviewPromise(guestMessage, enrichedContext) &&
       !this._isSmokeAlarmAllClear(guestMessage, enrichedContext) &&
       !isPetOverMaxAsk(guestMessage) &&
       !this._guestAsksNewQuestion(guestMessage, finalDecision.typeOfMessageReceived) &&
@@ -5905,6 +5982,13 @@ export class GuestMessagingAgent {
       finalResult.proposedResponse = latestCheckoutFinal.proposedResponse;
       finalResult.shouldReply = latestCheckoutFinal.shouldReply;
       finalResult.confidence = latestCheckoutFinal.confidence;
+    }
+
+    if (finalResult.proposedResponse) {
+      finalResult.proposedResponse = this._stripFalseYoureWelcome(
+        finalResult.proposedResponse,
+        guestMessage
+      );
     }
 
     const transportActivitiesFinal = this._applyThanksPlusTransportActivitiesPolicy(
