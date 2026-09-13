@@ -81,6 +81,8 @@ const HVAC_REMOTE_PER_UNIT_STANDARD_RESPONSE =
 const LAUNDRY_QUESTION_STANDARD_RESPONSE =
   'We do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102';
 
+const WIFI_LET_ME_KNOW = 'Let me know if it works.';
+
 /** Apt 2 listing UUID (Sunny Downtown 2 Bed) — street-door lockout is unit-specific. */
 const APT2_LISTING_ID = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
 
@@ -555,6 +557,14 @@ export class GuestMessagingAgent {
     if (laundryPolicy.applied) {
       parsed.typeOfMessageReceived = laundryPolicy.typeOfMessageReceived || 'LAUNDRY_QUESTION';
       parsed.proposedResponse = laundryPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const wifiPolicy = this._applyWifiPolicy(parsed, context, guestMessage);
+    if (wifiPolicy.applied) {
+      parsed.typeOfMessageReceived = wifiPolicy.typeOfMessageReceived || 'WIFI_PASSWORD';
+      parsed.proposedResponse = wifiPolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -1130,6 +1140,8 @@ export class GuestMessagingAgent {
       'LAUNDRY_QUESTION',
       'DIRECTIONS',
       'WIFI',
+      'WIFI_PASSWORD',
+      'WIFI_TROUBLESHOOTING',
       'NOT_CHECKIN_DAY_ACCESS',
       'POST_STAY_ACCESS',
       'CHECKOUT',
@@ -1173,6 +1185,8 @@ export class GuestMessagingAgent {
         'EARLY_CHECKIN',
         'PARKING',
         'WIFI',
+        'WIFI_PASSWORD',
+        'WIFI_TROUBLESHOOTING',
         'STAY_EXTENSION',
         'LATE_CHECKOUT',
         'DIRECTIONS',
@@ -3903,6 +3917,144 @@ export class GuestMessagingAgent {
     };
   }
 
+  _isWifiMention(guestMessage = '') {
+    return /\b(wifi|wi-?fi|wi\s*fi|wireless(?:\s+network)?|internet)\b/i.test(guestMessage || '');
+  }
+
+  /**
+   * Explicit password / network-name ask (WIFI_PASSWORD).
+   */
+  _isWifiPasswordAsk(guestMessage = '') {
+    const msg = String(guestMessage || '');
+    if (!this._isWifiMention(msg) && !/\b(ssid|network name)\b/i.test(msg)) return false;
+    return /\b(password|network name|ssid|credentials|what(?:'s| is) the (?:wifi|wi-?fi|network)|wifi (?:network|code|pw|pass))\b/i.test(
+      msg
+    );
+  }
+
+  /**
+   * Device/TV connection trouble or "steps to connect" (Jane 2026-09-13).
+   * Must get credentials + brief steps — not withhold until they ask for the password.
+   */
+  _isWifiDeviceConnectAsk(guestMessage = '') {
+    const msg = String(guestMessage || '');
+    if (!this._isWifiMention(msg)) return false;
+    const device = /\b(tv|t\.v\.|television|roku|chromecast|apple\s*tv|fire\s*stick|smart\s*tv|streaming|device)\b/i.test(
+      msg
+    );
+    const connect = /\b(connect(?:ing|ed|ion)?|can(?:not|'t| not) connect|won(?:'t)? connect|unable to connect|not connecting)\b/i.test(
+      msg
+    );
+    const trouble = /\b(issues?|trouble|problem|can(?:not|'t| not)|won(?:'t)?|unable|not working|steps)\b/i.test(
+      msg
+    );
+    if (device && (connect || trouble)) return true;
+    if (connect && trouble) return true;
+    return false;
+  }
+
+  _wifiCredentials() {
+    const c = getHostContactsSync();
+    return {
+      ssid: String(c.wifiSsid || '').trim() || '{{WIFI_SSID}}',
+      password: String(c.wifiPassword || '').trim() || '{{WIFI_PASSWORD}}',
+    };
+  }
+
+  _wifiDraftHasCredentials(draft = '') {
+    const { ssid, password } = this._wifiCredentials();
+    const lower = String(draft || '').toLowerCase();
+    return lower.includes(ssid.toLowerCase()) && lower.includes(password.toLowerCase());
+  }
+
+  _hostAlreadySentWifiCredentials(context = {}) {
+    const { ssid, password } = this._wifiCredentials();
+    if (ssid.startsWith('{{') || password.startsWith('{{')) return false;
+    const history = Array.isArray(context.conversationHistory) ? context.conversationHistory : [];
+    return history.some((m) => {
+      const role = String(m?.sender_type || m?.role || m?.sender?.type || m?.sender || '').toLowerCase();
+      if (!(role === 'host' || role === 'host_message' || role === 'owner')) return false;
+      const body = String(m?.body || m?.message || m?.text || m?.content || '').toLowerCase();
+      return body.includes(ssid.toLowerCase()) && body.includes(password.toLowerCase());
+    });
+  }
+
+  /**
+   * Jane TV-connect miss (West End Victorian 2026-09-12–16): guest asked for steps
+   * to connect a TV to wifi. Prompt used to withhold credentials unless they
+   * asked for the password. Force SSID + password + brief settings steps +
+   * "Let me know if it works."
+   */
+  _applyWifiPolicy(parsed, context = {}, guestMessage = '') {
+    const deviceAsk = this._isWifiDeviceConnectAsk(guestMessage);
+    const passwordAsk = this._isWifiPasswordAsk(guestMessage);
+    if (!deviceAsk && !passwordAsk) {
+      return { applied: false };
+    }
+    if (this._hostAlreadySentWifiCredentials(context)) {
+      return { applied: false };
+    }
+
+    const category = deviceAsk ? 'WIFI_TROUBLESHOOTING' : 'WIFI_PASSWORD';
+    const guestHasThanks = this._hasThankYouIntent(guestMessage);
+    const typeOfMessageReceived = this._mergeCategories(
+      parsed.typeOfMessageReceived,
+      category,
+      guestHasThanks ? 'THANK_YOU_MESSAGE' : null
+    );
+
+    const draft = (parsed.proposedResponse || '').trim();
+    const hasCreds = this._wifiDraftHasCredentials(draft);
+    const hasSteps = /settings|select the network|enter the password|reconnect/i.test(draft);
+    const hasFollowUp = /let me know if it works/i.test(draft);
+    const catsCorrect =
+      this._categoriesInclude(parsed.typeOfMessageReceived, category) &&
+      (!guestHasThanks || this._categoriesInclude(parsed.typeOfMessageReceived, 'THANK_YOU_MESSAGE'));
+    const textCorrect =
+      hasCreds &&
+      (!deviceAsk || (hasSteps && hasFollowUp)) &&
+      draft &&
+      draft.toLowerCase() !== 'none';
+
+    if (textCorrect && catsCorrect) {
+      return { applied: false };
+    }
+    if (textCorrect && !catsCorrect) {
+      return {
+        applied: true,
+        typeOfMessageReceived,
+        proposedResponse: draft,
+      };
+    }
+
+    const { ssid, password } = this._wifiCredentials();
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    let body;
+    if (deviceAsk) {
+      body =
+        `Please check the WiFi settings on the TV, then connect to the network ${ssid} with password ${password}. ` +
+        WIFI_LET_ME_KNOW;
+    } else {
+      body =
+        `The WiFi network is ${ssid} and the password is ${password} (all lowercase). ` + WIFI_LET_ME_KNOW;
+    }
+
+    let proposedResponse;
+    if (guestHasThanks) {
+      proposedResponse = firstName ? `You're welcome, ${firstName}! ${body}` : `You're welcome! ${body}`;
+    } else if (firstName) {
+      proposedResponse = `Hi ${firstName}, ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
+    } else {
+      proposedResponse = body;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived,
+      proposedResponse,
+    };
+  }
+
   /**
    * Apt 2 only: guest bolted the parking/unit door from inside and exited via the street.
    * Keypad codes alone cannot open a door bolted from the inside — use street backup key.
@@ -5785,6 +5937,15 @@ export class GuestMessagingAgent {
       finalResult.typeOfMessageReceived = laundryPolicyFinal.typeOfMessageReceived || 'LAUNDRY_QUESTION';
       finalResult.proposedResponse = laundryPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
+    }
+
+    const wifiPolicyFinal = this._applyWifiPolicy(finalResult, enrichedContext, guestMessage);
+    if (wifiPolicyFinal.applied) {
+      console.log('[Agent] → WiFi policy applied (credentials + device/TV connect steps)');
+      finalResult.typeOfMessageReceived = wifiPolicyFinal.typeOfMessageReceived || 'WIFI_PASSWORD';
+      finalResult.proposedResponse = wifiPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
     }
 
     const stayWindowAccessFinal = this._applyStayWindowAccessPolicy(

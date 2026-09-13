@@ -1,0 +1,30 @@
+{
+  "id": "jane-tv-wifi-connect",
+  "description": "Jane (West End Victorian, Sep 12–16 2026): TV connecting to wifi, asked for steps. Production did not auto-reply; host sent network + password + check settings + let me know if it works. wifi.md used to withhold credentials unless they asked for the password.",
+  "productionMiss": true,
+  "guestMessage": "Hi Jerome! We have very much enjoyed our time here so far! We are having some issues with the tv connecting to the wifi. Are there any specific steps needed to connect?",
+  "context": {
+    "guestName": "Jane",
+    "checkIn": "2026-09-12",
+    "checkOut": "2026-09-16",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "53 Pine St #2 · 1875 West End Victorian | EV Charging + Parking",
+    "bookingTimestamp": "2026-09-01T10:00:00Z",
+    "conversationHistory": [],
+    "suggestedResponseSnippet": "Please check the WiFi settings on the TV, then connect to the network TEST_WIFI_SSID with password test-wifi-password. Let me know if it works."
+  },
+  "rubric": {
+    "expectedCategory": "WIFI_TROUBLESHOOTING",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "TEST_WIFI_SSID",
+      "test-wifi-password",
+      "Let me know if it works"
+    ],
+    "forbiddenPhrases": []
+  },
+  "notes": "Jane West End Victorian 2026-09-12–16. Deterministic _applyWifiPolicy. Credentials from TEST_HOST_CONTACTS / {{WIFI_SSID}} {{WIFI_PASSWORD}} — never hardcode production secrets. Pineland/lobsterbake remains the existing wifi.md golden convention for WIFI_PASSWORD-only evals."
+}
