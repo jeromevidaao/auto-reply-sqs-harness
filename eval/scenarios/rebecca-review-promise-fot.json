@@ -1,0 +1,43 @@
+{
+  "id": "rebecca-review-promise-fot",
+  "description": "Rebecca Simpkin West End Victorian checkout day: exact live thank-you + review promise (typo fot). message.created never reached harness; only reaction_added did and was hard-skipped. Must REVIEW_PROMISE reply with You're welcome + reciprocal 5-star.",
+  "guestMessage": "Hi Jerome. Thank you for a wonderful stay.  I will absolutely write a review the place was great, we loved Portland. Thanks fot hosting us.",
+  "guestName": "Rebecca",
+  "checkIn": "2026-09-09T16:00:00-04:00",
+  "checkOut": "2026-09-12T10:00:00-04:00",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "Sunny Downtown 2 Bed Apt, Parking",
+  "context": {
+    "asOfDate": "2026-09-12",
+    "asOfInstant": "2026-09-12T17:01:00-04:00",
+    "nowForGreeting": "2026-09-12T17:01:00-04:00",
+    "reservationId": "7fd93b39-48bf-45bf-a499-fe2aa7ba6e38",
+    "conversation_id": "e792867b-c7e7-44b6-a7ac-2587402ba5f8",
+    "conversationHistory": [
+      {
+        "sender_type": "host",
+        "body": "Hi Rebecca,\n\nIt was a pleasure hosting you; I hope you had a great time in Portland and staying with us.\nIt would really mean a lot to me and will help enable other great guests like yourself to find my place on Airbnb if you give me a 5 star review. I hope you feel that I earned it.\nSafe travel back to Salford and I hope to welcome you back to Portland in the near future!\n\nJerome & Ruby"
+      }
+    ],
+    "suggestedResponseSnippet": "You're welcome, Rebecca! So glad you had a terrific trip — thank you for the kind words. We'll look forward to your review and will leave you a 5-star review as well. Hope to host you again in Portland soon!"
+  },
+  "rubric": {
+    "expectedCategory": ["REVIEW_PROMISE", "THANK_YOU_MESSAGE"],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.9,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "You're welcome",
+      "5-star"
+    ],
+    "forbiddenPhrases": [
+      "locked out",
+      "lock box",
+      "lockbox",
+      "backup key",
+      "see you soon"
+    ]
+  },
+  "notes": "Live body 2026-09-12T21:01:07Z platform_id 32695385435. Reaction-only delivery fix in reactionAdded.js / handler."
+}

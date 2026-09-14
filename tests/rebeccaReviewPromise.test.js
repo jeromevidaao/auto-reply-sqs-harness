@@ -170,4 +170,62 @@ describe('Rebecca REVIEW_PROMISE (West End Victorian checkout)', () => {
     assert.equal(out.typeOfMessageReceived, 'REVIEW_PROMISE');
     assert.match(String(out.proposedResponse), /5\s*-?\s*star|great guests?/i);
   });
+
+  // Exact live guest body from Hospitable (typo "fot") — production never replied.
+  const rebeccaLiveExact =
+    'Hi Jerome. Thank you for a wonderful stay.  I will absolutely write a review the place was great, we loved Portland. Thanks fot hosting us.';
+
+  for (const asOfDate of ['2026-09-12', '2026-09-13']) {
+    const dayLabel = asOfDate === '2026-09-12' ? 'on checkout day' : 'after checkout';
+
+    it(`_applyReviewPromisePolicy: EXACT live Rebecca thank-you+review+fot typo ${dayLabel}`, () => {
+      const agent = new GuestMessagingAgent({
+        projectRoot: projectRootForTests,
+        llmAdapter: { complete: async () => '{}' },
+      });
+      const ctx = baseCtx(asOfDate);
+      assert.equal(
+        agent._isPostStayGratitudeOrReviewPromise(rebeccaLiveExact, ctx),
+        true,
+        `exact live detector must match ${dayLabel}`
+      );
+      const applied = agent._applyReviewPromisePolicy(
+        {
+          typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+          proposedResponse: 'none',
+          shouldReply: false,
+          confidence: 0.1,
+        },
+        ctx,
+        rebeccaLiveExact
+      );
+      assertReviewPromiseApplied(applied, `live-exact ${dayLabel}`);
+    });
+  }
+
+  it('processMessage: EXACT live Rebecca string forces REVIEW_PROMISE when LLM silent', async () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      hospitableClient: {
+        getReservation: async () => null,
+        getConversationMessages: async () => [],
+        sendMessage: async () => ({ ok: true }),
+      },
+      llmAdapter: {
+        complete: async () =>
+          JSON.stringify({
+            typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+            proposedResponse: 'none',
+            shouldReply: false,
+            confidence: 0.1,
+          }),
+      },
+    });
+    const out = await agent.processMessage(rebeccaLiveExact, baseCtx('2026-09-12'));
+    assert.equal(out.shouldReply, true);
+    assert.equal(out.typeOfMessageReceived, 'REVIEW_PROMISE');
+    assert.match(String(out.proposedResponse), /you(?:'|’)re welcome/i);
+    assert.match(String(out.proposedResponse), /5\s*-?\s*star|great guests?/i);
+  });
+
 });

@@ -66,6 +66,11 @@ import {
   releaseReservationLock,
   isSameConversationInFlight,
 } from '../src/utils/reservationLock.js';
+import {
+  isReactionAddedUpdate,
+  guestMessagePlatformId,
+  guestMessageDedupKey,
+} from '../src/utils/reactionAdded.js';
 import { persistGuestMessagingRun } from '../src/utils/runMonitor.js';
 import { S3Client } from '@aws-sdk/client-s3';
 import { isHomeExchangePayload, handleHomeExchangeMessage, extractHomeExchangeMessage } from '../src/useCases/homeExchange.js';
@@ -1086,18 +1091,18 @@ export const handler = async (event, context) => {
     };
   }
 
-  // Skip "message.updated" events that are purely host reaction additions (e.g. manual thumbs up on a guest message).
-  // These are not new guest content; the guest message was already (or will be) handled via its .created event.
-  // Without this, Hospitable emits both "message.created" and "message.updated" (with triggers:["reaction_added"])
-  // for the same guest text + host reaction, leading to duplicate auto-replies (e.g. double "You're welcome").
+  // message.updated + reaction_added: host hearted/thumbed a guest message.
+  // Hospitable often emits BOTH message.created and this update for the same guest text.
+  // Historically we hard-skipped the reaction update to avoid double "You're welcome".
+  // Rebecca Simpkin 2026-09-12: message.created NEVER reached the harness; only
+  // reaction_added did — hard-skip left her post-stay thank-you unanswered.
+  // New rule: do NOT hard-skip here. Dedup on guestmsg:conv:platformId below skips
+  // when created already processed; otherwise we RECOVER the missed created.
   const action = msgContext.action || null;
   const triggers = Array.isArray(msgContext.triggers) ? msgContext.triggers : (msgContext.triggers ? [msgContext.triggers] : []);
-  if (action === 'message.updated' && triggers.includes('reaction_added')) {
-    console.log(`[Handler] ⛔ Ignoring message.updated with reaction_added (host manually reacted to guest message; not new input for auto-reply).`);
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ skipped: true, reason: 'reaction_added update' })
-    };
+  if (isReactionAddedUpdate({ action, triggers })) {
+    msgContext._reactionAddedUpdate = true;
+    console.log('[Handler] message.updated reaction_added — will process only if guestmsg dedup miss (recover missed message.created)');
   }
 
   // Optional: very old payloads with zero sender_type information at all.
@@ -1278,15 +1283,15 @@ export const handler = async (event, context) => {
   // Prefer a stable message identifier for the *guest content* (platform_id or the inner data.id for the message).
   // This is present on both "message.created" and "message.updated" events for the same guest text,
   // allowing us to dedup across the multiple events Hospitable emits for one guest message + host reaction.
-  const messagePlatformId = msgContext.platform_id || (msgContext.id && typeof msgContext.id === 'string' && !msgContext.id.includes('-') ? msgContext.id : (typeof msgContext.id === 'number' ? msgContext.id : null));
-  const convForDedup = msgContext.conversation_id || msgContext.conversationId || msgContext.reservation_id || msgContext.reservationId || null;
+  const messagePlatformId = guestMessagePlatformId(msgContext);
+  const guestMsgDedup = guestMessageDedupKey(msgContext);
   let dedupKey = webhookIdForDedup;
   if (msgContext.justAcceptedInquiry && (msgContext.reservationId || msgContext.reservation_id)) {
     // One accept-welcome per reservation + accept timestamp (not per guest message id)
     const acceptAt = msgContext.acceptAnalysis?.acceptedAt || 'unknown';
     dedupKey = `reservation-accept:${msgContext.reservationId || msgContext.reservation_id}:${acceptAt}`;
-  } else if (messagePlatformId && convForDedup) {
-    dedupKey = `guestmsg:${convForDedup}:${messagePlatformId}`;
+  } else if (guestMsgDedup) {
+    dedupKey = guestMsgDedup;
   }
   if (dedupKey) {
     try {
@@ -1302,6 +1307,9 @@ export const handler = async (event, context) => {
         ConditionExpression: 'attribute_not_exists(webhookId)'
       }));
       console.log(`[Handler] Dedup: dedupKey ${dedupKey} recorded (first processing)`);
+      if (msgContext._reactionAddedUpdate) {
+        console.log(`[Handler] ✅ RECOVERING missed message.created via reaction_added (dedup miss) key=${dedupKey}`);
+      }
     } catch (e) {
       if (e.name === 'ConditionalCheckFailedException') {
         console.log(`[Handler] ⛔ DEDUP SKIP: dedupKey ${dedupKey} already processed (SQS redelivery / duplicate webhook / duplicate guest message event (created+updated) protection)`);
