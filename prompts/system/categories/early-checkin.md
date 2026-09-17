@@ -7,6 +7,12 @@
 - We cannot guarantee early check-in.
 - If the unit is ready before 4pm, we will message the guest.
 
+**Reply copy (CRITICAL — Alexandra 2026-09-17 production miss)**:
+- ALWAYS promise to message the guest **as soon as cleaning finishes getting the unit ready** (or equivalent: "if cleaning finishes … we'll message you right away").
+- You MAY acknowledge a requested time (e.g. around 3) without guaranteeing it.
+- NEVER use vague deferrals like "I'll check with the cleaning team", "let you know if we can accommodate", "I'll check on readiness", or "if we can accommodate an earlier arrival".
+- Preferred pattern: warm greeting + cannot guarantee early check-in + "as soon as cleaning finishes getting the unit ready for you we'll message you right away".
+
 **When guest asks about early check-in or arrival**:
 - Use the `UnitReadinessTool` result if available to give accurate information.
 - Ground truth is DynamoDB `cleaning` `{airbnbListingId}_{check-in date}` **`pressedAt`**: if a previous-night guest checked out and there is no `pressedAt`, the unit is **not ready**.

@@ -1,0 +1,51 @@
+{
+  "id": "alexandra-early-checkin-cleaning-finishes",
+  "description": "Alexandra (Apt Cozy West End Victorian, Sep 17\u201319 2026): arrives in Portland a little early, asks about getting into the place around 3. Production auto-reply said 'I'll check with the cleaning team and let you know if we can accommodate' \u2014 too vague. Must promise to message when cleaning finishes / unit ready.",
+  "productionMiss": true,
+  "guestMessage": "Hi Jerome- we will arrive in Portland a little early. Is there any possibility of getting into the place around 3? Thanks so much for your consideration!",
+  "guestName": "Alexandra",
+  "checkIn": "2026-09-17T16:00:00-04:00",
+  "checkOut": "2026-09-19T10:00:00-04:00",
+  "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+  "propertyName": "53 Pine St #3 \u00b7 Cozy West End Victorian | EV Charging + Parking",
+  "context": {
+    "asOfDate": "2026-09-17",
+    "asOfInstant": "2026-09-17T12:36:00-04:00",
+    "nowForGreeting": "2026-09-17T12:36:00-04:00",
+    "reservationId": "alexandra-cozy-west-end-2026-09-17",
+    "conversation_id": "alexandra-early-checkin-conv",
+    "airbnbListingId": "24259977",
+    "conversationTraces": {
+      "hasRecentHostMessage": false,
+      "duplicateRisk": false,
+      "earlyUnitReadyOffered": false,
+      "historyFetchFailed": false,
+      "historySource": "scenario"
+    },
+    "conversationHistory": [],
+    "suggestedResponseSnippet": "Good afternoon, Alexandra. Check-in is at 4pm so we can't guarantee an arrival around 3pm, but as soon as cleaning finishes getting the unit ready for you we'll message you right away."
+  },
+  "rubric": {
+    "expectedCategory": [
+      "EARLY_CHECKIN",
+      "EARLY_CHECKIN_QUESTION",
+      "CHECK_IN_TIME_QUESTION"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "4pm",
+      "cleaning finishes",
+      "getting the unit ready",
+      "message you"
+    ],
+    "forbiddenPhrases": [
+      "check with the cleaning team",
+      "if we can accommodate"
+    ]
+  },
+  "notes": "Alexandra \u00b7 Apt Cozy West End Victorian \u00b7 Sep 17\u201319 2026 \u00b7 ~2026-09-17 09:36 PT. Production draft: \"Good afternoon, Alexandra. I'll check with the cleaning team and let you know if we can accommodate an earlier arrival around 3pm.\" Jerome wants copy that promises to message as soon as cleaning finishes getting the unit ready (not vague check/accommodate). Deterministic _applyEarlyCheckinReplyPolicy.",
+  "unitTestEnforced": true
+}

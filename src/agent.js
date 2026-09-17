@@ -513,6 +513,18 @@ export class GuestMessagingAgent {
       parsed.proposedResponse = earlyCheckinNamePolicy.proposedResponse;
     }
 
+    const earlyCheckinReplyPolicy = this._applyEarlyCheckinReplyPolicy(parsed, context, guestMessage);
+    if (earlyCheckinReplyPolicy.applied) {
+      console.log('[Agent] → Early check-in reply policy applied (message when cleaning finishes / unit ready)');
+      parsed.typeOfMessageReceived = earlyCheckinReplyPolicy.typeOfMessageReceived || 'EARLY_CHECKIN';
+      parsed.proposedResponse = earlyCheckinReplyPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
+      parsed.escalated = false;
+    }
+
     const hvacRemotePerUnitPolicy = this._applyHvacRemotePerUnitPolicy(parsed, context, guestMessage);
     if (hvacRemotePerUnitPolicy.applied) {
       parsed.typeOfMessageReceived = hvacRemotePerUnitPolicy.typeOfMessageReceived || 'HVAC_REMOTE_PER_UNIT';
@@ -1820,6 +1832,123 @@ export class GuestMessagingAgent {
       proposedResponse: `Hi ${name}, ${stripped}`,
     };
   }
+
+  /**
+   * Early check-in / early arrival ask (Alexandra 2026-09-17 class).
+   * Covers "arrive a little early", "getting into the place around 3", "early check-in".
+   */
+  _isEarlyCheckinAsk(guestMessage = '') {
+    const msg = String(guestMessage || '');
+    if (!msg.trim()) return false;
+    if (this._isCheckInDayReadinessAsk(msg)) return true;
+    return (
+      /early\s*check[\s-]*in/i.test(msg) ||
+      /arriv\w*.{0,50}\bearly\b|\bearly\b.{0,50}arriv/i.test(msg) ||
+      /getting into (the )?(place|unit|apartment|apt)/i.test(msg) ||
+      /earlier (arrival|check[\s-]*in)/i.test(msg) ||
+      (/check[\s-]*in/i.test(msg) && /\b(earlier|early|before\s*4|around\s*[123]|at\s*[123])\b/i.test(msg)) ||
+      (/possibility of getting|any chance of getting|possible to (get|check)/i.test(msg) &&
+        /\b(early|around\s*[123]|before\s*4)\b/i.test(msg))
+    );
+  }
+
+  /** Vague "I'll check with cleaning / if we can accommodate" copy — production miss. */
+  _hasWeakEarlyCheckinCopy(draft = '') {
+    const d = String(draft || '');
+    return (
+      /check with the cleaning/i.test(d) ||
+      /if we can accommodate/i.test(d) ||
+      /let you know if we can/i.test(d) ||
+      /i['’]?ll check (with|on)/i.test(d) ||
+      /see if (we|the cleaning|cleaning) can/i.test(d) ||
+      /check on readiness/i.test(d)
+    );
+  }
+
+  /** Strong promise: message when cleaning finishes / unit ready (Olivia golden class). */
+  _hasStrongEarlyCheckinPromise(draft = '') {
+    const d = String(draft || '');
+    if (this._hasWeakEarlyCheckinCopy(d)) return false;
+    const readyOrCleaning =
+      /cleaning finishes|as soon as cleaning|getting the unit ready|unit (is )?ready|if the unit is ready|ready before/i.test(
+        d
+      );
+    const willMessage =
+      /message you|let you know|we['’]?ll message|we will message|message you right away/i.test(d);
+    // Standard policy always states 4pm check-in when we have not already offered early.
+    const has4pm = /4\s*(:00)?\s*pm/i.test(d);
+    return readyOrCleaning && willMessage && has4pm;
+  }
+
+  _earlyCheckinReplySnippet(context = {}, guestMessage = '') {
+    const name = this._guestDisplayFirstName(context) || 'there';
+    const greeting = getTimeBasedGreeting(this._nowForGreeting(context)).greeting || 'Hi';
+    const msg = String(guestMessage || '');
+    const timeMatch = msg.match(/\baround\s+(\d{1,2})(?::\d{2})?\s*(am|pm)?\b/i);
+    let lead;
+    if (timeMatch) {
+      const hour = timeMatch[1];
+      const ap = (timeMatch[2] || 'pm').toLowerCase();
+      lead = `Check-in is at 4pm so we can't guarantee an arrival around ${hour}${ap}, but`;
+    } else {
+      lead = `Check-in is at 4pm and we can't guarantee early check-in, but`;
+    }
+    return `${greeting}, ${name}. ${lead} as soon as cleaning finishes getting the unit ready for you we'll message you right away.`
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Alexandra 2026-09-17: LLM drafted "I'll check with the cleaning team… if we can
+   * accommodate". Rewrite to the standard promise — message when cleaning finishes /
+   * unit is ready — without guaranteeing the requested time.
+   */
+  _applyEarlyCheckinReplyPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (this._hostAlreadyOfferedUnitReady(context)) return { applied: false };
+    // Check-in-day not-ready (Trevor) owns the reply when cleaning table says not ready.
+    if (
+      this._looksLikeCheckInDay(context) &&
+      this._isCheckInDayReadinessAsk(guestMessage) &&
+      this._unitIsNotReadyFromCleaningTable(context)
+    ) {
+      return { applied: false };
+    }
+
+    const cats = Array.isArray(parsed.typeOfMessageReceived)
+      ? parsed.typeOfMessageReceived
+      : [parsed.typeOfMessageReceived];
+    const isEarlyCat = cats.some((c) =>
+      ['EARLY_CHECKIN', 'EARLY_CHECKIN_QUESTION', 'CHECK_IN_TIME_QUESTION'].includes(c)
+    );
+    const isAsk = this._isEarlyCheckinAsk(guestMessage);
+    if (!isAsk && !isEarlyCat) return { applied: false };
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const weak = this._hasWeakEarlyCheckinCopy(draft);
+    const strong = this._hasStrongEarlyCheckinPromise(draft);
+    const missing = !draft || draft.toLowerCase() === 'none' || draft.length < 12;
+
+    // Only rewrite weak/missing drafts, or early asks that lack the cleaning-finishes promise.
+    if (!weak && !missing && strong) return { applied: false };
+    if (!isAsk && !weak) return { applied: false };
+    if (!weak && !missing && isEarlyCat && !isAsk) return { applied: false };
+
+    const proposedResponse = this._earlyCheckinReplySnippet(context, guestMessage);
+    parsed.typeOfMessageReceived = 'EARLY_CHECKIN';
+    parsed.proposedResponse = proposedResponse;
+    parsed.shouldReply = true;
+    parsed.confidence = 1.0;
+    parsed.escalated = false;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'EARLY_CHECKIN',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
 
   /**
    * Guest message signals actual checkout / end-of-stay departure (not a brief step-out).
@@ -5885,6 +6014,16 @@ export class GuestMessagingAgent {
     const earlyCheckinNameFinal = this._applyEarlyCheckinNamePolicy(finalResult, enrichedContext);
     if (earlyCheckinNameFinal.applied) {
       finalResult.proposedResponse = earlyCheckinNameFinal.proposedResponse;
+    }
+
+    const earlyCheckinReplyFinal = this._applyEarlyCheckinReplyPolicy(finalResult, enrichedContext, guestMessage);
+    if (earlyCheckinReplyFinal.applied) {
+      console.log('[Agent] → Early check-in reply policy applied (message when cleaning finishes / unit ready)');
+      finalResult.typeOfMessageReceived = earlyCheckinReplyFinal.typeOfMessageReceived || 'EARLY_CHECKIN';
+      finalResult.proposedResponse = earlyCheckinReplyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
     }
 
     const postCheckoutThanksPolicyFinal = this._applyPostCheckoutThankYouPolicy(finalResult, enrichedContext, guestMessage);
