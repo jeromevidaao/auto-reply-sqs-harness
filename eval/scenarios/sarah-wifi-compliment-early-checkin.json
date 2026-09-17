@@ -1,0 +1,68 @@
+{
+  "id": "sarah-wifi-compliment-early-checkin",
+  "description": "Sarah/Sara (Cozy West End Victorian Sep 20\u201322): WiFi password compliment + early check-in ask. Production only answered WiFi and dropped early check-in.",
+  "guestMessage": "Wonderful! I love your WiFi password! :)\n\nAny chance we can check-in earlier? We will be in Portland, as we arrive on the 19th and will stay at a hotel the first night.\n\nThank you!\n\nSara",
+  "context": {
+    "guestName": "Sara",
+    "checkIn": "2026-09-20",
+    "checkOut": "2026-09-22",
+    "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "propertyName": "53 Pine St #3 \u00b7 Cozy West End Victorian | EV Charging + Parking",
+    "conversationHistory": [
+      {
+        "role": "host",
+        "sender_type": "host",
+        "body": "Hi Sara! The WiFi network is Ansia_2.4 and the password is 10286500 (all lowercase). Looking forward to hosting you.",
+        "content": "Hi Sara! The WiFi network is Ansia_2.4 and the password is 10286500 (all lowercase). Looking forward to hosting you."
+      },
+      {
+        "role": "guest",
+        "sender_type": "guest",
+        "body": "Thanks!",
+        "content": "Thanks!"
+      }
+    ],
+    "asOfDate": "2026-09-17",
+    "asOfInstant": "2026-09-17T15:32:00-07:00",
+    "nowForGreeting": "2026-09-17T15:32:00-07:00",
+    "reservationId": "sarah-cozy-west-end-2026-09-20",
+    "conversation_id": "sarah-wifi-early-checkin-conv",
+    "airbnbListingId": "24259977",
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "earlyUnitReadyOffered": false,
+      "greeting": {
+        "isFirstHostMessage": false,
+        "numHostMessages": 2
+      },
+      "historySource": "scenario"
+    }
+  },
+  "rubric": {
+    "expectedCategory": [
+      "EARLY_CHECKIN",
+      "EARLY_CHECKIN_QUESTION",
+      "THANK_YOU_MESSAGE",
+      "FYI_STATEMENT",
+      "WIFI_PASSWORD"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "requiredPhrases": [
+      "4pm",
+      "cleaning finishes",
+      "getting the unit ready",
+      "message you",
+      "WiFi"
+    ],
+    "forbiddenPhrases": [
+      "check with the cleaning team",
+      "if we can accommodate"
+    ]
+  },
+  "notes": "Production 2026-09-17 ~15:32 PT. Bad reply: You're welcome, Sara! The WiFi network is Ansia_2.4... Missed early check-in. Root: _isWifiPasswordAsk matched compliment and _applyWifiPolicy overwrote early-check-in draft. Fix: compliment detector + _applyWifiEarlyCheckinMultiIntentPolicy.",
+  "productionMiss": true,
+  "unitTestEnforced": true,
+  "guestName": "Sara"
+}

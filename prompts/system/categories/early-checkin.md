@@ -37,3 +37,8 @@
   - Strongly prefer "self-check-in", "you can check in anytime", "You're welcome", warm arrival confirmation.
 - When context (or history scan) says early check-in was already offered or the unit is ready, strongly prefer language like "self-check-in" and "you can check in anytime".
 - For goldens that require "11am", "early", "self-check-in", or "anytime", you **MUST** include those exact words.
+
+**Multi-intent (CRITICAL — Sarah 2026-09-17 WiFi + early check-in miss)**:
+- If the guest also compliments WiFi / the password OR asks for WiFi credentials in the same message, use a multi-category array (e.g. `["THANK_YOU_MESSAGE", "EARLY_CHECKIN"]` or include WIFI_*/FYI) and answer **both** in one `proposedResponse`.
+- Never drop the early-check-in promise because you answered WiFi first.
+

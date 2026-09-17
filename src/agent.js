@@ -581,6 +581,17 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
+    const wifiEarlyMulti = this._applyWifiEarlyCheckinMultiIntentPolicy(parsed, context, guestMessage);
+    if (wifiEarlyMulti.applied) {
+      console.log('[Agent] → WiFi + early check-in multi-intent policy applied');
+      parsed.typeOfMessageReceived = wifiEarlyMulti.typeOfMessageReceived;
+      parsed.proposedResponse = wifiEarlyMulti.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
+    }
+
     const stayWindowAccessPolicy = this._applyStayWindowAccessPolicy(parsed, context, guestMessage);
     if (stayWindowAccessPolicy.applied) {
       this._assignStayWindowAccess(parsed, stayWindowAccessPolicy);
@@ -769,6 +780,21 @@ export class GuestMessagingAgent {
       console.log(
         `[Agent] → First-host new-booking welcome policy (processMessage): ${firstHostWelcomePolicy.reason}`
       );
+    }
+
+    const wifiEarlyAfterFirstHost = this._applyWifiEarlyCheckinMultiIntentPolicy(
+      parsed,
+      context,
+      guestMessage
+    );
+    if (wifiEarlyAfterFirstHost.applied) {
+      console.log('[Agent] → WiFi + early check-in multi-intent restored after first-host (processMessage)');
+      parsed.typeOfMessageReceived = wifiEarlyAfterFirstHost.typeOfMessageReceived;
+      parsed.proposedResponse = wifiEarlyAfterFirstHost.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
     }
 
     const inStaySeeYouSoonPolicy = this._applyInStaySeeYouSoonPolicy(parsed, context, guestMessage);
@@ -4057,11 +4083,43 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Guest is complimenting WiFi / the password (Sarah 2026-09-17), not asking for it.
+   * "I love your WiFi password!" must not fire WIFI_PASSWORD credential force.
+   */
+  _isWifiCompliment(guestMessage = '') {
+    const msg = String(guestMessage || '');
+    if (!this._isWifiMention(msg) && !/\bpassword\b/i.test(msg)) return false;
+    const praise =
+      /\b(love|like|loved|liked|great|awesome|wonderful|amazing|perfect|excellent|fantastic|cool)\b/i.test(
+        msg
+      );
+    if (!praise) return false;
+    // Praise near wifi/password (love your WiFi password / wifi is great / password is wonderful)
+    return (
+      /\b(love|like|loved|liked|great|awesome|wonderful|amazing|perfect|excellent|fantastic|cool)\b[\s\S]{0,40}\b(wifi|wi-?fi|password|network)\b/i.test(
+        msg
+      ) ||
+      /\b(wifi|wi-?fi|password|network)\b[\s\S]{0,40}\b(love|like|loved|liked|great|awesome|wonderful|amazing|perfect|excellent|fantastic|cool)\b/i.test(
+        msg
+      )
+    );
+  }
+
+  /**
    * Explicit password / network-name ask (WIFI_PASSWORD).
+   * Compliments ("I love your WiFi password!") are NOT asks — Sarah multi-intent miss.
    */
   _isWifiPasswordAsk(guestMessage = '') {
     const msg = String(guestMessage || '');
     if (!this._isWifiMention(msg) && !/\b(ssid|network name)\b/i.test(msg)) return false;
+    // Compliment-only: do not treat as a credential ask unless they also request the password.
+    if (this._isWifiCompliment(msg)) {
+      const explicitlyAsking =
+        /\b(what(?:'s| is)|can you (?:send|share|give|remind)|need (?:the |your )?(?:wifi |wi-?fi )?password|forgot|remind me)\b/i.test(
+          msg
+        );
+      if (!explicitlyAsking) return false;
+    }
     return /\b(password|network name|ssid|credentials|what(?:'s| is) the (?:wifi|wi-?fi|network)|wifi (?:network|code|pw|pass))\b/i.test(
       msg
     );
@@ -4132,24 +4190,29 @@ export class GuestMessagingAgent {
 
     const category = deviceAsk ? 'WIFI_TROUBLESHOOTING' : 'WIFI_PASSWORD';
     const guestHasThanks = this._hasThankYouIntent(guestMessage);
-    const typeOfMessageReceived = this._mergeCategories(
+    const earlyAsk = this._isEarlyCheckinAsk(guestMessage);
+    let typeOfMessageReceived = this._mergeCategories(
       parsed.typeOfMessageReceived,
       category,
-      guestHasThanks ? 'THANK_YOU_MESSAGE' : null
+      guestHasThanks ? 'THANK_YOU_MESSAGE' : null,
+      earlyAsk ? 'EARLY_CHECKIN' : null
     );
 
     const draft = (parsed.proposedResponse || '').trim();
     const hasCreds = this._wifiDraftHasCredentials(draft);
     const hasSteps = /settings|select the network|enter the password|reconnect/i.test(draft);
     const hasFollowUp = /let me know if it works/i.test(draft);
+    const hasStrongEarly = this._hasStrongEarlyCheckinPromise(draft);
     const catsCorrect =
       this._categoriesInclude(parsed.typeOfMessageReceived, category) &&
-      (!guestHasThanks || this._categoriesInclude(parsed.typeOfMessageReceived, 'THANK_YOU_MESSAGE'));
-    const textCorrect =
+      (!guestHasThanks || this._categoriesInclude(parsed.typeOfMessageReceived, 'THANK_YOU_MESSAGE')) &&
+      (!earlyAsk || this._categoriesInclude(parsed.typeOfMessageReceived, 'EARLY_CHECKIN'));
+    const wifiTextCorrect =
       hasCreds &&
       (!deviceAsk || (hasSteps && hasFollowUp)) &&
       draft &&
       draft.toLowerCase() !== 'none';
+    const textCorrect = wifiTextCorrect && (!earlyAsk || hasStrongEarly);
 
     if (textCorrect && catsCorrect) {
       return { applied: false };
@@ -4174,19 +4237,150 @@ export class GuestMessagingAgent {
         `The WiFi network is ${ssid} and the password is ${password} (all lowercase). ` + WIFI_LET_ME_KNOW;
     }
 
-    let proposedResponse;
+    let wifiPart;
     if (guestHasThanks) {
-      proposedResponse = firstName ? `You're welcome, ${firstName}! ${body}` : `You're welcome! ${body}`;
+      wifiPart = firstName ? `You're welcome, ${firstName}! ${body}` : `You're welcome! ${body}`;
     } else if (firstName) {
-      proposedResponse = `Hi ${firstName}, ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
+      wifiPart = `Hi ${firstName}, ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
     } else {
-      proposedResponse = body;
+      wifiPart = body;
+    }
+
+    let proposedResponse = wifiPart;
+    // Sarah miss: wifi credential force must not wipe an early-check-in ask.
+    if (earlyAsk && !this._hostAlreadyOfferedUnitReady(context)) {
+      const earlyPart = hasStrongEarly
+        ? draft
+        : this._earlyCheckinReplySnippet(context, guestMessage);
+      proposedResponse = this._combineWifiAndEarlyCheckinReply(wifiPart, earlyPart);
+      typeOfMessageReceived = this._mergeCategories(typeOfMessageReceived, 'EARLY_CHECKIN');
     }
 
     return {
       applied: true,
       typeOfMessageReceived,
       proposedResponse,
+    };
+  }
+
+  /**
+   * Join a wifi ack/credentials sentence with the Alexandra early-check-in promise
+   * without stacking duplicate greetings / You're welcome openers.
+   */
+  _combineWifiAndEarlyCheckinReply(wifiPart = '', earlyPart = '') {
+    const wifi = String(wifiPart || '').trim();
+    let early = String(earlyPart || '').trim();
+    if (!wifi) return early;
+    if (!early) return wifi;
+    // Strip time-of-day greeting + name from early snippet when wifi already opened.
+    early = early
+      .replace(/^(good\s+(morning|afternoon|evening)|hi|hello),?\s+[\w'-]+[.!]\s*/i, '')
+      .trim();
+    if (!early) return wifi;
+    // Avoid double "You're welcome" if early somehow included it.
+    if (/you(?:'|’)re welcome|you are welcome/i.test(wifi)) {
+      early = early.replace(/^you(?:'|’)re welcome[,!]\s*/i, '').trim();
+    }
+    return `${wifi} ${early}`.replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Sarah · Cozy West End Victorian 2026-09-17: WiFi compliment + early check-in ask.
+   * Production answered only WiFi. Ensure BOTH intents are covered — brief wifi ack
+   * (or credentials when asked) + Alexandra early-check-in promise.
+   */
+  _applyWifiEarlyCheckinMultiIntentPolicy(parsed = {}, context = {}, guestMessage = '') {
+    const earlyAsk = this._isEarlyCheckinAsk(guestMessage);
+    if (!earlyAsk) return { applied: false };
+    if (this._hostAlreadyOfferedUnitReady(context)) return { applied: false };
+
+    const wifiAsk =
+      this._isWifiPasswordAsk(guestMessage) || this._isWifiDeviceConnectAsk(guestMessage);
+    const wifiCompliment = this._isWifiCompliment(guestMessage);
+    if (!wifiAsk && !wifiCompliment) return { applied: false };
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const hasStrongEarly = this._hasStrongEarlyCheckinPromise(draft);
+    const hasWeakEarly = this._hasWeakEarlyCheckinCopy(draft);
+    const hasCreds = this._wifiDraftHasCredentials(draft);
+    const hasWifiAck =
+      /\b(wifi|wi-?fi|password|network)\b/i.test(draft) &&
+      (/you(?:'|’)re welcome|glad you|love that|happy you|thanks for|wonderful/i.test(draft) ||
+        hasCreds);
+
+    const needsCreds =
+      wifiAsk && !this._hostAlreadySentWifiCredentials(context);
+    const wifiCovered = needsCreds ? hasCreds : hasWifiAck || hasCreds;
+    const earlyCovered = hasStrongEarly && !hasWeakEarly;
+
+    const guestHasThanks = this._hasThankYouIntent(guestMessage);
+    const typeOfMessageReceived = this._mergeCategories(
+      parsed.typeOfMessageReceived,
+      'EARLY_CHECKIN',
+      wifiAsk ? (this._isWifiDeviceConnectAsk(guestMessage) ? 'WIFI_TROUBLESHOOTING' : 'WIFI_PASSWORD') : null,
+      wifiCompliment && !wifiAsk ? 'FYI_STATEMENT' : null,
+      guestHasThanks ? 'THANK_YOU_MESSAGE' : null
+    );
+
+    if (wifiCovered && earlyCovered) {
+      const catsOk =
+        this._categoriesInclude(parsed.typeOfMessageReceived, 'EARLY_CHECKIN') ||
+        this._categoriesInclude(parsed.typeOfMessageReceived, 'EARLY_CHECKIN_QUESTION');
+      if (catsOk) return { applied: false };
+      return {
+        applied: true,
+        typeOfMessageReceived,
+        proposedResponse: draft,
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    let wifiPart;
+    if (needsCreds) {
+      const { ssid, password } = this._wifiCredentials();
+      const body =
+        `The WiFi network is ${ssid} and the password is ${password} (all lowercase). ` + WIFI_LET_ME_KNOW;
+      wifiPart = guestHasThanks
+        ? firstName
+          ? `You're welcome, ${firstName}! ${body}`
+          : `You're welcome! ${body}`
+        : firstName
+          ? `Hi ${firstName}, ${body.charAt(0).toLowerCase()}${body.slice(1)}`
+          : body;
+    } else {
+      // Compliment / credentials already on thread — brief ack only (do not re-spam password).
+      wifiPart = guestHasThanks
+        ? firstName
+          ? `You're welcome, ${firstName}! Glad you like the WiFi.`
+          : `You're welcome! Glad you like the WiFi.`
+        : firstName
+          ? `Hi ${firstName}, glad you like the WiFi.`
+          : `Glad you like the WiFi.`;
+    }
+
+    const earlyPart = earlyCovered
+      ? draft
+      : this._earlyCheckinReplySnippet(context, guestMessage);
+    const proposedResponse = this._combineWifiAndEarlyCheckinReply(
+      wifiCovered && earlyCovered ? draft : wifiPart,
+      earlyCovered && wifiCovered ? '' : earlyPart
+    );
+    // If wifi was already covered in draft but early missing, append early to existing draft.
+    const finalResponse =
+      wifiCovered && !earlyCovered
+        ? this._combineWifiAndEarlyCheckinReply(draft, this._earlyCheckinReplySnippet(context, guestMessage))
+        : !wifiCovered && earlyCovered
+          ? this._combineWifiAndEarlyCheckinReply(wifiPart, draft)
+          : proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived,
+      proposedResponse: finalResponse,
+      shouldReply: true,
+      confidence: 1.0,
     };
   }
 
@@ -6093,6 +6287,20 @@ export class GuestMessagingAgent {
       finalResult.confidence = 1.0;
     }
 
+    const wifiEarlyMultiFinal = this._applyWifiEarlyCheckinMultiIntentPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (wifiEarlyMultiFinal.applied) {
+      console.log('[Agent] → WiFi + early check-in multi-intent policy applied (final)');
+      finalResult.typeOfMessageReceived = wifiEarlyMultiFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = wifiEarlyMultiFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+    }
+
     const stayWindowAccessFinal = this._applyStayWindowAccessPolicy(
       finalResult,
       enrichedContext,
@@ -6189,6 +6397,21 @@ export class GuestMessagingAgent {
       finalResult.escalated = firstHostWelcomeFinal.escalated;
       finalResult.firstHostWelcomeForced = true;
       finalResult.firstHostWelcomeReason = firstHostWelcomeFinal.reason;
+    }
+
+    // After first-host gate: Sarah-style wifi+early multi-intent must not stay wiped by welcome.
+    const wifiEarlyAfterWelcome = this._applyWifiEarlyCheckinMultiIntentPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (wifiEarlyAfterWelcome.applied) {
+      console.log('[Agent] → WiFi + early check-in multi-intent restored after first-host gate');
+      finalResult.typeOfMessageReceived = wifiEarlyAfterWelcome.typeOfMessageReceived;
+      finalResult.proposedResponse = wifiEarlyAfterWelcome.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
     }
 
     const postWelcomeThanksPolicyFinal = this._applyPostWelcomeThankYouPolicy(finalResult, enrichedContext, guestMessage);
