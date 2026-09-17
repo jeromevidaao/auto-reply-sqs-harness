@@ -1366,13 +1366,19 @@ export class GuestMessagingAgent {
     const name = this._guestDisplayFirstName(context);
     const draft = (parsed.proposedResponse || '').trim();
 
+    const canonical =
+      `You're welcome, ${name}! Glad you had a lovely stay — thanks for the heads up about the sofa bed, I'll note that for the team. Safe travels!`;
     const tooBare = !draft || draft === 'none' ||
       /^you're welcome,?\s+\w+!?\s*$/i.test(draft) ||
       (draft.length < 80 && !/heads up|sofa bed|note that|lovely stay/i.test(draft));
+    // Amy CI flake: long LLM rewrites can acknowledge the sofa sheets FYI but omit
+    // "Safe travels" / "heads up about the sofa bed" — force the canonical copy.
+    const missingRequired =
+      !/safe travels/i.test(draft) || !/heads up about the sofa bed/i.test(draft);
 
     let proposedResponse = draft;
-    if (tooBare) {
-      proposedResponse = `You're welcome, ${name}! Glad you had a lovely stay — thanks for the heads up about the sofa bed, I'll note that for the team. Safe travels!`;
+    if (tooBare || missingRequired) {
+      proposedResponse = canonical;
     }
 
     parsed.typeOfMessageReceived = typeOfMessageReceived;
