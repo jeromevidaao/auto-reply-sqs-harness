@@ -41,5 +41,5 @@
 **Multi-intent (CRITICAL — Sarah 2026-09-17 WiFi + early check-in miss)**:
 - If the guest **compliments** WiFi / the password and also asks for early check-in: primary category **EARLY_CHECKIN**; reply with the classic cleaning-finishes / message-you promise. Do **not** dump WiFi credentials for a compliment.
 - If the guest **explicitly asks** for WiFi credentials and also early check-in: cover both (property-aware Pineland/lobsterbake for Pine St) in one reply.
-- Never drop the early-check-in promise because you answered WiFi first. Never emit Ansia_2.4 / 10286500 for Pine St / West End Victorian.
+- Never drop the early-check-in promise because you answered WiFi first. Never emit WRONG_SSID / wrong-password for Pine St / West End Victorian.
 

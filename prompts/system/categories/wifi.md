@@ -5,7 +5,7 @@
 **CRITICAL NAMING RULE**: When the guest asks for the password or network name, output exactly **WIFI_PASSWORD**. When they have device/TV connection trouble or ask for steps to connect a device, output exactly **WIFI_TROUBLESHOOTING**. Do not use lowercase "wifi".
 
 **Network (property-aware)**:
-- Pine St / West End Victorian (Apt 1B, Apt 2, Apt 3): **Pineland** / **lobsterbake** (from check-in templates — never the global hostContacts `{{WIFI_SSID}}` / `{{WIFI_PASSWORD}}` if those still hold Ansia_2.4 / 10286500).
+- Pine St / West End Victorian (Apt 1B, Apt 2, Apt 3): **Pineland** / **lobsterbake** (from check-in templates — never the global hostContacts `{{WIFI_SSID}}` / `{{WIFI_PASSWORD}}` if those still hold WRONG_SSID / wrong-password).
 - Other / unknown: {{WIFI_SSID}} / {{WIFI_PASSWORD}} from host contacts.
 **Password**: {{WIFI_PASSWORD}} (all lowercase)
 

@@ -68,7 +68,7 @@ import {
 import {
   wifiCredentialsFromCheckinTemplate,
   draftContainsForbiddenPineWifi,
-  FORBIDDEN_PINE_WIFI,
+  CANONICAL_PINE_WIFI,
 } from './useCases/checkinTemplates/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1964,7 +1964,7 @@ export class GuestMessagingAgent {
     const weak = this._hasWeakEarlyCheckinCopy(draft);
     const strong = this._hasStrongEarlyCheckinPromise(draft);
     const missing = !draft || draft.toLowerCase() === 'none' || draft.length < 12;
-    // Sarah miss: WiFi credential dump (esp. wrong Ansia globals) is not a valid early reply.
+    // Sarah miss: WiFi credential dump (esp. non-Pineland credentials) is not a valid early reply.
     const wifiDump =
       draftContainsForbiddenPineWifi(draft) ||
       (/wifi\s+network\s+is/i.test(draft) && /password\s+is/i.test(draft) && isAsk);
@@ -3467,7 +3467,7 @@ export class GuestMessagingAgent {
 
     const draft = (parsed.proposedResponse || '').trim();
     const lower = draft.toLowerCase();
-    const needsStorageDetail = !lower.includes('storage compartment') && !lower.includes('under the sofa');
+    const needsStorageDetail = !lower.includes('storage compartment') || !lower.includes('under the sofa');
     const needsSheets = !/\bsheets\b/i.test(draft);
     const needsBlankets = !/\bblankets\b/i.test(draft);
     const needsPillows = !/\bpillows\b/i.test(draft);
@@ -3489,10 +3489,8 @@ export class GuestMessagingAgent {
 
     let proposedResponse = draft;
     if (shouldRewrite) {
-      const prefix = hasTodGreeting
-        ? draft.match(/^(Good (?:morning|afternoon|evening)[^!?\n]{0,80}[,!]\s*)/i)?.[0] || greetingPrefix
-        : greetingPrefix;
-      proposedResponse = prefix + facts;
+      // Always use a clean greeting + canonical facts (avoid appending onto a partial draft).
+      proposedResponse = greetingPrefix + facts;
     }
 
     return {
@@ -4115,6 +4113,82 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Guest-agnostic signals that the guest already knows / has WiFi credentials.
+   * Includes compliments (_isWifiCompliment) plus acks like "wifi works", "got it",
+   * "we're online", "thanks for the password". Never hardcode guest/property names.
+   */
+  _guestSignalsKnowsWifi(text = '') {
+    const msg = String(text || '');
+    if (!msg.trim()) return false;
+    if (this._isWifiCompliment(msg)) return true;
+    if (
+      /\b(?:got it|got the (?:wifi |wi-?fi )?password|thanks for (?:the )?(?:wifi |wi-?fi )?password|thank you for (?:the )?(?:wifi |wi-?fi )?password)\b/i.test(
+        msg
+      )
+    ) {
+      return true;
+    }
+    if (
+      /\b(?:wifi|wi-?fi)(?:\s+(?:password|network))?\b[\s\S]{0,40}\b(?:works|working|connected|great|awesome|perfect|good)\b/i.test(
+        msg
+      ) ||
+      /\b(?:works|working|connected|great|awesome|perfect)\b[\s\S]{0,40}\b(?:wifi|wi-?fi)(?:\s+(?:password|network))?\b/i.test(
+        msg
+      )
+    ) {
+      return true;
+    }
+    if (
+      /\b(?:logged in|we(?:'|’)re online|we are online|online now|got (?:on|onto) (?:the )?(?:wifi|wi-?fi|network))\b/i.test(
+        msg
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  _isGuestHistoryRole(row = {}) {
+    const role = String(row?.sender_type || row?.role || row?.sender?.type || row?.sender || '').toLowerCase();
+    return role === 'guest' || role === 'guest_message';
+  }
+
+  /**
+   * True when current message OR prior GUEST turns show they already know WiFi,
+   * or host already sent credentials and the guest is not explicitly re-asking.
+   * Property/guest-agnostic — conversation history is the source of truth.
+   */
+  _guestAlreadyKnowsWifiFromConversation(guestMessage = '', context = {}) {
+    const msg = String(guestMessage || '');
+    const explicitAsk =
+      this._isWifiPasswordAsk(msg) || this._isWifiDeviceConnectAsk(msg);
+    if (explicitAsk) return false;
+
+    if (this._guestSignalsKnowsWifi(msg)) return true;
+
+    const history = Array.isArray(context.conversationHistory) ? context.conversationHistory : [];
+    for (const row of history) {
+      if (!this._isGuestHistoryRole(row)) continue;
+      const body = String(row?.body || row?.message || row?.text || row?.content || '');
+      if (this._guestSignalsKnowsWifi(body)) return true;
+    }
+
+    // Host already shared credentials in-thread and guest is not asking again.
+    if (this._hostAlreadySentWifiCredentials(context)) return true;
+    if (
+      history.some((row) => {
+        const role = String(row?.sender_type || row?.role || row?.sender?.type || row?.sender || '').toLowerCase();
+        if (!(role === 'host' || role === 'host_message' || role === 'owner')) return false;
+        const body = String(row?.body || row?.message || row?.text || row?.content || '');
+        return /(?:wifi|wi-?fi)\s+network\s+is\b|\bpassword\s+is\s+[\w.-]{4,}/i.test(body);
+      })
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Explicit password / network-name ask (WIFI_PASSWORD).
    * Compliments ("I love your WiFi password!") are NOT asks — Sarah multi-intent miss.
    */
@@ -4158,7 +4232,7 @@ export class GuestMessagingAgent {
   /**
    * Property-aware WiFi credentials.
    * Pine St / West End Victorian (apt-1b/2/3 check-in templates) → Pineland / lobsterbake.
-   * Never emit global hostContacts Ansia_2.4 / 10286500 for those units (Sarah 2026-09-17).
+   * Never emit non-Pineland globals for those units — only Pineland / lobsterbake (Sarah 2026-09-17).
    * Non-Pine / unknown listing: fall back to hostContacts (SSM / env).
    */
   _wifiCredentials(context = {}) {
@@ -4169,16 +4243,17 @@ export class GuestMessagingAgent {
     const c = getHostContactsSync();
     const ssid = String(c.wifiSsid || '').trim() || '{{WIFI_SSID}}';
     const password = String(c.wifiPassword || '').trim() || '{{WIFI_PASSWORD}}';
-    // Hard block: if somehow still resolving the known-wrong Ansia pair with a Pine-like name, refuse.
+    // Hard block: Pine / West End always resolve to Pineland / lobsterbake.
     const name = String(context.propertyName || context.listingName || '').toLowerCase();
     const looksPine =
       /pine\s*st|west\s*end\s*victorian|53\s*pine|cozy.*victorian|sunny.*victorian/.test(name);
-    if (
-      looksPine &&
-      (ssid.toLowerCase() === FORBIDDEN_PINE_WIFI.ssid.toLowerCase() ||
-        password === FORBIDDEN_PINE_WIFI.password)
-    ) {
-      return { ssid: 'Pineland', password: 'lobsterbake', source: 'pine-forbidden-fallback' };
+    if (looksPine) {
+      // Pine / West End: only Pineland / lobsterbake — never hostContacts globals.
+      return {
+        ssid: CANONICAL_PINE_WIFI.ssid,
+        password: CANONICAL_PINE_WIFI.password,
+        source: 'pine-canonical-fallback',
+      };
     }
     return { ssid, password, source: 'hostContacts' };
   }
@@ -4207,28 +4282,21 @@ export class GuestMessagingAgent {
   }
 
   /**
-   * Strip known-wrong Ansia_2.4 / 10286500 (and any credential dump) from a draft
+   * Strip any non-canonical WiFi credential dump from a draft
    * when the guest did not ask for WiFi credentials.
    */
   _stripWifiCredentialDump(draft = '', context = {}) {
     let d = String(draft || '');
-    // Remove forbidden Ansia pair sentences.
+    // Generic credential dump: "network is X / password is Y" (any SSID/password).
     d = d.replace(
-      /(?:the\s+)?wifi\s+network\s+is\s+ansia[_\s]?2\.4\s+and\s+the\s+password\s+is\s+10286500(?:\s*\([^)]*\))?[^.!?]*[.!?]?/gi,
+      /(?:the\s+)?(?:wifi|wi-?fi)\s+network\s+is\s+\S+(?:\s+and\s+the\s+password\s+is\s+\S+)?(?:\s*\([^)]*\))?[^.!?]*[.!?]?/gi,
       ''
     );
-    d = d.replace(/\bansia[_\s]?2\.4\b/gi, '');
-    d = d.replace(/\b10286500\b/g, '');
-    // If pine context and draft still has wrong pair fragments, clear credential sentences.
-    if (wifiCredentialsFromCheckinTemplate(context) || draftContainsForbiddenPineWifi(d)) {
-      d = d.replace(
-        /(?:the\s+)?wifi\s+network\s+is\s+\S+\s+and\s+the\s+password\s+is\s+\S+(?:\s*\([^)]*\))?[^.!?]*[.!?]?/gi,
-        ''
-      );
-      d = d.replace(/\blet me know if it works\.?/gi, '');
-    }
+    d = d.replace(/\b(?:and\s+)?the\s+password\s+is\s+\S+(?:\s*\([^)]*\))?[^.!?]*[.!?]?/gi, '');
+    d = d.replace(/\blet me know if it works\.?/gi, '');
     return d.replace(/\s+/g, ' ').trim();
   }
+
 
   /**
    * Jane TV-connect miss (West End Victorian 2026-09-12–16): guest asked for steps
@@ -4240,6 +4308,10 @@ export class GuestMessagingAgent {
     const deviceAsk = this._isWifiDeviceConnectAsk(guestMessage);
     const passwordAsk = this._isWifiPasswordAsk(guestMessage);
     if (!deviceAsk && !passwordAsk) {
+      return { applied: false };
+    }
+    // Guest already knows WiFi (compliment/ack/history) — never force credentials.
+    if (this._guestAlreadyKnowsWifiFromConversation(guestMessage, context)) {
       return { applied: false };
     }
     if (this._hostAlreadySentWifiCredentials(context)) {
@@ -4369,9 +4441,12 @@ export class GuestMessagingAgent {
     const wifiAsk =
       this._isWifiPasswordAsk(guestMessage) || this._isWifiDeviceConnectAsk(guestMessage);
     const wifiCompliment = this._isWifiCompliment(guestMessage);
+    const guestKnowsWifi =
+      wifiCompliment || this._guestAlreadyKnowsWifiFromConversation(guestMessage, context);
 
-    // Compliment alone (no early ask, no password ask) → warm ack, never credential dump.
-    if (wifiCompliment && !wifiAsk && !earlyAsk) {
+    // Compliment / knows-wifi alone (no early ask, no password ask) → warm ack, never credential dump.
+    // Do NOT collapse into WIFI_PASSWORD — keep FYI / thanks categories only.
+    if (guestKnowsWifi && !wifiAsk && !earlyAsk && (wifiCompliment || this._guestSignalsKnowsWifi(guestMessage))) {
       const draft = String(parsed.proposedResponse || '').trim();
       const hasForbidden = draftContainsForbiddenPineWifi(draft);
       const dumpedCreds =
@@ -4395,18 +4470,19 @@ export class GuestMessagingAgent {
 
     if (!earlyAsk) return { applied: false };
     if (this._hostAlreadyOfferedUnitReady(context)) return { applied: false };
-    if (!wifiAsk && !wifiCompliment) return { applied: false };
+    if (!wifiAsk && !guestKnowsWifi) return { applied: false };
 
     const draft = String(parsed.proposedResponse || '').trim();
     const guestHasThanks = this._hasThankYouIntent(guestMessage);
 
-    // Compliment + early check-in (no explicit WiFi ask): EARLY_CHECKIN wins.
-    // Strip any credential dump the LLM / prior wifi policy injected.
-    if (wifiCompliment && !wifiAsk) {
+    // Guest already knows WiFi (compliment / prior ack / host sent) + early check-in:
+    // EARLY_CHECKIN wins. Multi-category OK (EARLY_CHECKIN + THANK_YOU + FYI).
+    // Never inject WIFI_PASSWORD or credentials when they are not asking.
+    if (guestKnowsWifi && !wifiAsk) {
       const earlyPart = this._hasStrongEarlyCheckinPromise(draft) && !draftContainsForbiddenPineWifi(draft)
         ? this._stripWifiCredentialDump(draft, context)
         : this._earlyCheckinReplySnippet(context, guestMessage);
-      // Prefer pure early snippet — do not force WiFi ack/credentials on a compliment.
+      // Prefer pure early snippet — do not force WiFi ack/credentials when guest knows WiFi.
       const proposedResponse =
         this._hasStrongEarlyCheckinPromise(earlyPart) && !draftContainsForbiddenPineWifi(earlyPart)
           ? earlyPart
@@ -4416,7 +4492,7 @@ export class GuestMessagingAgent {
         typeOfMessageReceived: this._mergeCategories(
           'EARLY_CHECKIN',
           guestHasThanks ? 'THANK_YOU_MESSAGE' : null,
-          'FYI_STATEMENT'
+          wifiCompliment || this._guestSignalsKnowsWifi(guestMessage) ? 'FYI_STATEMENT' : null
         ),
         proposedResponse,
         shouldReply: true,
@@ -7077,54 +7153,47 @@ export class GuestMessagingAgent {
     const hvacGuard = this._applyHvacThreadJudgeGuard(llmJudgeResult, firstDecision, context, guestMessage);
     if (hvacGuard) return hvacGuard;
 
-    // Sarah 2026-09-17: WiFi compliment / prior host WiFi → never APPROVE credential re-send.
+    // Generic: guest already knows WiFi (compliment / prior guest ack / host sent) →
+    // never APPROVE credential re-send. Prefer REVISE (intent rework) with early-checkin
+    // classic when that was the actionable ask. Sarah is one example only.
     {
       const draft = (firstDecision.proposedResponse || '').trim();
       const revised = (llmJudgeResult.revisedResponse || '').trim();
       const wifiCompliment = this._isWifiCompliment(guestMessage);
       const wifiAsk =
         this._isWifiPasswordAsk(guestMessage) || this._isWifiDeviceConnectAsk(guestMessage);
-      const hostSentWifi =
-        this._hostAlreadySentWifiCredentials(context) ||
-        (Array.isArray(context.conversationHistory) &&
-          context.conversationHistory.some((m) => {
-            const role = String(m?.sender_type || m?.role || '').toLowerCase();
-            if (!(role === 'host' || role === 'owner')) return false;
-            const body = String(m?.body || m?.content || '');
-            return /(?:wifi|wi-?fi)\s+network\s+is|pineland|lobsterbake|ansia[\s_]?2\.4|10286500/i.test(body);
-          }));
+      const guestKnowsWifi = this._guestAlreadyKnowsWifiFromConversation(guestMessage, context);
       const dumpRe =
-        /ansia[\s_]?2\.4|10286500|pineland|lobsterbake|(?:wifi|wi-?fi)\s+network\s+is|password\s+is\s+\S+/i;
+        /(?:wifi|wi-?fi)\s+network\s+is|password\s+is\s+\S+|\bpineland\b|\blobsterbake\b/i;
       const draftDumps = dumpRe.test(draft);
       const revisedDumps = revised ? dumpRe.test(revised) : false;
-      if (!wifiAsk && (wifiCompliment || hostSentWifi) && (draftDumps || revisedDumps || llmJudgeResult.verdict === 'APPROVE' && draftDumps)) {
-        if (draftDumps || (llmJudgeResult.verdict === 'APPROVE' && draftDumps) || revisedDumps) {
-          const earlyAsk = this._isEarlyCheckinAsk(guestMessage);
-          let fixed;
-          if (earlyAsk && !this._hostAlreadyOfferedUnitReady(context)) {
-            fixed = this._earlyCheckinReplySnippet(context, guestMessage);
-          } else if (wifiCompliment) {
-            fixed = this._wifiComplimentAckSnippet(context, guestMessage);
-          } else {
-            fixed = this._stripWifiCredentialDump(draft, context) || draft;
-          }
-          const stillDumps = dumpRe.test(fixed);
-          console.log('[Agent] → Deterministic judge guard: WiFi re-send after compliment / prior host credentials (Sarah)');
-          return {
-            ...llmJudgeResult,
-            // REJECT pure credential spam; REVISE when we can answer early check-in.
-            verdict: earlyAsk && !stillDumps ? 'REVISE' : stillDumps ? 'REJECT' : 'REVISE',
-            revisedResponse: stillDumps ? undefined : fixed,
-            notes:
-              (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
-              'Deterministic guard: guest complimented WiFi / host already sent credentials — do not re-send SSID/password; answer early check-in only when asked.',
-            issues: [
-              ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
-              'WiFi credential re-send after compliment or prior host WiFi (Sarah West End Victorian 2026-09-17).',
-            ],
-            deterministicGuard: true,
-          };
+      const dumps = draftDumps || revisedDumps;
+      if (!wifiAsk && guestKnowsWifi && dumps) {
+        const earlyAsk = this._isEarlyCheckinAsk(guestMessage);
+        let fixed;
+        if (earlyAsk && !this._hostAlreadyOfferedUnitReady(context)) {
+          fixed = this._earlyCheckinReplySnippet(context, guestMessage);
+        } else if (wifiCompliment || this._guestSignalsKnowsWifi(guestMessage)) {
+          fixed = this._wifiComplimentAckSnippet(context, guestMessage);
+        } else {
+          fixed = this._stripWifiCredentialDump(draft || revised, context) || draft;
         }
+        const stillDumps = dumpRe.test(fixed || '');
+        console.log('[Agent] → Deterministic judge guard: WiFi re-send after guest already knows credentials');
+        return {
+          ...llmJudgeResult,
+          // Prefer REVISE for intent rework; REJECT only if we cannot strip the dump.
+          verdict: stillDumps ? 'REJECT' : 'REVISE',
+          revisedResponse: stillDumps ? undefined : fixed,
+          notes:
+            (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+            'Deterministic guard: guest already knows WiFi — do not re-send SSID/password; answer the actionable ask (e.g. early check-in).',
+          issues: [
+            ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+            'WiFi credential re-send after guest already knows password (history / compliment / ack). Intent miss — REVISE.',
+          ],
+          deterministicGuard: true,
+        };
       }
     }
 

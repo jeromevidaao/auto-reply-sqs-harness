@@ -4,10 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GuestMessagingAgent } from '../src/agent.js';
 import { setHostContactsForTests, TEST_HOST_CONTACTS } from '../src/config/hostContacts.js';
-import {
-  wifiCredentialsFromCheckinTemplate,
-  FORBIDDEN_PINE_WIFI,
-} from '../src/useCases/checkinTemplates/index.js';
+import { wifiCredentialsFromCheckinTemplate } from '../src/useCases/checkinTemplates/index.js';
+import { NON_CANONICAL_WIFI_FIXTURE } from './fixtures/forbiddenPineWifi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRootForTests = path.resolve(__dirname, '..');
@@ -15,8 +13,8 @@ const projectRootForTests = path.resolve(__dirname, '..');
 // Inject the known-wrong production globals so tests prove we never emit them for Pine.
 setHostContactsForTests({
   ...TEST_HOST_CONTACTS,
-  wifiSsid: FORBIDDEN_PINE_WIFI.ssid,
-  wifiPassword: FORBIDDEN_PINE_WIFI.password,
+  wifiSsid: NON_CANONICAL_WIFI_FIXTURE.ssid,
+  wifiPassword: NON_CANONICAL_WIFI_FIXTURE.password,
 });
 process.env.ALLOW_HOST_CONTACT_TEST_DEFAULTS = '1';
 
@@ -25,13 +23,13 @@ const hasGrokKey = !!process.env.GROK_API_KEY;
 /**
  * Sarah / Sara · Cozy West End Victorian · Sep 20–22 2026 · ~15:32 PT production miss
  * Guest complimented WiFi password AND asked for earlier check-in.
- * Production auto-reply dumped wrong global Ansia WiFi and dropped early check-in.
+ * Production auto-reply dumped wrong global non-canonical WiFi and dropped early check-in.
  */
 const SARAH_MSG =
   'Wonderful! I love your WiFi password! :)\n\nAny chance we can check-in earlier? We will be in Portland, as we arrive on the 19th and will stay at a hotel the first night.\n\nThank you!\n\nSara';
 
 const BAD_PRODUCTION_WIFI_ONLY =
-  "You're welcome, Sara! The WiFi network is Ansia_2.4 and the password is 10286500 (all lowercase). Let me know if it works.";
+  "You're welcome, Sara! The WiFi network is WRONG_SSID and the password is wrong-password (all lowercase). Let me know if it works.";
 
 const WIFI_COMPLIMENT_ONLY = 'Wonderful! I love your WiFi password! :)';
 
@@ -78,8 +76,8 @@ function assertClassicEarlyCheckin(text, label = 'reply') {
   assert.match(body, /4\s*(:00)?\s*pm/i, `${label}: states 4pm check-in`);
   assert.doesNotMatch(body, /check with the cleaning team/i, `${label}: no weak cleaning-team copy`);
   assert.doesNotMatch(body, /if we can accommodate/i, `${label}: no weak accommodate copy`);
-  assert.doesNotMatch(body, /ansia[_\s]?2\.4/i, `${label}: never Ansia_2.4`);
-  assert.doesNotMatch(body, /10286500/, `${label}: never 10286500`);
+  assert.doesNotMatch(body, /WRONG_SSID/i, `${label}: never WRONG_SSID`);
+  assert.doesNotMatch(body, /wrong-password/, `${label}: never wrong-password`);
   // Compliment is not a password ask — do not dump credentials.
   assert.doesNotMatch(
     body,
@@ -126,7 +124,7 @@ describe('Sarah WiFi compliment + early check-in (Cozy West End Victorian produc
     );
   });
 
-  it('Sarah exact message → EARLY_CHECKIN classic; never Ansia / never credential dump', () => {
+  it('Sarah exact message → EARLY_CHECKIN classic; never non-canonical WiFi / never credential dump', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' },
@@ -166,7 +164,7 @@ describe('Sarah WiFi compliment + early check-in (Cozy West End Victorian produc
     );
   });
 
-  it('Pine St / West End: wifi credentials from policy are Pineland/lobsterbake never Ansia', () => {
+  it('Pine St / West End: wifi credentials from policy are Pineland/lobsterbake never non-canonical WiFi', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' },
@@ -197,8 +195,8 @@ describe('Sarah WiFi compliment + early check-in (Cozy West End Victorian produc
       const { ssid, password } = agent._wifiCredentials(ctx);
       assert.equal(ssid, 'Pineland', `ssid for ${ctx.propertyName}`);
       assert.equal(password, 'lobsterbake', `password for ${ctx.propertyName}`);
-      assert.notEqual(ssid, FORBIDDEN_PINE_WIFI.ssid);
-      assert.notEqual(password, FORBIDDEN_PINE_WIFI.password);
+      assert.notEqual(ssid, NON_CANONICAL_WIFI_FIXTURE.ssid);
+      assert.notEqual(password, NON_CANONICAL_WIFI_FIXTURE.password);
       const applied = agent._applyWifiPolicy(
         { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'none', shouldReply: false },
         ctx,
@@ -207,8 +205,8 @@ describe('Sarah WiFi compliment + early check-in (Cozy West End Victorian produc
       assert.equal(applied.applied, true, `policy should apply for ${ctx.propertyName}`);
       assert.match(applied.proposedResponse, /Pineland/i);
       assert.match(applied.proposedResponse, /lobsterbake/i);
-      assert.doesNotMatch(applied.proposedResponse, /ansia[_\s]?2\.4/i);
-      assert.doesNotMatch(applied.proposedResponse, /10286500/);
+      assert.doesNotMatch(applied.proposedResponse, /WRONG_SSID/i);
+      assert.doesNotMatch(applied.proposedResponse, /wrong-password/);
     }
   });
 
@@ -228,7 +226,7 @@ describe('Sarah WiFi compliment + early check-in (Cozy West End Victorian produc
     );
     assert.equal(multi.applied, true);
     assert.match(multi.proposedResponse, /glad you like the wifi|you're welcome/i);
-    assert.doesNotMatch(multi.proposedResponse, /ansia[_\s]?2\.4|10286500|pineland|lobsterbake|password is/i);
+    assert.doesNotMatch(multi.proposedResponse, /WRONG_SSID|wrong-password|pineland|lobsterbake|password is/i);
   });
 
   it('processMessage: LLM wifi-only draft becomes EARLY_CHECKIN classic (Hospitable mocked)', async () => {
@@ -262,7 +260,7 @@ describe('Sarah WiFi compliment + early check-in (Cozy West End Victorian produc
   });
 
   it(
-    'live Grok: Sarah → EARLY_CHECKIN classic, never Ansia (Hospitable mocked)',
+    'live Grok: Sarah → EARLY_CHECKIN classic, never non-canonical WiFi (Hospitable mocked)',
     { skip: !hasGrokKey },
     async () => {
       const sent = [];

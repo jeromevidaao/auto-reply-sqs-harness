@@ -14,7 +14,7 @@ const SARAH_MSG =
   'Wonderful! I love your WiFi password! :) Any chance we can check-in earlier? We will be in Portland, as we arrive on the 19th and will stay at a hotel the first night. Thank you! Sara';
 
 const BAD_ANSIA =
-  "You're welcome, Sara! The WiFi network is Ansia_2.4 and the password is 10286500 (all lowercase). Let me know if it works.";
+  "You're welcome, Sara! The WiFi network is WRONG_SSID and the password is wrong-password (all lowercase). Let me know if it works.";
 
 const BAD_PINELAND =
   "You're welcome! The WiFi network is Pineland and the password is lobsterbake. Let me know if it works.";
@@ -27,7 +27,7 @@ const HISTORY = [
 ];
 
 describe('claimCheck: Sarah WiFi re-send after known (judge common sense)', () => {
-  it('forces early-checkin classic when Ansia dump follows compliment + early ask', () => {
+  it('forces early-checkin classic when non-canonical dump follows compliment + early ask', () => {
     const r = checkDraftClaims({
       draft: BAD_ANSIA,
       guestMessage: SARAH_MSG,
@@ -36,7 +36,7 @@ describe('claimCheck: Sarah WiFi re-send after known (judge common sense)', () =
     assert.equal(r.ok, false);
     assert.ok(r.issues.some((i) => i.code === 'wifi_resend_after_known'));
     assert.match(r.revisedResponse || '', /cleaning finishes|message you right away|can'?t guarantee early/i);
-    assert.doesNotMatch(r.revisedResponse || '', /ansia|10286500|pineland|lobsterbake/i);
+    assert.doesNotMatch(r.revisedResponse || '', /WRONG_SSID|wrong-password|pineland|lobsterbake/i);
   });
 
   it('strips even correct Pineland dump when host already sent it + guest complimented', () => {
@@ -65,7 +65,7 @@ describe('claimCheck: Sarah WiFi re-send after known (judge common sense)', () =
 });
 
 describe('deterministic judge guard: Sarah WiFi re-send', () => {
-  it('REVISE/REJECT Ansia dump that LLM APPROVEd → early-checkin classic, zero credentials', () => {
+  it('REVISE/REJECT non-canonical dump that LLM APPROVEd → early-checkin classic, zero credentials', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' },
@@ -90,7 +90,7 @@ describe('deterministic judge guard: Sarah WiFi re-send', () => {
     assert.ok(['REVISE', 'REJECT'].includes(out.verdict), `verdict=${out.verdict}`);
     if (out.verdict === 'REVISE') {
       assert.match(out.revisedResponse || '', /cleaning finishes|message you/i);
-      assert.doesNotMatch(out.revisedResponse || '', /ansia|10286500|pineland|lobsterbake|password is/i);
+      assert.doesNotMatch(out.revisedResponse || '', /WRONG_SSID|wrong-password|pineland|lobsterbake|password is/i);
     }
   });
 });

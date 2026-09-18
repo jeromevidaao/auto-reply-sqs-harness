@@ -25,10 +25,10 @@
       "Let me know if it works"
     ],
     "forbiddenPhrases": [
-      "Ansia_2.4",
-      "10286500",
-      "TEST_WIFI_SSID"
+      "WRONG_SSID",
+      "wrong-password",
+      "WRONG_SSID"
     ]
   },
-  "notes": "Jane West End Victorian 2026-09-12–16. Deterministic _applyWifiPolicy. Pine St / West End credentials come from check-in templates (Pineland/lobsterbake) — never global hostContacts Ansia_2.4/10286500."
+  "notes": "Jane West End Victorian 2026-09-12–16. Deterministic _applyWifiPolicy. Pine St / West End credentials come from check-in templates (Pineland/lobsterbake) — never global hostContacts WRONG_SSID/wrong-password."
 }

@@ -4,7 +4,7 @@
  * Grounds the draft against tool results and known incident rules:
  * stay-extension calendar, host "unit ready" vs 4pm, pet max, post-checkout
  * parking, already-cancelled 475 links, event false positives,
- * WiFi credential re-send after compliment / prior host WiFi (Sarah 2026-09-17).
+ * WiFi credential re-send after guest already knows WiFi / prior host WiFi (generic; Sarah is one example).
  */
 
 import { isAdditionalParkingAsk, isEventHostingDenial, isTripPurposeEventMention } from '../tools/parking/additionalParking.js';
@@ -20,9 +20,9 @@ const OWN_SPOT_AFTER_CHECKOUT_RE = /(?:keep|leave|use) (?:your|the) (?:car|spot|
 
 
 const WIFI_CRED_DUMP_RE =
-  /\b(?:ansia[_\s]?2\.4|10286500|pineland|lobsterbake)\b|(?:wifi|wi-?fi)\s+network\s+is\b|\bpassword\s+is\s+\S+/i;
+  /(?:wifi|wi-?fi)\s+network\s+is\b|\bpassword\s+is\s+\S+|\bpineland\b|\blobsterbake\b/i;
 const HOST_WIFI_HISTORY_RE =
-  /(?:wifi|wi-?fi)\s+network\s+is\b|\bpassword\s+is\s+(?:pineland|lobsterbake|ansia|[\w.-]{4,})\b|\bpineland\b.*\blobsterbake\b|\blobsterbake\b.*\bpineland\b|\bansia[_\s]?2\.4\b|\b10286500\b/i;
+  /(?:wifi|wi-?fi)\s+network\s+is\b|\bpassword\s+is\s+[\w.-]{4,}\b|\bpineland\b.*\blobsterbake\b|\blobsterbake\b.*\bpineland\b/i;
 const WIFI_COMPLIMENT_RE =
   /\b(love|like|loved|liked|great|awesome|wonderful|amazing|perfect|excellent|fantastic|cool)\b[\s\S]{0,40}\b(wifi|wi-?fi|password|network)\b|\b(wifi|wi-?fi|password|network)\b[\s\S]{0,40}\b(love|like|loved|liked|great|awesome|wonderful|amazing|perfect|excellent|fantastic|cool)\b/i;
 const WIFI_EXPLICIT_ASK_RE =
@@ -48,6 +48,62 @@ function hostAlreadySentWifiInHistory(context = {}) {
   });
 }
 
+/** Guest-agnostic signals that the guest already knows WiFi (compliment is one of them). */
+function guestSignalsKnowsWifi(text = '') {
+  const m = String(text || '');
+  if (!m.trim()) return false;
+  if (isWifiComplimentMessage(m)) return true;
+  if (
+    /\b(?:got it|got the (?:wifi |wi-?fi )?password|thanks for (?:the )?(?:wifi |wi-?fi )?password|thank you for (?:the )?(?:wifi |wi-?fi )?password)\b/i.test(
+      m
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:wifi|wi-?fi)(?:\s+(?:password|network))?\b[\s\S]{0,40}\b(?:works|working|connected|great|awesome|perfect|good)\b/i.test(
+      m
+    ) ||
+    /\b(?:works|working|connected|great|awesome|perfect)\b[\s\S]{0,40}\b(?:wifi|wi-?fi)(?:\s+(?:password|network))?\b/i.test(
+      m
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:logged in|we(?:'|’)re online|we are online|online now|got (?:on|onto) (?:the )?(?:wifi|wi-?fi|network))\b/i.test(
+      m
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isGuestHistoryRole(row = {}) {
+  const role = String(row?.sender_type || row?.role || row?.sender?.type || row?.sender || '').toLowerCase();
+  return role === 'guest' || role === 'guest_message';
+}
+
+/**
+ * True when current message or prior GUEST turns show they know WiFi,
+ * or host already sent credentials and guest is not explicitly re-asking.
+ */
+function guestAlreadyKnowsWifiFromHistory(guestMessage = '', context = {}) {
+  const msg = String(guestMessage || '');
+  const explicitAsk = WIFI_EXPLICIT_ASK_RE.test(msg) && !isWifiComplimentMessage(msg);
+  if (explicitAsk) return false;
+  if (guestSignalsKnowsWifi(msg)) return true;
+  const history = Array.isArray(context.conversationHistory) ? context.conversationHistory : [];
+  for (const row of history) {
+    if (!isGuestHistoryRole(row)) continue;
+    const body = String(row?.body || row?.message || row?.text || row?.content || '');
+    if (guestSignalsKnowsWifi(body)) return true;
+  }
+  if (hostAlreadySentWifiInHistory(context)) return true;
+  return false;
+}
+
 function draftHasWifiCredentialDump(draft = '') {
   return WIFI_CRED_DUMP_RE.test(String(draft || ''));
 }
@@ -56,8 +112,8 @@ function stripWifiCredentialSentences(draft = '') {
   let d = String(draft || '');
   d = d.replace(/(?:the\s+)?(?:wifi|wi-?fi)\s+network\s+is\s+\S+[^.!?]*[.!?]?/gi, '');
   d = d.replace(/\b(?:and\s+)?the\s+password\s+is\s+\S+(?:\s*\([^)]*\))?[^.!?]*[.!?]?/gi, '');
-  d = d.replace(/\bansia[_\s]?2\.4\b/gi, '');
-  d = d.replace(/\b10286500\b/g, '');
+  
+  
   d = d.replace(/\bpineland\b/gi, '');
   d = d.replace(/\blobsterbake\b/gi, '');
   d = d.replace(/\blet me know if it works\.?/gi, '');
@@ -200,19 +256,19 @@ export function checkDraftClaims({
   }
 
 
-  // Sarah 2026-09-17: WiFi compliment / prior host already sent credentials —
-  // never re-dump SSID/password (esp. wrong Ansia globals). Force early-checkin
-  // classic when that was the actionable ask.
+  // Generic: guest already knows WiFi (compliment / prior guest ack / host sent) —
+  // never re-dump SSID/password unless they explicitly ask again. Prefer early-checkin
+  // classic when that was the actionable ask. Sarah is one example only.
   const wifiCompliment = isWifiComplimentMessage(msg);
-  const hostSentWifi = hostAlreadySentWifiInHistory(context);
+  const guestKnowsWifi = guestAlreadyKnowsWifiFromHistory(msg, context);
   const wifiDump = draftHasWifiCredentialDump(text);
   const explicitWifiAsk = WIFI_EXPLICIT_ASK_RE.test(msg) && !wifiCompliment;
-  if (wifiDump && !explicitWifiAsk && (wifiCompliment || hostSentWifi)) {
+  if (wifiDump && !explicitWifiAsk && guestKnowsWifi) {
     const earlyAsk = EARLY_CHECKIN_ASK_RE.test(msg);
     addIssue(
       issues,
       'wifi_resend_after_known',
-      'Draft re-sends WiFi credentials after the host already shared them and/or the guest only complimented the password (Sarah West End Victorian).',
+      'Draft re-sends WiFi credentials after the guest already knows them (compliment, prior guest ack like "wifi works", or host already shared credentials in-thread).',
       {
         deterministicFix: earlyAsk ? 'force_early_checkin_classic' : 'strip_wifi_credentials',
       }

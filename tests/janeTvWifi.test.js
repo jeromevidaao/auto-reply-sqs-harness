@@ -56,7 +56,7 @@ describe('Jane TV WiFi connect (West End Victorian production miss)', () => {
     assert.match(applied.proposedResponse, /lobsterbake/i);
     assert.match(applied.proposedResponse, /settings/i);
     assert.match(applied.proposedResponse, /let me know if it works/i);
-    assert.doesNotMatch(applied.proposedResponse, /ansia[_\s]?2\.4|10286500|TEST_WIFI_SSID/i);
+    assert.doesNotMatch(applied.proposedResponse, /WRONG_SSID|wrong-password|WRONG_SSID/i);
   });
 
   it('forces WIFI_PASSWORD credentials on explicit password ask', () => {
@@ -116,7 +116,7 @@ describe('Jane TV WiFi connect (West End Victorian production miss)', () => {
     assert.equal(result.typeOfMessageReceived, 'WIFI_TROUBLESHOOTING');
     assert.match(result.proposedResponse, /Pineland/i);
     assert.match(result.proposedResponse, /lobsterbake/i);
-    assert.doesNotMatch(result.proposedResponse, /ansia[_\s]?2\.4|10286500/i);
+    assert.doesNotMatch(result.proposedResponse, /WRONG_SSID|wrong-password/i);
     assert.match(result.proposedResponse, /let me know if it works/i);
     assert.match(result.proposedResponse, /settings/i);
   });

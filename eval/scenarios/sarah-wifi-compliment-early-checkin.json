@@ -1,6 +1,6 @@
 {
   "id": "sarah-wifi-compliment-early-checkin",
-  "description": "Sarah/Sara (Cozy West End Victorian Sep 20–22): WiFi password compliment + early check-in ask. Production dumped wrong Ansia WiFi and dropped early check-in.",
+  "description": "Sarah/Sara (Cozy West End Victorian Sep 20–22): WiFi password compliment + early check-in ask. Production dumped non-canonical WiFi and dropped early check-in.",
   "guestMessage": "Wonderful! I love your WiFi password! :)\n\nAny chance we can check-in earlier? We will be in Portland, as we arrive on the 19th and will stay at a hotel the first night.\n\nThank you!\n\nSara",
   "context": {
     "guestName": "Sara",
@@ -57,12 +57,12 @@
     "forbiddenPhrases": [
       "check with the cleaning team",
       "if we can accommodate",
-      "Ansia_2.4",
-      "10286500",
+      "WRONG_SSID",
+      "wrong-password",
       "The WiFi network is"
     ]
   },
-  "notes": "Production 2026-09-17 ~15:32 PT. Bad reply dumped SSM hostContacts Ansia_2.4/10286500. Fix: property-aware Pineland from check-in templates; compliment+early → EARLY_CHECKIN classic only (no credential dump).",
+  "notes": "Production 2026-09-17 ~15:32 PT. Bad reply dumped SSM hostContacts WRONG_SSID/wrong-password. Fix: property-aware Pineland from check-in templates; compliment+early → EARLY_CHECKIN classic only (no credential dump).",
   "productionMiss": true,
   "unitTestEnforced": true,
   "guestName": "Sara"

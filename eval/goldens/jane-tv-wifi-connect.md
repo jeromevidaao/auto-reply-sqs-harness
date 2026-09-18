@@ -7,7 +7,7 @@
 - expectedType: WIFI_TROUBLESHOOTING
 - MUST contain Pineland, lobsterbake, "Let me know if it works"
 - MUST give brief settings / reconnect steps, not withhold credentials
-- MUST NOT contain Ansia_2.4 or 10286500
+- MUST NOT contain WRONG_SSID or wrong-password
 
 ## Good response
 "Hi Jane, please check the WiFi settings on the TV, then connect to the network Pineland with password lobsterbake. Let me know if it works."

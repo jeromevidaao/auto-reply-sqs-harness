@@ -111,7 +111,7 @@ const WIFI_BY_ID = (() => {
 /**
  * Property-aware WiFi for Pine St / West End Victorian units (apt-1b/2/3).
  * Returns Pineland / lobsterbake from check-in templates — never the global
- * hostContacts Ansia_2.4 / 10286500 for these listings.
+ * hostContacts globals for these listings — only Pineland / lobsterbake.
  *
  * @param {object} context
  * @returns {{ ssid: string, password: string, unitKey?: string, source: string } | null}
@@ -156,16 +156,42 @@ export function wifiCredentialsFromCheckinTemplate(context = {}) {
   return null;
 }
 
-/** Known-wrong global SSID/password that must never be sent for Pine units. */
-export const FORBIDDEN_PINE_WIFI = Object.freeze({
-  ssid: 'Ansia_2.4',
-  password: '10286500',
+/** Canonical Pine St / West End Victorian WiFi (check-in templates). */
+export const CANONICAL_PINE_WIFI = Object.freeze({
+  ssid: 'Pineland',
+  password: 'lobsterbake',
 });
 
+/**
+ * True when a draft has WiFi credentials that are NOT the canonical Pineland/lobsterbake
+ * pair (or that dump any SSID/password sentence). Does not embed wrong SSIDs as sendable values.
+ */
 export function draftContainsForbiddenPineWifi(draft = '') {
-  const d = String(draft || '').toLowerCase();
-  return (
-    d.includes(FORBIDDEN_PINE_WIFI.ssid.toLowerCase()) ||
-    d.includes(FORBIDDEN_PINE_WIFI.password.toLowerCase())
-  );
+  const d = String(draft || '');
+  if (!d.trim()) return false;
+  const lower = d.toLowerCase();
+  const hasCredSentence =
+    /(?:wifi|wi-?fi)\s+network\s+is\b/i.test(d) || /\bpassword\s+is\s+\S+/i.test(d);
+  if (!hasCredSentence && !/\bpineland\b/i.test(d) && !/\blobsterbake\b/i.test(d)) {
+    // No wifi credential content — not a forbidden pine dump.
+    return false;
+  }
+  // Forbidden for pine replies: any credential dump that is missing the canonical pair,
+  // or that states a network/password that is not Pineland/lobsterbake.
+  const hasCanonical =
+    lower.includes(CANONICAL_PINE_WIFI.ssid.toLowerCase()) &&
+    lower.includes(CANONICAL_PINE_WIFI.password.toLowerCase());
+  if (hasCredSentence && !hasCanonical) return true;
+  // Explicit non-canonical network/password tokens near wifi language.
+  const networkMatch = d.match(/(?:wifi|wi-?fi)\s+network\s+is\s+(\S+)/i);
+  const passwordMatch = d.match(/\bpassword\s+is\s+(\S+)/i);
+  if (networkMatch) {
+    const ssid = networkMatch[1].replace(/[.,);:]+$/, '');
+    if (ssid.toLowerCase() !== CANONICAL_PINE_WIFI.ssid.toLowerCase()) return true;
+  }
+  if (passwordMatch) {
+    const pw = passwordMatch[1].replace(/[.,);:]+$/, '');
+    if (pw.toLowerCase() !== CANONICAL_PINE_WIFI.password.toLowerCase()) return true;
+  }
+  return false;
 }
