@@ -11,7 +11,7 @@
     "propertyName": "53 Pine St #2 · 1875 West End Victorian | EV Charging + Parking",
     "bookingTimestamp": "2026-09-01T10:00:00Z",
     "conversationHistory": [],
-    "suggestedResponseSnippet": "Please check the WiFi settings on the TV, then connect to the network TEST_WIFI_SSID with password test-wifi-password. Let me know if it works."
+    "suggestedResponseSnippet": "Please check the WiFi settings on the TV, then connect to the network Pineland with password lobsterbake. Let me know if it works."
   },
   "rubric": {
     "expectedCategory": "WIFI_TROUBLESHOOTING",
@@ -20,11 +20,15 @@
     "minConfidence": 0.95,
     "productionMiss": true,
     "requiredPhrases": [
-      "TEST_WIFI_SSID",
-      "test-wifi-password",
+      "Pineland",
+      "lobsterbake",
       "Let me know if it works"
     ],
-    "forbiddenPhrases": []
+    "forbiddenPhrases": [
+      "Ansia_2.4",
+      "10286500",
+      "TEST_WIFI_SSID"
+    ]
   },
-  "notes": "Jane West End Victorian 2026-09-12–16. Deterministic _applyWifiPolicy. Credentials from TEST_HOST_CONTACTS / {{WIFI_SSID}} {{WIFI_PASSWORD}} — never hardcode production secrets. Pineland/lobsterbake remains the existing wifi.md golden convention for WIFI_PASSWORD-only evals."
+  "notes": "Jane West End Victorian 2026-09-12–16. Deterministic _applyWifiPolicy. Pine St / West End credentials come from check-in templates (Pineland/lobsterbake) — never global hostContacts Ansia_2.4/10286500."
 }
