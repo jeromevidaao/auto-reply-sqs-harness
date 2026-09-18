@@ -5,7 +5,7 @@
 **GUEST_CHECKOUT**:
 - Guest announces they have checked out or are leaving **at end of stay** (checkout day or explicit "checked out" / dishwasher / "thanks for hosting" language).
 - When the message is purely logistical ("just checked out"), give a simple warm acknowledgment + safe travels.
-- When it includes thanks ("Thanks again...", "thanks for your host", dishwasher mention, etc.), prefer THANK_YOU_MESSAGE category for the "You're welcome" style reply. Do not escalate or use OTHER_MESSAGE.
+- When it includes thanks ("We have checked out. Thank you for a great stay!", "Thanks again...", dishwasher mention, etc.), classify as THANK_YOU_MESSAGE (optionally with GUEST_CHECKOUT). Reply must be **warm and multi-sentence**: (1) You're welcome, (2) thanks for staying / glad you enjoyed, (3) safe travels **or** hope to see you again. Do **not** ship a bare "You're welcome, [Name]!" (Sarah checkout incident). Do not escalate or use OTHER_MESSAGE.
 - **NOT GUEST_CHECKOUT**: Guest says they "left the apartment" on check-in day or mid-stay to let staff deliver something (blanket, maintenance knock, item by the door). They are still staying — use THANK_YOU_MESSAGE with brief "You're welcome, [Name]!" only, no safe travels (Amie incident).
 
 **PACK_AND_PLAY_BRAND**:

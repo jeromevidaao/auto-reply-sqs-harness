@@ -1,0 +1,36 @@
+{
+  "id": "sarah-checkout-thanks",
+  "description": "Sarah \u00b7 Booker post-checkout thanks: 'We have checked out. Thank you for a great stay!' Auto replied only 'You're welcome, Sarah!' \u2014 too thin. Must be warm multi-sentence: You're welcome + thanks for staying / glad you enjoyed + safe travels or hope to see you again. Must NOT be bare You're welcome only. Distinct from Amie in-stay temporary departure (no safe travels).",
+  "guestMessage": "We have checked out. Thank you for a great stay!",
+  "context": {
+    "guestName": "Sarah",
+    "guestDisplayName": "Sarah",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Cozy West End Victorian",
+    "checkIn": "2026-09-17",
+    "checkOut": "2026-09-18",
+    "asOfDate": "2026-09-18",
+    "conversation_id": "sarah-checkout-thanks-conv",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "We have checked out. Thank you for a great stay!"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "THANK_YOU_MESSAGE",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.8,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "You're welcome",
+      "Sarah",
+      "Safe travels",
+      "stay"
+    ],
+    "forbiddenPhrases": []
+  },
+  "notes": "Sarah checkout incident 2026-09. Policy `_applyPostCheckoutThankYouPolicy` + `_hasWarmPostCheckoutThanks` must enrich thin You're welcome. Rotate variants via `_checkoutThanksReplySnippet`. Amie temporary-departure eval must stay green (no safe travels mid-stay)."
+}

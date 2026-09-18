@@ -2081,6 +2081,44 @@ export class GuestMessagingAgent {
       /officially checked out|we(?:'ve| have) gotten everything out|pulled the linens/i.test(lower);
   }
 
+  /**
+   * Warm post-checkout thanks must be multi-sentence: You're welcome + thanks for
+   * staying / glad you enjoyed + safe travels or hope to see you again.
+   * Bare "You're welcome, Sarah!" is too thin (Sarah checkout incident).
+   */
+  _hasWarmPostCheckoutThanks(text = '', context = {}) {
+    const body = String(text || '');
+    if (!/you(?:'|’)?re welcome|you are welcome/i.test(body)) return false;
+    const thanksStay =
+      /(thank|thanks).{0,60}(stay|staying)|glad you (enjoyed|had)|hope you enjoyed/i.test(body);
+    const farewell =
+      /safe travels|hope to see you|see you again/i.test(body);
+    if (!thanksStay || !farewell) return false;
+    const name = String(this._guestDisplayFirstName(context) || '').trim();
+    if (name && name.toLowerCase() !== 'there' && !body.toLowerCase().includes(name.toLowerCase())) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Stable rotating warm checkout-thanks closings (hash of guest message).
+   * Always includes You're welcome + thanks-for-staying tone + farewell.
+   */
+  _checkoutThanksReplySnippet(context = {}, guestMessage = '') {
+    const name = this._guestDisplayFirstName(context) || 'there';
+    const variants = [
+      `You're welcome, ${name}! Thanks for staying with us — glad you had a great stay. Safe travels!`,
+      `You're welcome, ${name}! Glad you enjoyed your stay. Hope to see you again — Safe travels!`,
+      `You're welcome, ${name}! Thanks so much for staying with us. Safe travels and hope to see you again!`,
+      `You're welcome, ${name}! Hope you enjoyed your stay — thanks for staying with us. Safe travels!`,
+    ];
+    const key = String(guestMessage || context.conversation_id || name);
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+    return variants[h % variants.length];
+  }
+
   _applyPostCheckoutThankYouPolicy(parsed, context = {}, guestMessage = '') {
     if (!this._isPostCheckoutThankYou(guestMessage, context)) {
       return { applied: false };
@@ -2091,29 +2129,40 @@ export class GuestMessagingAgent {
     const eventDecline = /not able to accommodate events|gatherings/i.test(draft);
     // Thank-you category: no formal Good morning/afternoon/evening (Nancy incident).
     const draftBody = stripLeadingFormalTimeGreeting(draft);
-    const isGoodThankYouAck = !eventDecline && /you're welcome|you are welcome/i.test(draftBody);
+    // Sarah incident: "You're welcome" alone is NOT enough — need warm multi-sentence farewell.
+    const isWarmCheckoutThanks =
+      !eventDecline && this._hasWarmPostCheckoutThanks(draftBody, context);
 
     let proposedResponse = draftBody;
-    if (!isGoodThankYouAck) {
+    if (!isWarmCheckoutThanks) {
       let recovered = null;
       const raw = parsed.rawModelOutput;
       if (raw) {
         try {
           const r = typeof raw === 'string' ? JSON.parse(raw) : raw;
           const pr = stripLeadingFormalTimeGreeting((r.proposedResponse || '').trim());
-          if (/you're welcome|you are welcome/i.test(pr) && !/not able to accommodate events/i.test(pr)) {
+          if (
+            this._hasWarmPostCheckoutThanks(pr, context) &&
+            !/not able to accommodate events/i.test(pr)
+          ) {
             recovered = pr;
           }
         } catch {
           // ignore parse errors
         }
       }
-      proposedResponse = recovered || `You're welcome, ${naturalName}! Safe travels and hope you enjoyed your stay.`;
+      proposedResponse =
+        recovered || this._checkoutThanksReplySnippet(context, guestMessage);
     }
 
     // Hard rule: never ship formal time greeting on thank-you (even if LLM left one).
     proposedResponse = stripLeadingFormalTimeGreeting(proposedResponse);
 
+    // Prefer merged categories when checkout + thanks (multi-intent clarity for judge).
+    const cats = Array.isArray(parsed.categories) ? [...parsed.categories] : [];
+    if (!cats.includes('THANK_YOU_MESSAGE')) cats.push('THANK_YOU_MESSAGE');
+    if (!cats.includes('GUEST_CHECKOUT')) cats.push('GUEST_CHECKOUT');
+    parsed.categories = cats;
     parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
     parsed.proposedResponse = proposedResponse;
 
@@ -4669,6 +4718,18 @@ export class GuestMessagingAgent {
     const thanksOnly = /thank|thanks|appreciate/i.test(lower);
     const hostAskedReview = this._hostRecentlyAskedForReview(context);
 
+    // Sarah checkout incident: explicit "checked out" + thanks for a great stay is warm
+    // checkout farewell (THANK_YOU), not REVIEW_PROMISE — unless they also promise a review
+    // or richer post-stay gratitude (city love / hope to be back).
+    if (
+      this._looksLikeActualCheckout(guestMessage, context) &&
+      !reviewPromise &&
+      !cityLove &&
+      !/looking forward to the next|hope to (?:be )?back|until next time/i.test(lower)
+    ) {
+      return false;
+    }
+
     // Strong review/thanks language on/after checkout day (inclusive — Rebecca same-day miss).
     if (onOrAfterCheckout && (reviewPromise || postStayThanks)) return true;
     // Explicit review promise + thanks/gratitude anytime (incl. checkout day).
@@ -4809,6 +4870,13 @@ export class GuestMessagingAgent {
     }
     // Housekeeping FYI path has its own richer ack.
     if (this._isPostStayHousekeepingFeedback(guestMessage)) {
+      return { applied: false };
+    }
+    // Explicit checkout thanks without review language → post-checkout farewell wins (Sarah).
+    if (
+      this._isPostCheckoutThankYou(guestMessage, context) &&
+      !/\breview\b/i.test(guestMessage)
+    ) {
       return { applied: false };
     }
 
@@ -6419,7 +6487,7 @@ export class GuestMessagingAgent {
 
     const postCheckoutThanksPolicyFinal = this._applyPostCheckoutThankYouPolicy(finalResult, enrichedContext, guestMessage);
     if (postCheckoutThanksPolicyFinal.applied) {
-      console.log('[Agent] → Post-checkout thank-you policy applied (short warm ack; repeats allowed)');
+      console.log('[Agent] → Post-checkout thank-you policy applied (warm multi-sentence farewell)');
       finalResult.typeOfMessageReceived = postCheckoutThanksPolicyFinal.typeOfMessageReceived;
       finalResult.proposedResponse = postCheckoutThanksPolicyFinal.proposedResponse;
       finalResult.shouldReply = postCheckoutThanksPolicyFinal.shouldReply;
