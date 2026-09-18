@@ -110,7 +110,20 @@ describe('computeRetryDelay / Retry-After', () => {
     assert.ok(delay >= HOSPITABLE_429_DEFAULT_MS, `got ${delay}`);
   });
 
+  it('read 429 delays escalate across attempts even when Retry-After is flat (Carli)', () => {
+    // Hospitable may keep returning Retry-After ≈ 20–26s; we must still escalate.
+    const err = statusErr(429);
+    err.response.headers = { 'retry-after': '20' };
+    const d1 = computeRetryDelay(err, { attempt: 1, kind: 'read', jitter: false });
+    const d2 = computeRetryDelay(err, { attempt: 2, kind: 'read', jitter: false });
+    const d3 = computeRetryDelay(err, { attempt: 3, kind: 'read', jitter: false });
+    assert.ok(d1 >= 15000, `d1 ${d1}`);
+    assert.ok(d2 > d1, `expected escalate d1=${d1} d2=${d2}`);
+    assert.ok(d3 > d2, `expected escalate d2=${d2} d3=${d3}`);
+  });
+
   it('uses shorter exponential backoff for reads', () => {
+
     const d1 = computeRetryDelay(timeoutErr(), { attempt: 1, kind: 'read', jitter: false });
     const d2 = computeRetryDelay(timeoutErr(), { attempt: 2, kind: 'read', jitter: false });
     assert.equal(d1, 2000);

@@ -19,6 +19,8 @@
  *   - Honor Retry-After on 429 when it is at least the kind floor; never honor 0
  *     (Hospitable often sends Retry-After: 0 after the first 429 — Amber 2026-08-17).
  *     Default 60s for message POSTs / reads when header is missing or too small.
+ *   - On 429, also apply attempt-based exponential floor so a flat Retry-After
+ *     (Carli 2026-09-18 ~20–26s) still escalates across retries.
  *   - Message POSTs must stay under 2/min (min spacing 30s).
  *   - After a send timeout, callers should GET the thread before POSTing again
  *     (timeout ≠ not delivered).
@@ -132,9 +134,21 @@ export function computeRetryDelay(err, opts = {}) {
     const parsed = parseRetryAfterMs(err);
     // Retry-After: 0 / past HTTP-date / tiny values are not usable — Hospitable
     // sent 0 on subsequent 429s and we burned 4 GET attempts in ~29s (Amber).
-    delay = parsed == null || parsed < minFloor ? Math.max(fallback, minFloor) : parsed;
+    const fromHeader = parsed != null && parsed >= minFloor ? parsed : 0;
+    // Exp schedule always applies as a floor so flat Retry-After (Carli ~20–26s)
+    // still escalates across attempts instead of waiting the same delay forever.
+    const exp429 =
+      kind === 'write'
+        ? WRITE_BACKOFF_MS[Math.min(attempt - 1, WRITE_BACKOFF_MS.length - 1)]
+        : kind === 'send'
+          ? [30000, 30000, 40000][Math.min(attempt - 1, 2)]
+          : [15000, 30000, 60000, 60000][Math.min(attempt - 1, 3)];
+    delay = Math.max(exp429, fromHeader || fallback, minFloor);
     if (kind === 'write') {
       delay = Math.min(delay, WRITE_429_CAP_MS);
+    }
+    if (kind === 'read') {
+      delay = Math.min(delay, 90000);
     }
   } else if (kind === 'send') {
     // After fail 1/2/3: 20s, 30s, 40s — then clamped to the 2/min floor (30s).
