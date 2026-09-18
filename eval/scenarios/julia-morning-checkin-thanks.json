@@ -1,0 +1,44 @@
+{
+  "id": "julia-morning-checkin-thanks",
+  "description": "Julia \u00b7 Booker, Downtown Studio Parking with EV, stay Sep 17\u201320. Host morning check-in hoped she settled in / is enjoying stay. Guest: 'So far so good!! I'll reach out if needed. TYSM! Julia'. Auto sent bare You're welcome, Julia! \u2014 too thin. Must include You're welcome + short enjoying-stay / glad-you context from prior host message + guest positive. No formal Good morning repeat.",
+  "guestMessage": "So far so good!! I'll reach out if needed. TYSM! Julia",
+  "context": {
+    "guestName": "Julia",
+    "guestDisplayName": "Julia",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio Parking with EV",
+    "checkIn": "2026-09-17",
+    "checkOut": "2026-09-20",
+    "asOfDate": "2026-09-18",
+    "conversation_id": "julia-morning-checkin-thanks-conv",
+    "conversationHistory": [
+      {
+        "sender_type": "host",
+        "body": "Good morning Julia, I hope that you have settled in after your travel and that you are enjoying your stay. Please let me know if there is anything you need. Don't forget to check out the Portland guidebook in the apartment for local tips. Jerome & Ruby"
+      },
+      {
+        "sender_type": "guest",
+        "body": "So far so good!! I'll reach out if needed. TYSM! Julia"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "THANK_YOU_MESSAGE",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.8,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "You're welcome",
+      "enjoying"
+    ],
+    "forbiddenPhrases": [
+      "Good morning Julia",
+      "Good morning, Julia",
+      "4pm",
+      "self-check-in",
+      "safe travels"
+    ]
+  },
+  "notes": "Julia morning check-in thanks incident. Policy `_inferThankYouContext` + `_applyContextualThankYouPolicy` enrich thin You're welcome when prior host hoped enjoying/settled-in and guest is positive. Keep amie-temporary-departure-thanks / rene-welcome-thanks / sarah-checkout-thanks green."
+}

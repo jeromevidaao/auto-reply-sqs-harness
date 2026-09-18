@@ -810,6 +810,14 @@ export class GuestMessagingAgent {
       confidence = 1.0;
     }
 
+    const contextualThanksPolicy = this._applyContextualThankYouPolicy(parsed, context, guestMessage);
+    if (contextualThanksPolicy.applied) {
+      parsed.typeOfMessageReceived = contextualThanksPolicy.typeOfMessageReceived;
+      parsed.proposedResponse = contextualThanksPolicy.proposedResponse;
+      shouldReply = contextualThanksPolicy.shouldReply;
+      confidence = contextualThanksPolicy.confidence;
+    }
+
     const smokeAllClearPolicy = this._applySmokeAlarmAllClearPolicy(parsed, context, guestMessage);
     if (smokeAllClearPolicy.applied) {
       parsed.typeOfMessageReceived = smokeAllClearPolicy.typeOfMessageReceived;
@@ -2740,6 +2748,137 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Infer WHY the guest is thankful from prior HOST message(s) + guest text.
+   * Julia morning check-in incident: host hoped they settled in / enjoying stay,
+   * guest "So far so good!! … TYSM!" → reason enjoying_stay.
+   * Word-boundary thanks only — must NOT match "Thanksgiving" (Elizabeth pet ask).
+   */
+  _inferThankYouContext(guestMessage = '', context = {}) {
+    const guest = String(guestMessage || '').trim();
+    if (!guest) return null;
+    // Whole-word thanks / slang only (Thanksgiving must not match).
+    if (!/\b(?:thank you|thanks|thx|tysm|ty|appreciate(?:\s+it)?)\b/i.test(guest)) return null;
+    // Operational questions are not pure contextual-thanks turns.
+    if (/\?/.test(guest)) return null;
+
+    const items = this._conversationHistoryItems(context);
+    const hostTexts = [];
+    for (const m of items) {
+      const role = String(m?.sender_type || m?.sender?.type || m?.role || '').toLowerCase();
+      if (role && role !== 'host') continue;
+      const text = String(m?.content || m?.body || m?.text || '').trim();
+      if (text) hostTexts.push(text);
+    }
+    if (!hostTexts.length) return null;
+
+    const recentHost = hostTexts.slice(-3).join('\n');
+    const guestLower = guest.toLowerCase();
+
+    const hostEnjoying =
+      /enjoying (?:your |the )?stay|settled in|hope (?:that )?you (?:have |are )?(?:settled|enjoying)|hope you(?:'re| are) enjoying|hope (?:you'?re|you are) (?:having|settling)/i.test(
+        recentHost
+      );
+    const guestPositive =
+      /so far so good|enjoying|all good|settled in|doing (?:great|well|fine)|everything(?:'s| is) (?:great|good|fine|ok|okay)|loving (?:it|the)|having a (?:great|good|wonderful|lovely)|we(?:'re| are) (?:good|great|fine)/i.test(
+        guestLower
+      );
+
+    if (hostEnjoying && guestPositive) {
+      return {
+        reason: 'enjoying_stay',
+        clause: "Glad you're enjoying your stay.",
+      };
+    }
+
+    return null;
+  }
+
+  _isThinYoureWelcomeAck(text = '') {
+    const body = stripLeadingFormalTimeGreeting(String(text || '').trim());
+    if (!body || body === 'none') return true;
+    return (
+      /^you(?:'|’)re welcome,?\s+\w+!?\s*$/i.test(body) ||
+      /^you(?:'|’)re welcome!?\s*$/i.test(body) ||
+      /^you are welcome,?\s+\w+!?\s*$/i.test(body)
+    );
+  }
+
+  /**
+   * Enrich bare "You're welcome, Name!" when conversation history shows a clear
+   * thank-you reason (Julia: morning check-in + so far so good).
+   * Does NOT apply to Amie temporary departure, Rene post-welcome, or Sarah checkout.
+   * Never overwrites operational drafts (pets, parking, wifi, etc.).
+   */
+  _applyContextualThankYouPolicy(parsed, context = {}, guestMessage = '') {
+    if (this._isTemporaryDepartureDuringStay(guestMessage, context)) {
+      return { applied: false };
+    }
+    if (this._isPostCheckoutThankYou(guestMessage, context)) {
+      return { applied: false };
+    }
+    if (this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
+      return { applied: false };
+    }
+
+    const inferred = this._inferThankYouContext(guestMessage, context);
+    if (!inferred?.clause) return { applied: false };
+
+    const draft = stripLeadingFormalTimeGreeting((parsed.proposedResponse || '').trim());
+    const hasYoureWelcome = /you(?:'|’)re welcome|you are welcome/i.test(draft);
+    const alreadyHasContext =
+      /glad you(?:'re| are)? enjoying|glad you're enjoying your stay|enjoying (?:your |the )?stay/i.test(
+        draft
+      );
+
+    // Already warm + You're welcome with enjoying context — leave alone.
+    if (hasYoureWelcome && alreadyHasContext) {
+      return { applied: false };
+    }
+
+    // Only touch thank-you-shaped drafts: thin You're welcome, or short glad-without-welcome.
+    // Never clobber operational answers (Elizabeth 3rd-dog, parking, wifi, …).
+    const looksOperational =
+      /\b(maximum \d+ dogs?|2 dogs?|parking|wifi|password|4\s*pm|lock\s*box|laundry|checkout is|pet fee|self-check-in|remote|sheets|linens|towels)\b/i.test(
+        draft
+      );
+    if (looksOperational) return { applied: false };
+
+    const shortGladOnly =
+      draft.length > 0 &&
+      draft.length < 120 &&
+      /glad you|enjoying (?:your |the )?stay/i.test(draft) &&
+      !hasYoureWelcome &&
+      !looksOperational;
+
+    const needsRewrite =
+      !draft ||
+      draft === 'none' ||
+      this._isThinYoureWelcomeAck(draft) ||
+      shortGladOnly ||
+      (hasYoureWelcome && !alreadyHasContext && draft.length < 100);
+
+    if (!needsRewrite) return { applied: false };
+
+    const name = this._guestDisplayFirstName(context);
+    let proposedResponse = `You're welcome, ${name}! ${inferred.clause}`.replace(/\s+/g, ' ').trim();
+    if (!/[!.]$/.test(proposedResponse)) proposedResponse += '!';
+    proposedResponse = stripLeadingFormalTimeGreeting(proposedResponse);
+
+    parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
+    parsed.proposedResponse = proposedResponse;
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+      escalated: false,
+      thankYouContextReason: inferred.reason,
+    };
+  }
+
+  /**
    * Clock for time-of-day greetings (Eastern). Eval may freeze via asOfDate; live uses real now.
    * Never bookingTimestamp — that is booking time, not reply time.
    */
@@ -4016,7 +4155,8 @@ export class GuestMessagingAgent {
   /** True when the guest message includes thanks / appreciation (multi-intent with other asks). */
   _hasThankYouIntent(guestMessage = '') {
     const lower = (guestMessage || '').toLowerCase();
-    return /\bthank(?:s| you)\b|\bappreciate(?: it)?\b|\bthx\b/.test(lower);
+    // Include slang TYSM / TY (Julia "TYSM!" morning check-in thanks).
+    return /\bthank(?:s| you)\b|\bappreciate(?: it)?\b|\bthx\b|\btysm\b|\bty\b/.test(lower);
   }
 
   /**
@@ -6705,6 +6845,22 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = true;
     }
 
+    const contextualThanksFinal = this._applyContextualThankYouPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (contextualThanksFinal.applied) {
+      console.log(
+        `[Agent] → Contextual thank-you policy applied (${contextualThanksFinal.thankYouContextReason || 'context'})`
+      );
+      finalResult.typeOfMessageReceived = contextualThanksFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = contextualThanksFinal.proposedResponse;
+      finalResult.shouldReply = contextualThanksFinal.shouldReply;
+      finalResult.confidence = contextualThanksFinal.confidence;
+      finalResult.escalated = contextualThanksFinal.escalated;
+    }
+
     const smokeAllClearFinal = this._applySmokeAlarmAllClearPolicy(
       finalResult,
       enrichedContext,
@@ -6777,6 +6933,24 @@ export class GuestMessagingAgent {
         finalResult.proposedResponse,
         guestMessage
       );
+    }
+
+    // After false-welcome strip: re-apply contextual thanks so TYSM / slang thanks
+    // keep You're welcome + reason (Julia morning check-in).
+    const contextualThanksAfterStrip = this._applyContextualThankYouPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (contextualThanksAfterStrip.applied) {
+      console.log(
+        `[Agent] → Contextual thank-you policy applied after strip (${contextualThanksAfterStrip.thankYouContextReason || 'context'})`
+      );
+      finalResult.typeOfMessageReceived = contextualThanksAfterStrip.typeOfMessageReceived;
+      finalResult.proposedResponse = contextualThanksAfterStrip.proposedResponse;
+      finalResult.shouldReply = contextualThanksAfterStrip.shouldReply;
+      finalResult.confidence = contextualThanksAfterStrip.confidence;
+      finalResult.escalated = contextualThanksAfterStrip.escalated;
     }
 
     const transportActivitiesFinal = this._applyThanksPlusTransportActivitiesPolicy(
