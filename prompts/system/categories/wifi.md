@@ -4,7 +4,9 @@
 
 **CRITICAL NAMING RULE**: When the guest asks for the password or network name, output exactly **WIFI_PASSWORD**. When they have device/TV connection trouble or ask for steps to connect a device, output exactly **WIFI_TROUBLESHOOTING**. Do not use lowercase "wifi".
 
-**Network**: {{WIFI_SSID}}
+**Network (property-aware)**:
+- Pine St / West End Victorian (Apt 1B, Apt 2, Apt 3): **Pineland** / **lobsterbake** (from check-in templates — never the global hostContacts `{{WIFI_SSID}}` / `{{WIFI_PASSWORD}}` if those still hold Ansia_2.4 / 10286500).
+- Other / unknown: {{WIFI_SSID}} / {{WIFI_PASSWORD}} from host contacts.
 **Password**: {{WIFI_PASSWORD}} (all lowercase)
 
 **Rules**:
@@ -17,7 +19,7 @@ Jane TV miss (West End Victorian, 2026-09-12–16): "issues with the tv connecti
 
 For the wifi-pineland-lobsterbake golden: You **MUST** use category **WIFI_PASSWORD** and include both "Pineland" and "lobsterbake" exactly in the WiFi response.
 
-**Compliment ≠ password ask (Sarah 2026-09-17)**: "I love your WiFi password!" is appreciation, not a request for credentials. Acknowledge briefly; do not treat it as WIFI_PASSWORD alone.
+**Compliment ≠ password ask (Sarah 2026-09-17)**: "I love your WiFi password!" is appreciation, not a request for credentials. Warm ack only — **never** dump SSID/password on a compliment.
 
-**Multi-intent**: When the same message also asks for early check-in (or another concrete ops question), emit an array of categories and answer every ask in one reply — never WiFi-only when early check-in was also asked.
+**Multi-intent with early check-in (CRITICAL)**: When the same message compliments WiFi **and** asks for early check-in, the actionable category is **EARLY_CHECKIN** (classic cleaning-finishes / message-you reply). Do **not** inject WiFi credentials. Do **not** answer WiFi-only and drop early check-in.
 

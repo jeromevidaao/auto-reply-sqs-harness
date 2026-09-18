@@ -65,6 +65,11 @@ import {
   checkDraftClaims,
   shouldSkipLlmJudge,
 } from './harness/index.js';
+import {
+  wifiCredentialsFromCheckinTemplate,
+  draftContainsForbiddenPineWifi,
+  FORBIDDEN_PINE_WIFI,
+} from './useCases/checkinTemplates/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -1959,11 +1964,15 @@ export class GuestMessagingAgent {
     const weak = this._hasWeakEarlyCheckinCopy(draft);
     const strong = this._hasStrongEarlyCheckinPromise(draft);
     const missing = !draft || draft.toLowerCase() === 'none' || draft.length < 12;
+    // Sarah miss: WiFi credential dump (esp. wrong Ansia globals) is not a valid early reply.
+    const wifiDump =
+      draftContainsForbiddenPineWifi(draft) ||
+      (/wifi\s+network\s+is/i.test(draft) && /password\s+is/i.test(draft) && isAsk);
 
     // Only rewrite weak/missing drafts, or early asks that lack the cleaning-finishes promise.
-    if (!weak && !missing && strong) return { applied: false };
-    if (!isAsk && !weak) return { applied: false };
-    if (!weak && !missing && isEarlyCat && !isAsk) return { applied: false };
+    if (!weak && !missing && strong && !wifiDump) return { applied: false };
+    if (!isAsk && !weak && !wifiDump) return { applied: false };
+    if (!weak && !missing && isEarlyCat && !isAsk && !wifiDump) return { applied: false };
 
     const proposedResponse = this._earlyCheckinReplySnippet(context, guestMessage);
     parsed.typeOfMessageReceived = 'EARLY_CHECKIN';
@@ -4146,22 +4155,47 @@ export class GuestMessagingAgent {
     return false;
   }
 
-  _wifiCredentials() {
+  /**
+   * Property-aware WiFi credentials.
+   * Pine St / West End Victorian (apt-1b/2/3 check-in templates) → Pineland / lobsterbake.
+   * Never emit global hostContacts Ansia_2.4 / 10286500 for those units (Sarah 2026-09-17).
+   * Non-Pine / unknown listing: fall back to hostContacts (SSM / env).
+   */
+  _wifiCredentials(context = {}) {
+    const fromTpl = wifiCredentialsFromCheckinTemplate(context);
+    if (fromTpl?.ssid && fromTpl?.password) {
+      return { ssid: fromTpl.ssid, password: fromTpl.password, source: fromTpl.source || 'checkinTemplate' };
+    }
     const c = getHostContactsSync();
-    return {
-      ssid: String(c.wifiSsid || '').trim() || '{{WIFI_SSID}}',
-      password: String(c.wifiPassword || '').trim() || '{{WIFI_PASSWORD}}',
-    };
+    const ssid = String(c.wifiSsid || '').trim() || '{{WIFI_SSID}}';
+    const password = String(c.wifiPassword || '').trim() || '{{WIFI_PASSWORD}}';
+    // Hard block: if somehow still resolving the known-wrong Ansia pair with a Pine-like name, refuse.
+    const name = String(context.propertyName || context.listingName || '').toLowerCase();
+    const looksPine =
+      /pine\s*st|west\s*end\s*victorian|53\s*pine|cozy.*victorian|sunny.*victorian/.test(name);
+    if (
+      looksPine &&
+      (ssid.toLowerCase() === FORBIDDEN_PINE_WIFI.ssid.toLowerCase() ||
+        password === FORBIDDEN_PINE_WIFI.password)
+    ) {
+      return { ssid: 'Pineland', password: 'lobsterbake', source: 'pine-forbidden-fallback' };
+    }
+    return { ssid, password, source: 'hostContacts' };
   }
 
-  _wifiDraftHasCredentials(draft = '') {
-    const { ssid, password } = this._wifiCredentials();
+  _wifiDraftHasCredentials(draft = '', context = {}) {
+    const { ssid, password } = this._wifiCredentials(context);
     const lower = String(draft || '').toLowerCase();
-    return lower.includes(ssid.toLowerCase()) && lower.includes(password.toLowerCase());
+    if (ssid && password && !ssid.startsWith('{{') && lower.includes(ssid.toLowerCase()) && lower.includes(password.toLowerCase())) {
+      return true;
+    }
+    // Also treat Pineland/lobsterbake as credentials when present (template canonical).
+    if (/pineland/i.test(draft) && /lobsterbake/i.test(draft)) return true;
+    return false;
   }
 
   _hostAlreadySentWifiCredentials(context = {}) {
-    const { ssid, password } = this._wifiCredentials();
+    const { ssid, password } = this._wifiCredentials(context);
     if (ssid.startsWith('{{') || password.startsWith('{{')) return false;
     const history = Array.isArray(context.conversationHistory) ? context.conversationHistory : [];
     return history.some((m) => {
@@ -4170,6 +4204,30 @@ export class GuestMessagingAgent {
       const body = String(m?.body || m?.message || m?.text || m?.content || '').toLowerCase();
       return body.includes(ssid.toLowerCase()) && body.includes(password.toLowerCase());
     });
+  }
+
+  /**
+   * Strip known-wrong Ansia_2.4 / 10286500 (and any credential dump) from a draft
+   * when the guest did not ask for WiFi credentials.
+   */
+  _stripWifiCredentialDump(draft = '', context = {}) {
+    let d = String(draft || '');
+    // Remove forbidden Ansia pair sentences.
+    d = d.replace(
+      /(?:the\s+)?wifi\s+network\s+is\s+ansia[_\s]?2\.4\s+and\s+the\s+password\s+is\s+10286500(?:\s*\([^)]*\))?[^.!?]*[.!?]?/gi,
+      ''
+    );
+    d = d.replace(/\bansia[_\s]?2\.4\b/gi, '');
+    d = d.replace(/\b10286500\b/g, '');
+    // If pine context and draft still has wrong pair fragments, clear credential sentences.
+    if (wifiCredentialsFromCheckinTemplate(context) || draftContainsForbiddenPineWifi(d)) {
+      d = d.replace(
+        /(?:the\s+)?wifi\s+network\s+is\s+\S+\s+and\s+the\s+password\s+is\s+\S+(?:\s*\([^)]*\))?[^.!?]*[.!?]?/gi,
+        ''
+      );
+      d = d.replace(/\blet me know if it works\.?/gi, '');
+    }
+    return d.replace(/\s+/g, ' ').trim();
   }
 
   /**
@@ -4199,7 +4257,8 @@ export class GuestMessagingAgent {
     );
 
     const draft = (parsed.proposedResponse || '').trim();
-    const hasCreds = this._wifiDraftHasCredentials(draft);
+    const hasCreds = this._wifiDraftHasCredentials(draft, context);
+    const hasForbidden = draftContainsForbiddenPineWifi(draft) && !!wifiCredentialsFromCheckinTemplate(context);
     const hasSteps = /settings|select the network|enter the password|reconnect/i.test(draft);
     const hasFollowUp = /let me know if it works/i.test(draft);
     const hasStrongEarly = this._hasStrongEarlyCheckinPromise(draft);
@@ -4209,6 +4268,7 @@ export class GuestMessagingAgent {
       (!earlyAsk || this._categoriesInclude(parsed.typeOfMessageReceived, 'EARLY_CHECKIN'));
     const wifiTextCorrect =
       hasCreds &&
+      !hasForbidden &&
       (!deviceAsk || (hasSteps && hasFollowUp)) &&
       draft &&
       draft.toLowerCase() !== 'none';
@@ -4225,7 +4285,7 @@ export class GuestMessagingAgent {
       };
     }
 
-    const { ssid, password } = this._wifiCredentials();
+    const { ssid, password } = this._wifiCredentials(context);
     const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
     let body;
     if (deviceAsk) {
@@ -4285,40 +4345,98 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Warm ack for a WiFi compliment (no credentials).
+   */
+  _wifiComplimentAckSnippet(context = {}, guestMessage = '') {
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    const guestHasThanks = this._hasThankYouIntent(guestMessage);
+    if (guestHasThanks) {
+      return firstName
+        ? `You're welcome, ${firstName}! Glad you like the WiFi.`
+        : `You're welcome! Glad you like the WiFi.`;
+    }
+    return firstName ? `Hi ${firstName}, glad you like the WiFi.` : `Glad you like the WiFi.`;
+  }
+
+  /**
    * Sarah · Cozy West End Victorian 2026-09-17: WiFi compliment + early check-in ask.
-   * Production answered only WiFi. Ensure BOTH intents are covered — brief wifi ack
-   * (or credentials when asked) + Alexandra early-check-in promise.
+   * Compliment ≠ password ask. Actionable reply is classic EARLY_CHECKIN only
+   * (cleaning finishes / message when ready). Do NOT inject WiFi credentials.
+   * Explicit WiFi ask + early still merges both; compliment-only gets a warm ack.
    */
   _applyWifiEarlyCheckinMultiIntentPolicy(parsed = {}, context = {}, guestMessage = '') {
     const earlyAsk = this._isEarlyCheckinAsk(guestMessage);
-    if (!earlyAsk) return { applied: false };
-    if (this._hostAlreadyOfferedUnitReady(context)) return { applied: false };
-
     const wifiAsk =
       this._isWifiPasswordAsk(guestMessage) || this._isWifiDeviceConnectAsk(guestMessage);
     const wifiCompliment = this._isWifiCompliment(guestMessage);
+
+    // Compliment alone (no early ask, no password ask) → warm ack, never credential dump.
+    if (wifiCompliment && !wifiAsk && !earlyAsk) {
+      const draft = String(parsed.proposedResponse || '').trim();
+      const hasForbidden = draftContainsForbiddenPineWifi(draft);
+      const dumpedCreds =
+        this._wifiDraftHasCredentials(draft, context) ||
+        /wifi\s+network\s+is|password\s+is\s+\S+/i.test(draft);
+      if (!dumpedCreds && !hasForbidden && /glad you|love that|like the wifi|you're welcome/i.test(draft)) {
+        return { applied: false };
+      }
+      return {
+        applied: true,
+        typeOfMessageReceived: this._mergeCategories(
+          parsed.typeOfMessageReceived,
+          'FYI_STATEMENT',
+          this._hasThankYouIntent(guestMessage) ? 'THANK_YOU_MESSAGE' : null
+        ),
+        proposedResponse: this._wifiComplimentAckSnippet(context, guestMessage),
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
+    if (!earlyAsk) return { applied: false };
+    if (this._hostAlreadyOfferedUnitReady(context)) return { applied: false };
     if (!wifiAsk && !wifiCompliment) return { applied: false };
 
     const draft = String(parsed.proposedResponse || '').trim();
+    const guestHasThanks = this._hasThankYouIntent(guestMessage);
+
+    // Compliment + early check-in (no explicit WiFi ask): EARLY_CHECKIN wins.
+    // Strip any credential dump the LLM / prior wifi policy injected.
+    if (wifiCompliment && !wifiAsk) {
+      const earlyPart = this._hasStrongEarlyCheckinPromise(draft) && !draftContainsForbiddenPineWifi(draft)
+        ? this._stripWifiCredentialDump(draft, context)
+        : this._earlyCheckinReplySnippet(context, guestMessage);
+      // Prefer pure early snippet — do not force WiFi ack/credentials on a compliment.
+      const proposedResponse =
+        this._hasStrongEarlyCheckinPromise(earlyPart) && !draftContainsForbiddenPineWifi(earlyPart)
+          ? earlyPart
+          : this._earlyCheckinReplySnippet(context, guestMessage);
+      return {
+        applied: true,
+        typeOfMessageReceived: this._mergeCategories(
+          'EARLY_CHECKIN',
+          guestHasThanks ? 'THANK_YOU_MESSAGE' : null,
+          'FYI_STATEMENT'
+        ),
+        proposedResponse,
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
+
+    // Explicit wifi ask + early: cover both (property-aware credentials).
     const hasStrongEarly = this._hasStrongEarlyCheckinPromise(draft);
     const hasWeakEarly = this._hasWeakEarlyCheckinCopy(draft);
-    const hasCreds = this._wifiDraftHasCredentials(draft);
-    const hasWifiAck =
-      /\b(wifi|wi-?fi|password|network)\b/i.test(draft) &&
-      (/you(?:'|’)re welcome|glad you|love that|happy you|thanks for|wonderful/i.test(draft) ||
-        hasCreds);
+    const hasCreds = this._wifiDraftHasCredentials(draft, context);
+    const hasForbidden = draftContainsForbiddenPineWifi(draft) && !!wifiCredentialsFromCheckinTemplate(context);
+    const needsCreds = wifiAsk && !this._hostAlreadySentWifiCredentials(context);
+    const wifiCovered = needsCreds ? hasCreds && !hasForbidden : true;
+    const earlyCovered = hasStrongEarly && !hasWeakEarly && !hasForbidden;
 
-    const needsCreds =
-      wifiAsk && !this._hostAlreadySentWifiCredentials(context);
-    const wifiCovered = needsCreds ? hasCreds : hasWifiAck || hasCreds;
-    const earlyCovered = hasStrongEarly && !hasWeakEarly;
-
-    const guestHasThanks = this._hasThankYouIntent(guestMessage);
     const typeOfMessageReceived = this._mergeCategories(
       parsed.typeOfMessageReceived,
       'EARLY_CHECKIN',
-      wifiAsk ? (this._isWifiDeviceConnectAsk(guestMessage) ? 'WIFI_TROUBLESHOOTING' : 'WIFI_PASSWORD') : null,
-      wifiCompliment && !wifiAsk ? 'FYI_STATEMENT' : null,
+      this._isWifiDeviceConnectAsk(guestMessage) ? 'WIFI_TROUBLESHOOTING' : 'WIFI_PASSWORD',
       guestHasThanks ? 'THANK_YOU_MESSAGE' : null
     );
 
@@ -4339,7 +4457,7 @@ export class GuestMessagingAgent {
     const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
     let wifiPart;
     if (needsCreds) {
-      const { ssid, password } = this._wifiCredentials();
+      const { ssid, password } = this._wifiCredentials(context);
       const body =
         `The WiFi network is ${ssid} and the password is ${password} (all lowercase). ` + WIFI_LET_ME_KNOW;
       wifiPart = guestHasThanks
@@ -4350,30 +4468,22 @@ export class GuestMessagingAgent {
           ? `Hi ${firstName}, ${body.charAt(0).toLowerCase()}${body.slice(1)}`
           : body;
     } else {
-      // Compliment / credentials already on thread — brief ack only (do not re-spam password).
-      wifiPart = guestHasThanks
-        ? firstName
-          ? `You're welcome, ${firstName}! Glad you like the WiFi.`
-          : `You're welcome! Glad you like the WiFi.`
-        : firstName
-          ? `Hi ${firstName}, glad you like the WiFi.`
-          : `Glad you like the WiFi.`;
+      wifiPart = this._wifiComplimentAckSnippet(context, guestMessage);
     }
 
     const earlyPart = earlyCovered
-      ? draft
+      ? this._stripWifiCredentialDump(draft, context)
       : this._earlyCheckinReplySnippet(context, guestMessage);
-    const proposedResponse = this._combineWifiAndEarlyCheckinReply(
-      wifiCovered && earlyCovered ? draft : wifiPart,
-      earlyCovered && wifiCovered ? '' : earlyPart
-    );
-    // If wifi was already covered in draft but early missing, append early to existing draft.
+
     const finalResponse =
       wifiCovered && !earlyCovered
-        ? this._combineWifiAndEarlyCheckinReply(draft, this._earlyCheckinReplySnippet(context, guestMessage))
+        ? this._combineWifiAndEarlyCheckinReply(
+            this._stripWifiCredentialDump(draft, context) || wifiPart,
+            this._earlyCheckinReplySnippet(context, guestMessage)
+          )
         : !wifiCovered && earlyCovered
-          ? this._combineWifiAndEarlyCheckinReply(wifiPart, draft)
-          : proposedResponse;
+          ? this._combineWifiAndEarlyCheckinReply(wifiPart, earlyPart)
+          : this._combineWifiAndEarlyCheckinReply(wifiPart, earlyPart);
 
     return {
       applied: true,

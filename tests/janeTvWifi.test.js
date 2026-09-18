@@ -52,11 +52,11 @@ describe('Jane TV WiFi connect (West End Victorian production miss)', () => {
     );
     assert.equal(applied.applied, true);
     assert.equal(applied.typeOfMessageReceived, 'WIFI_TROUBLESHOOTING');
-    assert.match(applied.proposedResponse, new RegExp(TEST_HOST_CONTACTS.wifiSsid, 'i'));
-    assert.match(applied.proposedResponse, new RegExp(TEST_HOST_CONTACTS.wifiPassword, 'i'));
+    assert.match(applied.proposedResponse, /Pineland/i);
+    assert.match(applied.proposedResponse, /lobsterbake/i);
     assert.match(applied.proposedResponse, /settings/i);
     assert.match(applied.proposedResponse, /let me know if it works/i);
-    assert.doesNotMatch(applied.proposedResponse, /Pineland|lobsterbake/i);
+    assert.doesNotMatch(applied.proposedResponse, /ansia[_\s]?2\.4|10286500|TEST_WIFI_SSID/i);
   });
 
   it('forces WIFI_PASSWORD credentials on explicit password ask', () => {
@@ -85,7 +85,7 @@ describe('Jane TV WiFi connect (West End Victorian production miss)', () => {
       llmAdapter: { complete: async () => '{}' },
     });
     const good =
-      `Hi Jane, please check the WiFi settings on the TV and connect to ${TEST_HOST_CONTACTS.wifiSsid} / ${TEST_HOST_CONTACTS.wifiPassword}. Let me know if it works.`;
+      `Hi Jane, please check the WiFi settings on the TV and connect to Pineland / lobsterbake. Let me know if it works.`;
     const applied = agent._applyWifiPolicy(
       {
         typeOfMessageReceived: 'WIFI_TROUBLESHOOTING',
@@ -114,8 +114,9 @@ describe('Jane TV WiFi connect (West End Victorian production miss)', () => {
     const result = await agent.processMessage(JANE_TV_WIFI, janeCtx);
     assert.equal(result.shouldReply, true);
     assert.equal(result.typeOfMessageReceived, 'WIFI_TROUBLESHOOTING');
-    assert.match(result.proposedResponse, new RegExp(TEST_HOST_CONTACTS.wifiSsid, 'i'));
-    assert.match(result.proposedResponse, new RegExp(TEST_HOST_CONTACTS.wifiPassword, 'i'));
+    assert.match(result.proposedResponse, /Pineland/i);
+    assert.match(result.proposedResponse, /lobsterbake/i);
+    assert.doesNotMatch(result.proposedResponse, /ansia[_\s]?2\.4|10286500/i);
     assert.match(result.proposedResponse, /let me know if it works/i);
     assert.match(result.proposedResponse, /settings/i);
   });

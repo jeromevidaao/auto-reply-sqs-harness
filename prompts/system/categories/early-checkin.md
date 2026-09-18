@@ -39,6 +39,7 @@
 - For goldens that require "11am", "early", "self-check-in", or "anytime", you **MUST** include those exact words.
 
 **Multi-intent (CRITICAL — Sarah 2026-09-17 WiFi + early check-in miss)**:
-- If the guest also compliments WiFi / the password OR asks for WiFi credentials in the same message, use a multi-category array (e.g. `["THANK_YOU_MESSAGE", "EARLY_CHECKIN"]` or include WIFI_*/FYI) and answer **both** in one `proposedResponse`.
-- Never drop the early-check-in promise because you answered WiFi first.
+- If the guest **compliments** WiFi / the password and also asks for early check-in: primary category **EARLY_CHECKIN**; reply with the classic cleaning-finishes / message-you promise. Do **not** dump WiFi credentials for a compliment.
+- If the guest **explicitly asks** for WiFi credentials and also early check-in: cover both (property-aware Pineland/lobsterbake for Pine St) in one reply.
+- Never drop the early-check-in promise because you answered WiFi first. Never emit Ansia_2.4 / 10286500 for Pine St / West End Victorian.
 

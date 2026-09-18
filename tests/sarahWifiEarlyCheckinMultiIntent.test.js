@@ -4,11 +4,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GuestMessagingAgent } from '../src/agent.js';
 import { setHostContactsForTests, TEST_HOST_CONTACTS } from '../src/config/hostContacts.js';
+import {
+  wifiCredentialsFromCheckinTemplate,
+  FORBIDDEN_PINE_WIFI,
+} from '../src/useCases/checkinTemplates/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRootForTests = path.resolve(__dirname, '..');
 
-setHostContactsForTests(TEST_HOST_CONTACTS);
+// Inject the known-wrong production globals so tests prove we never emit them for Pine.
+setHostContactsForTests({
+  ...TEST_HOST_CONTACTS,
+  wifiSsid: FORBIDDEN_PINE_WIFI.ssid,
+  wifiPassword: FORBIDDEN_PINE_WIFI.password,
+});
 process.env.ALLOW_HOST_CONTACT_TEST_DEFAULTS = '1';
 
 const hasGrokKey = !!process.env.GROK_API_KEY;
@@ -16,7 +25,7 @@ const hasGrokKey = !!process.env.GROK_API_KEY;
 /**
  * Sarah / Sara · Cozy West End Victorian · Sep 20–22 2026 · ~15:32 PT production miss
  * Guest complimented WiFi password AND asked for earlier check-in.
- * Production auto-reply only covered WiFi credentials and dropped early check-in entirely.
+ * Production auto-reply dumped wrong global Ansia WiFi and dropped early check-in.
  */
 const SARAH_MSG =
   'Wonderful! I love your WiFi password! :)\n\nAny chance we can check-in earlier? We will be in Portland, as we arrive on the 19th and will stay at a hotel the first night.\n\nThank you!\n\nSara';
@@ -24,8 +33,7 @@ const SARAH_MSG =
 const BAD_PRODUCTION_WIFI_ONLY =
   "You're welcome, Sara! The WiFi network is Ansia_2.4 and the password is 10286500 (all lowercase). Let me know if it works.";
 
-const PRIOR_HOST_WIFI =
-  'Hi Sara! The WiFi network is Ansia_2.4 and the password is 10286500 (all lowercase). Looking forward to hosting you.';
+const WIFI_COMPLIMENT_ONLY = 'Wonderful! I love your WiFi password! :)';
 
 const sarahCtx = {
   guestName: 'Sara',
@@ -33,13 +41,13 @@ const sarahCtx = {
   checkIn: '2026-09-20',
   checkOut: '2026-09-22',
   listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+  airbnbListingId: '24259977',
   propertyName: '53 Pine St #3 · Cozy West End Victorian | EV Charging + Parking',
   asOfDate: '2026-09-17',
   asOfInstant: '2026-09-17T15:32:00-07:00',
   nowForGreeting: '2026-09-17T15:32:00-07:00',
   reservationId: 'sarah-cozy-west-end-2026-09-20',
   conversation_id: 'sarah-wifi-early-checkin-conv',
-  // Prior host turn so first-host welcome policy does not wipe multi-intent (prod already had thread).
   conversationTraces: {
     earlyUnitReadyOffered: false,
     hasRecentHostMessage: true,
@@ -49,8 +57,8 @@ const sarahCtx = {
     {
       role: 'host',
       sender_type: 'host',
-      body: PRIOR_HOST_WIFI,
-      content: PRIOR_HOST_WIFI,
+      body: 'Hi Sara! The Wifi network is Pineland and the password is lobsterbake.',
+      content: 'Hi Sara! The Wifi network is Pineland and the password is lobsterbake.',
     },
     {
       role: 'guest',
@@ -62,21 +70,22 @@ const sarahCtx = {
   requireLiveConversationHistory: false,
 };
 
-function assertCoversWifiAndEarlyCheckin(text, label = 'reply') {
+function assertClassicEarlyCheckin(text, label = 'reply') {
   const body = String(text || '');
   assert.ok(body && body.toLowerCase() !== 'none', `${label}: must have a sendable draft`);
-  // WiFi / password acknowledgment OR credentials
-  assert.match(
-    body,
-    /wifi|wi-?fi|password|network/i,
-    `${label}: must acknowledge WiFi / password`
-  );
-  // Alexandra early-check-in policy (not vague "check with cleaning")
   assert.match(body, /cleaning finishes|getting the unit ready|unit ready/i, `${label}: early check-in ready promise`);
   assert.match(body, /message you|let you know|we['’]?ll message|we will message/i, `${label}: will message`);
   assert.match(body, /4\s*(:00)?\s*pm/i, `${label}: states 4pm check-in`);
   assert.doesNotMatch(body, /check with the cleaning team/i, `${label}: no weak cleaning-team copy`);
   assert.doesNotMatch(body, /if we can accommodate/i, `${label}: no weak accommodate copy`);
+  assert.doesNotMatch(body, /ansia[_\s]?2\.4/i, `${label}: never Ansia_2.4`);
+  assert.doesNotMatch(body, /10286500/, `${label}: never 10286500`);
+  // Compliment is not a password ask — do not dump credentials.
+  assert.doesNotMatch(
+    body,
+    /wifi\s+network\s+is|password\s+is\s+\S+/i,
+    `${label}: must not dump WiFi credentials on a compliment`
+  );
 }
 
 function mockHospitable(sent) {
@@ -95,7 +104,14 @@ function mockHospitable(sent) {
   };
 }
 
-describe('Sarah WiFi compliment + early check-in multi-intent (Cozy West End Victorian production miss)', () => {
+describe('Sarah WiFi compliment + early check-in (Cozy West End Victorian production miss)', () => {
+  it('check-in templates resolve Pineland/lobsterbake for Apt 3 / Pine / West End', () => {
+    const creds = wifiCredentialsFromCheckinTemplate(sarahCtx);
+    assert.ok(creds);
+    assert.equal(creds.ssid, 'Pineland');
+    assert.equal(creds.password, 'lobsterbake');
+  });
+
   it('detects early-check-in ask AND wifi compliment (not a password ask)', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
@@ -106,17 +122,15 @@ describe('Sarah WiFi compliment + early check-in multi-intent (Cozy West End Vic
     assert.equal(
       agent._isWifiPasswordAsk(SARAH_MSG),
       false,
-      'compliment must not be treated as password ask (that overwrote early check-in in prod)'
+      'compliment must not be treated as password ask'
     );
-    assert.equal(agent._hasThankYouIntent(SARAH_MSG), true);
   });
 
-  it('policy path: production wifi-only draft is rewritten to cover BOTH intents', () => {
+  it('Sarah exact message → EARLY_CHECKIN classic; never Ansia / never credential dump', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
       llmAdapter: { complete: async () => '{}' },
     });
-    // Reproduce the production post-policy order: early applies, then wifi used to wipe it.
     let parsed = {
       typeOfMessageReceived: 'WIFI_PASSWORD',
       proposedResponse: BAD_PRODUCTION_WIFI_ONLY,
@@ -128,14 +142,7 @@ describe('Sarah WiFi compliment + early check-in multi-intent (Cozy West End Vic
       parsed = { ...parsed, ...early, shouldReply: true };
     }
     const wifi = agent._applyWifiPolicy(parsed, sarahCtx, SARAH_MSG);
-    if (wifi.applied) {
-      parsed = {
-        ...parsed,
-        typeOfMessageReceived: wifi.typeOfMessageReceived,
-        proposedResponse: wifi.proposedResponse,
-        shouldReply: true,
-      };
-    }
+    assert.equal(wifi.applied, false, 'wifi policy must not fire on compliment');
     const multi = agent._applyWifiEarlyCheckinMultiIntentPolicy(parsed, sarahCtx, SARAH_MSG);
     if (multi.applied) {
       parsed = {
@@ -145,17 +152,86 @@ describe('Sarah WiFi compliment + early check-in multi-intent (Cozy West End Vic
         shouldReply: true,
       };
     }
-    assertCoversWifiAndEarlyCheckin(parsed.proposedResponse, 'post-policy');
+    assertClassicEarlyCheckin(parsed.proposedResponse, 'post-policy');
     const cats = Array.isArray(parsed.typeOfMessageReceived)
       ? parsed.typeOfMessageReceived
       : [parsed.typeOfMessageReceived];
     assert.ok(
       cats.some((c) => ['EARLY_CHECKIN', 'EARLY_CHECKIN_QUESTION', 'CHECK_IN_TIME_QUESTION'].includes(c)),
-      `categories must include early check-in, got ${JSON.stringify(cats)}`
+      `categories must include EARLY_CHECKIN, got ${JSON.stringify(cats)}`
+    );
+    assert.ok(
+      !cats.includes('WIFI_PASSWORD'),
+      `compliment+early must not stay WIFI_PASSWORD, got ${JSON.stringify(cats)}`
     );
   });
 
-  it('processMessage: LLM wifi-only draft still covers both (Hospitable mocked, LLM stubbed)', async () => {
+  it('Pine St / West End: wifi credentials from policy are Pineland/lobsterbake never Ansia', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const pineContexts = [
+      {
+        guestName: 'Sara',
+        listingId: '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd',
+        airbnbListingId: '24259977',
+        propertyName: '53 Pine St #3 · Cozy West End Victorian | EV Charging + Parking',
+        conversationHistory: [],
+      },
+      {
+        guestName: 'Jane',
+        listingId: '114663c5-0709-4eff-a868-fa9ebd6ed42d',
+        propertyName: '53 Pine St #2 · 1875 West End Victorian | EV Charging + Parking',
+        conversationHistory: [],
+      },
+      {
+        guestName: 'Sam',
+        listingId: 'c899481f-2e5b-402d-80c4-3167fd824d96',
+        airbnbListingId: '20904545',
+        propertyName: 'Downtown Studio · 53 Pine St Apt 1B',
+        conversationHistory: [],
+      },
+    ];
+    for (const ctx of pineContexts) {
+      const { ssid, password } = agent._wifiCredentials(ctx);
+      assert.equal(ssid, 'Pineland', `ssid for ${ctx.propertyName}`);
+      assert.equal(password, 'lobsterbake', `password for ${ctx.propertyName}`);
+      assert.notEqual(ssid, FORBIDDEN_PINE_WIFI.ssid);
+      assert.notEqual(password, FORBIDDEN_PINE_WIFI.password);
+      const applied = agent._applyWifiPolicy(
+        { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'none', shouldReply: false },
+        ctx,
+        'What is the wifi password?'
+      );
+      assert.equal(applied.applied, true, `policy should apply for ${ctx.propertyName}`);
+      assert.match(applied.proposedResponse, /Pineland/i);
+      assert.match(applied.proposedResponse, /lobsterbake/i);
+      assert.doesNotMatch(applied.proposedResponse, /ansia[_\s]?2\.4/i);
+      assert.doesNotMatch(applied.proposedResponse, /10286500/);
+    }
+  });
+
+  it('WiFi compliment alone → warm ack, NOT credential dump', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const multi = agent._applyWifiEarlyCheckinMultiIntentPolicy(
+      {
+        typeOfMessageReceived: 'WIFI_PASSWORD',
+        proposedResponse: BAD_PRODUCTION_WIFI_ONLY,
+        shouldReply: true,
+      },
+      sarahCtx,
+      WIFI_COMPLIMENT_ONLY
+    );
+    assert.equal(multi.applied, true);
+    assert.match(multi.proposedResponse, /glad you like the wifi|you're welcome/i);
+    assert.doesNotMatch(multi.proposedResponse, /ansia[_\s]?2\.4|10286500|pineland|lobsterbake|password is/i);
+  });
+
+  it('processMessage: LLM wifi-only draft becomes EARLY_CHECKIN classic (Hospitable mocked)', async () => {
     const sent = [];
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,
@@ -174,19 +250,19 @@ describe('Sarah WiFi compliment + early check-in multi-intent (Cozy West End Vic
 
     const out = await agent.processMessage(SARAH_MSG, sarahCtx);
     assert.equal(out.shouldReply, true);
-    assertCoversWifiAndEarlyCheckin(out.proposedResponse, 'processMessage');
+    assertClassicEarlyCheckin(out.proposedResponse, 'processMessage');
+    const cats = Array.isArray(out.typeOfMessageReceived)
+      ? out.typeOfMessageReceived
+      : [out.typeOfMessageReceived];
+    assert.ok(cats.some((c) => String(c).includes('EARLY_CHECKIN')), `got ${JSON.stringify(cats)}`);
 
-    // Simulate Lambda send decision with the proposed draft (assert send payload).
-    const convId = sarahCtx.conversation_id;
-    const body = out.proposedResponse;
-    await agent.hospitableClient.sendMessage(convId, body);
+    await agent.hospitableClient.sendMessage(sarahCtx.conversation_id, out.proposedResponse);
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].conversationId, convId);
-    assertCoversWifiAndEarlyCheckin(sent[0].body, 'send payload');
+    assertClassicEarlyCheckin(sent[0].body, 'send payload');
   });
 
   it(
-    'live Grok: Sarah multi-intent covers WiFi ack + early check-in (Hospitable mocked)',
+    'live Grok: Sarah → EARLY_CHECKIN classic, never Ansia (Hospitable mocked)',
     { skip: !hasGrokKey },
     async () => {
       const sent = [];
@@ -200,16 +276,15 @@ describe('Sarah WiFi compliment + early check-in multi-intent (Cozy West End Vic
 
       const out = await agent.processMessage(SARAH_MSG, {
         ...sarahCtx,
-        // Keep history empty / non-live so we do not hit real Hospitable GETs.
         requireLiveConversationHistory: false,
       });
 
       assert.equal(out.shouldReply, true, 'must auto-reply');
-      assertCoversWifiAndEarlyCheckin(out.proposedResponse, 'live Grok');
+      assertClassicEarlyCheckin(out.proposedResponse, 'live Grok');
 
       await agent.hospitableClient.sendMessage(sarahCtx.conversation_id, out.proposedResponse);
-      assert.equal(sent.length, 1, 'mock Hospitable must record the send');
-      assertCoversWifiAndEarlyCheckin(sent[0].body, 'live Grok send payload');
+      assert.equal(sent.length, 1);
+      assertClassicEarlyCheckin(sent[0].body, 'live Grok send payload');
     }
   );
 });
