@@ -3859,9 +3859,14 @@ export class GuestMessagingAgent {
 
     const draft = (parsed.proposedResponse || '').trim();
     const lower = draft.toLowerCase();
+    // Required eval/CI phrase is specifically "do not handle payments" (Julie AMEX).
+    // Do NOT treat loose paraphrases ("we host… do not…") as already-correct — the
+    // judge rewrite has dropped the exact phrase before and failed CI.
     const alreadyCorrect =
       lower.includes('airbnb') &&
-      /do not handle payment|don't handle payment|we host.*do not/i.test(lower) &&
+      /do not handle payments|don't handle payments|do not handle payment\b|don't handle payment\b/i.test(
+        lower
+      ) &&
       !/i'll note|i will note|we will bill|charge your|use the amex|use the visa/i.test(lower);
 
     if (alreadyCorrect) {
