@@ -28,6 +28,10 @@
    - **Ted Apt 3 turn-off follow-up (2026-09-05)**: Prior host message already said mixed-mode + "Use the remotes on the wall in each room" (no Nest, no unit number). Guest: sorry, thought they turned it off, may have set heat, currently away, "Are you able to turn it off remotely or is it ok to leave as is for now." Bad draft: repeated remotes + Nest lecture + asked them for remote settings, never turned anything off. Correct: REVISE to confirm **I turned the wall units off**. You always receive the **full** conversation history — if a prior host turn already gave remotes/same-mode, repeating it is a fail.
    - The ConversationContextTool now sets `priorHostHVACAdvice`, `priorHostInstructions[]`, and `repeatedInstructionRisk` (when current message is HVAC-related and prior host advice on Nest/remotes/controls exists). Use these signals + the raw conversationHistory (host messages) to detect. Flag even across larger time gaps or intervening messages (e.g. arrival, "unit ready", other topics) in a long stay thread.
    - General (not just HVAC): if history shows prior host gave WiFi password, parking directions, check-in codes, pet policy details, etc., and the draft re-explains the same facts without the guest explicitly re-asking for the basics, require revise to strip the duplicate.
+   - **WiFi compliment after credentials already sent (Sarah · Cozy West End Victorian 2026-09-17)**: Conversation history shows a prior **host** message with WiFi network/password (e.g. Pineland / lobsterbake in the check-in instructions). Guest then says **"I love your WiFi password!"** (compliment / acknowledgement) and may also ask about **early check-in**. This is **not** a request for credentials.
+     - If the draft re-sends any SSID/password (`Ansia_2.4`, `10286500`, `Pineland`, `lobsterbake`, "The WiFi network is…", "password is…"), you MUST **REJECT** or **REVISE**. Never APPROVE a credential dump on a compliment.
+     - When early check-in was also asked: **APPROVE/REVISE to early-check-in classic only** — check-in is at 4pm, cannot guarantee early, as soon as cleaning finishes getting the unit ready we'll message you. Zero WiFi credentials in the reply.
+     - Common sense + history: the guest already has the password (they just praised it). Re-sending (especially wrong globals like Ansia_2.4) is a fail.
    - Issues example to emit: "Repeated prior host instruction: draft re-stated the Nest/heat-pump-remotes control advice that a host message earlier in the thread already provided (see priorHostHVACAdvice or history). Remove the duplicated explanation; keep only new tool-derived value and optionally reference 'as previously noted'."
    - **Rapid repeated time-of-day greeting (Olivia car-spot case)**: A prior host message only ~2 minutes earlier already started with "Good morning, Olivia," (or "Good X, Name"). The guest then sent a quick thanks ("No problem, we’ll move it. Thanks for the quick response!"). The draft replied "Good morning, Olivia, You're welcome!". This repeats the exact greeting style the guest just heard from a host 2 min ago and sounds robotic. conversationTraces will contain `recentHostGreeting` + `recentHostGreetingMinutesAgo` (from ConversationContextTool scan of host messages for greeting patterns + recency <30min). 
      - Correct action: REVISE (or REJECT if the whole reply is low value). revisedResponse must strip the repeated greeting and use only the minimal warm ack: "You're welcome, Olivia!" or "You're welcome!". Name is fine; the "Good morning/afternoon..." opener must not be repeated on the immediate follow-up.
@@ -153,7 +157,19 @@ You must return **only** valid JSON in this exact structure:
 }
 ```
 
-### Verdict Guidelines
+#
+## HARD rule — never re-send WiFi / codes the guest already has (Sarah · Cozy West End Victorian, 2026-09-17)
+
+**Common sense + full thread history.** If a prior HOST message already sent WiFi SSID/password (e.g. Pineland / lobsterbake), OR the current guest message is clearly a **compliment/acknowledgement** of the password ("I love your WiFi password!", "wifi password is great"), then:
+
+- Any draft that re-states SSID, password, network name, or "the wifi is … / password is …" is **wrong** — even if the credentials are correct, and especially if they are the wrong global Ansia_2.4 / 10286500 pair.
+- The guest's real ask (early check-in, parking, etc.) must be answered; WiFi must be stripped.
+
+**Verdict:** **REJECT** if the draft is mostly a credential dump and ignores the real ask. **REVISE** if there is a good early-check-in (or other) answer buried under a WiFi re-send — strip every credential sentence; keep only the early-check-in classic ("we'll message you when cleaning finishes / the unit is ready").
+
+Never APPROVE a reply that re-sends WiFi after the guest just complimented knowing the password. That is nonsense given the conversation history.
+
+## Verdict Guidelines
 
 - **APPROVE**: The response is good on truth, coverage, thread consistency, and human tone. No significant issues.
 - **REVISE**: Clear issues. Always fill `issues[]`. Prefer a crisp `rewriteBrief` for the rewrite pass; optionally also set `revisedResponse`. On cancellation topics, lean conservative and point to the official policy.

@@ -7077,6 +7077,57 @@ export class GuestMessagingAgent {
     const hvacGuard = this._applyHvacThreadJudgeGuard(llmJudgeResult, firstDecision, context, guestMessage);
     if (hvacGuard) return hvacGuard;
 
+    // Sarah 2026-09-17: WiFi compliment / prior host WiFi → never APPROVE credential re-send.
+    {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const wifiCompliment = this._isWifiCompliment(guestMessage);
+      const wifiAsk =
+        this._isWifiPasswordAsk(guestMessage) || this._isWifiDeviceConnectAsk(guestMessage);
+      const hostSentWifi =
+        this._hostAlreadySentWifiCredentials(context) ||
+        (Array.isArray(context.conversationHistory) &&
+          context.conversationHistory.some((m) => {
+            const role = String(m?.sender_type || m?.role || '').toLowerCase();
+            if (!(role === 'host' || role === 'owner')) return false;
+            const body = String(m?.body || m?.content || '');
+            return /(?:wifi|wi-?fi)\s+network\s+is|pineland|lobsterbake|ansia[\s_]?2\.4|10286500/i.test(body);
+          }));
+      const dumpRe =
+        /ansia[\s_]?2\.4|10286500|pineland|lobsterbake|(?:wifi|wi-?fi)\s+network\s+is|password\s+is\s+\S+/i;
+      const draftDumps = dumpRe.test(draft);
+      const revisedDumps = revised ? dumpRe.test(revised) : false;
+      if (!wifiAsk && (wifiCompliment || hostSentWifi) && (draftDumps || revisedDumps || llmJudgeResult.verdict === 'APPROVE' && draftDumps)) {
+        if (draftDumps || (llmJudgeResult.verdict === 'APPROVE' && draftDumps) || revisedDumps) {
+          const earlyAsk = this._isEarlyCheckinAsk(guestMessage);
+          let fixed;
+          if (earlyAsk && !this._hostAlreadyOfferedUnitReady(context)) {
+            fixed = this._earlyCheckinReplySnippet(context, guestMessage);
+          } else if (wifiCompliment) {
+            fixed = this._wifiComplimentAckSnippet(context, guestMessage);
+          } else {
+            fixed = this._stripWifiCredentialDump(draft, context) || draft;
+          }
+          const stillDumps = dumpRe.test(fixed);
+          console.log('[Agent] → Deterministic judge guard: WiFi re-send after compliment / prior host credentials (Sarah)');
+          return {
+            ...llmJudgeResult,
+            // REJECT pure credential spam; REVISE when we can answer early check-in.
+            verdict: earlyAsk && !stillDumps ? 'REVISE' : stillDumps ? 'REJECT' : 'REVISE',
+            revisedResponse: stillDumps ? undefined : fixed,
+            notes:
+              (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+              'Deterministic guard: guest complimented WiFi / host already sent credentials — do not re-send SSID/password; answer early check-in only when asked.',
+            issues: [
+              ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+              'WiFi credential re-send after compliment or prior host WiFi (Sarah West End Victorian 2026-09-17).',
+            ],
+            deterministicGuard: true,
+          };
+        }
+      }
+    }
+
     if (this._isSmokeAlarmAllClear(guestMessage, context)) {
       const draft = (firstDecision.proposedResponse || '').trim();
       const revised = (llmJudgeResult.revisedResponse || '').trim();

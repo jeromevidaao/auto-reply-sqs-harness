@@ -5,6 +5,11 @@ This is the canonical instruction file for any AI/agent working in this repo (Gr
 **Do not offer manual Lambda deploy.** Push to `main` → CI (tests + eval) → auto-deploy via `.github/workflows/deploy.yml`. See README **CI/CD & Deployment** and `docs/deployment.md`. Only mention manual/AWS-console steps when the user explicitly asks for something outside that path (e.g. DLQ redrive, alarm investigation).
 
 
+
+### Judge: WiFi re-send after known (Sarah 2026-09-17)
+
+Guest already received Pineland/lobsterbake and said "I love your WiFi password" + early check-in. Auto re-sent (wrong) credentials. Fix: conversation-judge HARD rule + deterministic `checkDraftClaims` `wifi_resend_after_known` + agent judge guard. Compliment ≠ password ask; answer early-checkin classic only.
+
 ## Pre-push (Jerome — HARD)
 
 Never push harness changes hoping CI will catch golden drift. After WiFi/credential/policy edits:
