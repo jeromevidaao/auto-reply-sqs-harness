@@ -1433,9 +1433,36 @@ export class GuestMessagingAgent {
     };
   }
 
+  /**
+   * Early-check-in auto-reply / policy answer (Carli): mentions 4pm + cleaning finishes /
+   * message you right away — NOT a full NEW_RESERVATION_WELCOME logistics block.
+   */
+  _hostMessageLooksLikeEarlyCheckinAnswer(body = '') {
+    const text = String(body || '');
+    // Classic early-check-in auto-reply (Carli / Alexandra): 4pm + can't guarantee +
+    // message when cleaning finishes — not a full welcome logistics block.
+    return /can'?t guarantee early|cleaning finishes(?: getting the unit ready)?|as soon as cleaning|message you right away|we(?:'ll| will) message you(?: right away)?/i.test(
+      text
+    );
+  }
+
   _hostMessageLooksLikeWelcome(body = '') {
-    const welcomeMarkers = /check-?in|self-check-in|parking|pet fee|looking forward to hosting|detailed check-in instructions|3 days before|delighted to host|glad to host/i;
-    return welcomeMarkers.test(body || '');
+    const text = body || '';
+    // Carli: early-check-in policy answers mention check-in/4pm but are not full welcomes.
+    if (
+      this._hostMessageLooksLikeEarlyCheckinAnswer(text) &&
+      !/pet fee|looking forward to hosting|detailed check-in instructions|3 days before|delighted to host|one dedicated/i.test(
+        text
+      )
+    ) {
+      return false;
+    }
+    const strong =
+      /pet fee|looking forward to hosting|detailed check-in instructions|3 days before|delighted to host|glad to host|one dedicated (?:off-street )?parking/i;
+    if (strong.test(text)) return true;
+    // Self-check-in + parking together is welcome-shaped (Rene).
+    if (/self-check-in/i.test(text) && /parking/i.test(text)) return true;
+    return false;
   }
 
   _guestDisplayFirstName(context = {}) {
@@ -2693,16 +2720,29 @@ export class GuestMessagingAgent {
     if (this._isPostStayHousekeepingFeedback(msg)) return false;
     if (isAdditionalParkingAsk(msg) || isEventHostingDenial(msg)) return false;
     if (!this._looksLikePlausibleFollowUp(msg) &&
-        !(/^(thank you|thanks)/i.test(msg.toLowerCase()) && /(appreciate|excited)/i.test(msg.toLowerCase()))) {
+        !(/^(thank you|thanks|thankyou)/i.test(msg.toLowerCase()) && /(appreciate|excited)/i.test(msg.toLowerCase()))) {
       return false;
     }
 
     const traces = context.conversationTraces || {};
-    if (traces.recentWelcomeSent) return true;
-
     const history = context.conversationHistory || [];
     const hostMsgs = history.filter(m => m.sender_type === 'host' || m.sender?.type === 'host');
-    if (hostMsgs.some(m => this._hostMessageLooksLikeWelcome(m.body))) return true;
+    // Resolve last host body from history or traces (enrichment may set recentWelcomeSent on
+    // early-check-in answers because they mention 4pm — Carli must still get contextual thanks).
+    const lastHostBody = [...hostMsgs].reverse().map(m => m.body || m.content || m.text).find(Boolean)
+      || traces.lastHostMessagePreview
+      || '';
+    if (
+      lastHostBody &&
+      this._hostMessageLooksLikeEarlyCheckinAnswer(lastHostBody) &&
+      !this._hostMessageLooksLikeWelcome(lastHostBody)
+    ) {
+      return false;
+    }
+
+    if (traces.recentWelcomeSent) return true;
+
+    if (hostMsgs.some(m => this._hostMessageLooksLikeWelcome(m.body || m.content || m.text))) return true;
 
     if (traces.lastHostMessagePreview && this._hostMessageLooksLikeWelcome(traces.lastHostMessagePreview)) {
       return true;
@@ -2757,7 +2797,8 @@ export class GuestMessagingAgent {
     const guest = String(guestMessage || '').trim();
     if (!guest) return null;
     // Whole-word thanks / slang only (Thanksgiving must not match).
-    if (!/\b(?:thank you|thanks|thx|tysm|ty|appreciate(?:\s+it)?)\b/i.test(guest)) return null;
+    // Include compound 'thankyou' (Carli: "Thankyou so much :)" — no space).
+    if (!/\b(?:thank you|thanks|thankyou|thx|tysm|ty|appreciate(?:\s+it)?)\b/i.test(guest)) return null;
     // Operational questions are not pure contextual-thanks turns.
     if (/\?/.test(guest)) return null;
 
@@ -2790,6 +2831,14 @@ export class GuestMessagingAgent {
       };
     }
 
+    // Carli: guest thanks after early-check-in auto-reply (cleaning finishes / message you).
+    if (this._hostMessageLooksLikeEarlyCheckinAnswer(recentHost)) {
+      return {
+        reason: 'will_update',
+        clause: 'Glad we can update you.',
+      };
+    }
+
     return null;
   }
 
@@ -2816,21 +2865,25 @@ export class GuestMessagingAgent {
     if (this._isPostCheckoutThankYou(guestMessage, context)) {
       return { applied: false };
     }
-    if (this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
-      return { applied: false };
-    }
 
     const inferred = this._inferThankYouContext(guestMessage, context);
+    // Early-check-in thanks (Carli) must enrich even when enrichment marks recentWelcomeSent.
+    const earlyCheckinThanks = inferred?.reason === 'will_update' || inferred?.reason === 'happy_to_help';
+    if (!earlyCheckinThanks && this._isPostWelcomeThankYouFollowUp(guestMessage, context)) {
+      return { applied: false };
+    }
     if (!inferred?.clause) return { applied: false };
 
     const draft = stripLeadingFormalTimeGreeting((parsed.proposedResponse || '').trim());
     const hasYoureWelcome = /you(?:'|’)re welcome|you are welcome/i.test(draft);
-    const alreadyHasContext =
-      /glad you(?:'re| are)? enjoying|glad you're enjoying your stay|enjoying (?:your |the )?stay/i.test(
-        draft
-      );
+    const earlyCheckinReason = inferred.reason === 'will_update' || inferred.reason === 'happy_to_help';
+    const alreadyHasContext = earlyCheckinReason
+      ? /glad we can update|update you/i.test(draft)
+      : /glad you(?:'re| are)? enjoying|glad you're enjoying your stay|enjoying (?:your |the )?stay/i.test(
+          draft
+        );
 
-    // Already warm + You're welcome with enjoying context — leave alone.
+    // Already warm + You're welcome with the right context — leave alone.
     if (hasYoureWelcome && alreadyHasContext) {
       return { applied: false };
     }
@@ -2846,16 +2899,23 @@ export class GuestMessagingAgent {
     const shortGladOnly =
       draft.length > 0 &&
       draft.length < 120 &&
-      /glad you|enjoying (?:your |the )?stay/i.test(draft) &&
+      /glad you|enjoying (?:your |the )?stay|glad we can update|happy to help/i.test(draft) &&
       !hasYoureWelcome &&
       !looksOperational;
 
-    const needsRewrite =
+    let needsRewrite =
       !draft ||
       draft === 'none' ||
       this._isThinYoureWelcomeAck(draft) ||
       shortGladOnly ||
-      (hasYoureWelcome && !alreadyHasContext && draft.length < 100);
+      (hasYoureWelcome && !alreadyHasContext && draft.length < 100) ||
+      // Carli: always pin early-checkin thanks to the update clause (eval + prod).
+      (earlyCheckinReason && !alreadyHasContext);
+
+    // Deterministic: early-checkin thanks must mention update (LLM drafts are flaky).
+    if (earlyCheckinReason && !/update you|glad we can update/i.test(draft)) {
+      needsRewrite = true;
+    }
 
     if (!needsRewrite) return { applied: false };
 
@@ -2866,6 +2926,9 @@ export class GuestMessagingAgent {
 
     parsed.typeOfMessageReceived = 'THANK_YOU_MESSAGE';
     parsed.proposedResponse = proposedResponse;
+    console.log(
+      `[Agent] → Contextual thank-you policy applied (${inferred.reason}): ${proposedResponse.slice(0, 100)}`
+    );
 
     return {
       applied: true,
@@ -4156,7 +4219,8 @@ export class GuestMessagingAgent {
   _hasThankYouIntent(guestMessage = '') {
     const lower = (guestMessage || '').toLowerCase();
     // Include slang TYSM / TY (Julia "TYSM!" morning check-in thanks).
-    return /\bthank(?:s| you)\b|\bappreciate(?: it)?\b|\bthx\b|\btysm\b|\bty\b/.test(lower);
+    // Catch compound 'Thankyou' (Carli incident: 'Thankyou so much :)') — no space variant of "thank you".
+    return /\bthank(?:s| you|you)\b|\bappreciate(?: it)?\b|\bthx\b|\btysm\b|\bty\b/.test(lower);
   }
 
   /**

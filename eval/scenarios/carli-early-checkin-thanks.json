@@ -1,0 +1,47 @@
+{
+  "id": "carli-early-checkin-thanks",
+  "description": "Carli · Booker (Pine / Pineland wifi). Guest early-check-in ask → host auto-reply (4pm, can't guarantee, message when cleaning finishes) → guest 'Thankyou so much :) appreciate it!' (compound Thankyou, no space). Must You're welcome + short glad-we-can-update / happy-to-help context. Bare You're welcome alone fails. Must NOT re-explain 4pm.",
+  "guestMessage": "Thankyou so much :) appreciate it!",
+  "context": {
+    "guestName": "Carli",
+    "guestDisplayName": "Carli",
+    "propertyName": "Booker / Pine",
+    "checkIn": "2026-09-18",
+    "checkOut": "2026-09-20",
+    "asOfDate": "2026-09-18",
+    "conversation_id": "carli-early-checkin-thanks-conv",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Hello! If there's any chance of na early check in, would you let me know please. Thankyou!"
+      },
+      {
+        "sender_type": "host",
+        "body": "Good afternoon, Carli. Check-in is at 4pm and we can't guarantee early check-in, but as soon as cleaning finishes getting the unit ready for you we'll message you right away."
+      },
+      {
+        "sender_type": "guest",
+        "body": "Thankyou so much :) appreciate it!"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": "THANK_YOU_MESSAGE",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.8,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "You're welcome",
+      "update"
+    ],
+    "forbiddenPhrases": [
+      "4pm",
+      "4 pm",
+      "can't guarantee early",
+      "Good afternoon, Carli",
+      "safe travels"
+    ]
+  },
+  "notes": "Carli Thankyou (no space) after early-check-in auto-reply. Detection + _inferThankYouContext will_update + contextual policy. Keep amie/rene/sarah/julia green. Live You're welcome already sent — no SQS replay. Optional: 429/Retry-After delay on getReservationMessages (~26s) briefly made the reply look missing in UI."
+}
