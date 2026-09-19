@@ -3504,7 +3504,11 @@ export class GuestMessagingAgent {
       ? parsed.typeOfMessageReceived
       : [parsed.typeOfMessageReceived];
     const canonical = ['CANCELLATION_POLICY', 'CANCELLATION_NOTIFICATION', 'CANCELLATION_POLICY_EXCEPTION'];
-    if (!categories.includes('CANCELLATION') || categories.some(c => canonical.includes(c))) {
+    // Legacy aliases the modular LLM still emits: bare CANCELLATION and CANCELLATION_REQUEST.
+    // CI flake 2026-09-19: Elena full-refund prior-host scored REQUEST instead of POLICY.
+    const aliases = ['CANCELLATION', 'CANCELLATION_REQUEST'];
+    const hasAlias = categories.some((c) => aliases.includes(c));
+    if (!hasAlias || categories.some((c) => canonical.includes(c))) {
       return { applied: false };
     }
 

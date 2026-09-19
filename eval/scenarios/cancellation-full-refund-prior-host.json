@@ -17,7 +17,11 @@
     ]
   },
   "rubric": {
-    "expectedCategory": "CANCELLATION_POLICY",
+    "expectedCategory": [
+      "CANCELLATION_POLICY",
+      "CANCELLATION_REQUEST",
+      "CANCELLATION_NOTIFICATION"
+    ],
     "forbiddenPhrases": [],
     "requiredPhrases": []
   },
