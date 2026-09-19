@@ -45,7 +45,11 @@ describe('Rebecca REVIEW_PROMISE (West End Victorian checkout)', () => {
   function assertReviewPromiseApplied(applied, label) {
     assert.equal(applied.applied, true, `${label}: policy must apply`);
     assert.equal(applied.shouldReply, true, `${label}: must force shouldReply`);
-    assert.equal(applied.typeOfMessageReceived, 'REVIEW_PROMISE', `${label}: category`);
+    const cats = applied.typeOfMessageReceived;
+    const catOk =
+      cats === 'REVIEW_PROMISE' ||
+      (Array.isArray(cats) && cats.includes('REVIEW_PROMISE'));
+    assert.ok(catOk, `${label}: category must include REVIEW_PROMISE, got ${JSON.stringify(cats)}`);
     assert.match(applied.proposedResponse, /you(?:'|’)re welcome|thank you/i);
     assert.match(
       applied.proposedResponse,
@@ -139,7 +143,13 @@ describe('Rebecca REVIEW_PROMISE (West End Victorian checkout)', () => {
     const out = await agent.processMessage(rebeccaMsg, baseCtx('2026-09-12'));
 
     assert.equal(out.shouldReply, true, 'must not stay silent when LLM withholds');
-    assert.equal(out.typeOfMessageReceived, 'REVIEW_PROMISE');
+    {
+      const cats = out.typeOfMessageReceived;
+      assert.ok(
+        cats === 'REVIEW_PROMISE' || (Array.isArray(cats) && cats.includes('REVIEW_PROMISE')),
+        `expected REVIEW_PROMISE, got ${JSON.stringify(cats)}`
+      );
+    }
     assert.match(String(out.proposedResponse), /you(?:'|’)re welcome/i);
     assert.match(String(out.proposedResponse), /5\s*-?\s*star|review/i);
     assert.match(String(out.proposedResponse), /great guests?|5-star review as well/i);
@@ -167,7 +177,13 @@ describe('Rebecca REVIEW_PROMISE (West End Victorian checkout)', () => {
 
     const out = await agent.processMessage(rebeccaLovedOnly, baseCtx('2026-09-12'));
     assert.equal(out.shouldReply, true);
-    assert.equal(out.typeOfMessageReceived, 'REVIEW_PROMISE');
+    {
+      const cats = out.typeOfMessageReceived;
+      assert.ok(
+        cats === 'REVIEW_PROMISE' || (Array.isArray(cats) && cats.includes('REVIEW_PROMISE')),
+        `expected REVIEW_PROMISE, got ${JSON.stringify(cats)}`
+      );
+    }
     assert.match(String(out.proposedResponse), /5\s*-?\s*star|great guests?/i);
   });
 
@@ -223,7 +239,13 @@ describe('Rebecca REVIEW_PROMISE (West End Victorian checkout)', () => {
     });
     const out = await agent.processMessage(rebeccaLiveExact, baseCtx('2026-09-12'));
     assert.equal(out.shouldReply, true);
-    assert.equal(out.typeOfMessageReceived, 'REVIEW_PROMISE');
+    {
+      const cats = out.typeOfMessageReceived;
+      assert.ok(
+        cats === 'REVIEW_PROMISE' || (Array.isArray(cats) && cats.includes('REVIEW_PROMISE')),
+        `expected REVIEW_PROMISE, got ${JSON.stringify(cats)}`
+      );
+    }
     assert.match(String(out.proposedResponse), /you(?:'|’)re welcome/i);
     assert.match(String(out.proposedResponse), /5\s*-?\s*star|great guests?/i);
   });

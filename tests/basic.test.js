@@ -559,7 +559,13 @@ describe('EventRequestTool (no LLM)', () => {
       postStayThanks
     );
     assert.equal(reviewPolicy.applied, true);
-    assert.equal(reviewPolicy.typeOfMessageReceived, 'REVIEW_PROMISE');
+    {
+      const cats = reviewPolicy.typeOfMessageReceived;
+      assert.ok(
+        cats === 'REVIEW_PROMISE' || (Array.isArray(cats) && cats.includes('REVIEW_PROMISE')),
+        `expected REVIEW_PROMISE, got ${JSON.stringify(cats)}`
+      );
+    }
     assert.ok(/you're welcome/i.test(reviewPolicy.proposedResponse));
     assert.ok(/review/i.test(reviewPolicy.proposedResponse));
     assert.ok(!/locked out|lock box/i.test(reviewPolicy.proposedResponse));

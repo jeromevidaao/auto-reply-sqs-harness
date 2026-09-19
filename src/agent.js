@@ -2895,6 +2895,10 @@ export class GuestMessagingAgent {
     if (this._isTemporaryDepartureDuringStay(guestMessage, context)) {
       return { applied: false };
     }
+    // Never demote post-stay review / 5-star promise into a thin contextual You're welcome (Alexandra).
+    if (this._isPostStayGratitudeOrReviewPromise(guestMessage, context)) {
+      return { applied: false };
+    }
     if (this._isPostCheckoutThankYou(guestMessage, context)) {
       return { applied: false };
     }
@@ -5085,6 +5089,60 @@ export class GuestMessagingAgent {
     });
   }
 
+  /**
+   * Guest promised or confirmed 5 stars / a review without needing the word "review".
+   * Alexandra 2026-09-19: "Thanks again, Jerome! You got 5!" after host asked for 5 stars.
+   */
+  _guestPromisedOrGaveStars(guestMessage = '') {
+    const lower = String(guestMessage || '').toLowerCase();
+    if (!lower) return false;
+    // "You got 5" / "you got five" / "you got 5 stars" (bare number after host review ask).
+    if (/\byou got\s*(?:a\s+)?(?:5|five)(?:\s*[-]?\s*stars?)?\b/.test(lower)) return true;
+    // "5 stars" / "five stars" / "five-star" as guest commitment or submitted review.
+    if (/(?:^|[^\d])(?:5|five)\s*[-]?\s*stars?\b/.test(lower)) return true;
+    // "left you a 5" / "gave you five stars" / "promised 5 stars"
+    if (/(?:got|gave|left|leaving|promise[ds]?|will|i'?ll|we'?ll|going to)\s+(?:you\s+)?(?:a\s+)?(?:5|five)\s*[-]?\s*stars?\b/.test(lower)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Warm REVIEW_PROMISE ack must thank for the (promised) review/5 stars AND promise
+   * a reciprocal 5-star. Bare "You're welcome, Name!" is too thin (Alexandra incident).
+   */
+  _hasGoodReviewPromiseAck(text = '') {
+    const body = String(text || '');
+    if (!body || body === 'none') return false;
+    if (this._isThinYoureWelcomeAck(body)) return false;
+    if (!/you(?:'|')?re welcome|you are welcome|thank you for/i.test(body)) return false;
+    const ackStarsOrReview =
+      /\breview\b|5\s*-?\s*star|five\s*star|kind words|terrific trip/i.test(body);
+    const reciprocal =
+      /leave you a 5|5-star review as well|five-star review as well|great guests?/i.test(body) ||
+      (/(?:we'?ll|we will|will)\s+leave.{0,40}(?:5|five)\s*-?\s*star/i.test(body) &&
+        /(?:as well|too|also|for you)/i.test(body));
+    return ackStarsOrReview && reciprocal;
+  }
+
+  _reviewPromiseReplySnippet(context = {}, guestMessage = '') {
+    const name = this._guestDisplayFirstName(context);
+    // Alexandra: already confirmed stars ("You got 5!") — thank for the 5-star + reciprocal.
+    // Rebecca: promised to write a review — look forward + reciprocal.
+    if (this._guestPromisedOrGaveStars(guestMessage)) {
+      return (
+        `You're welcome, ${name}! So glad you had a terrific trip — thank you for the kind words and the 5-star review. ` +
+        `We'll leave you a 5-star review as well. ` +
+        `Hope to host you again in Portland soon!`
+      );
+    }
+    return (
+      `You're welcome, ${name}! So glad you had a terrific trip — thank you for the kind words. ` +
+      `We'll look forward to your review and will leave you a 5-star review as well. ` +
+      `Hope to host you again in Portland soon!`
+    );
+  }
+
   _isPostStayGratitudeOrReviewPromise(guestMessage = '', context = {}) {
     const msg = String(guestMessage || '').trim();
     if (!msg) return false;
@@ -5097,11 +5155,14 @@ export class GuestMessagingAgent {
     const onOrAfterCheckout = !!(checkOut && today && checkOut <= today);
     const pastCheckout = !!(checkOut && today && checkOut < today);
 
+    // Explicit "review" + promise language (write/leave/submit…). Keep separate from bare
+    // "You got 5!" / "5 stars" so star phrases need thanks and/or a prior host review ask.
     const reviewPromise =
       /\breview\b/.test(lower) &&
       /(submit|leave|write|post|send|get a|glowing|5\s*[- ]?star|five\s*star|will|i'?ll|we'?ll|today|tomorrow|coming)/i.test(
         lower
       );
+    const starPromise = this._guestPromisedOrGaveStars(guestMessage);
     const cityLove =
       /loved\s+portland|love\s+portland|had a (?:lovely|wonderful|great|amazing) time in portland|portland was (?:lovely|wonderful|great|amazing)/i.test(
         lower
@@ -5116,10 +5177,11 @@ export class GuestMessagingAgent {
 
     // Sarah checkout incident: explicit "checked out" + thanks for a great stay is warm
     // checkout farewell (THANK_YOU), not REVIEW_PROMISE — unless they also promise a review
-    // or richer post-stay gratitude (city love / hope to be back).
+    // or richer post-stay gratitude (city love / hope to be back / 5-star promise).
     if (
       this._looksLikeActualCheckout(guestMessage, context) &&
       !reviewPromise &&
+      !starPromise &&
       !cityLove &&
       !/looking forward to the next|hope to (?:be )?back|until next time/i.test(lower)
     ) {
@@ -5132,8 +5194,17 @@ export class GuestMessagingAgent {
     if (reviewPromise && /thank|thanks|appreciate|terrific|great trip|great stay|looking forward|loved/i.test(lower)) {
       return true;
     }
+    // 5-star confirmation ("You got 5!", "5 stars") + thanks — Alexandra class (history optional
+    // but prior host review-ask is still used by the judge / enrichment copy).
+    if (starPromise && thanksOnly) {
+      return true;
+    }
     // Host just asked for a review; guest thanks + city love (no "review" word) on/after checkout.
     if (onOrAfterCheckout && hostAskedReview && thanksOnly && cityLove) {
+      return true;
+    }
+    // Host asked for review + bare 5-star confirmation (even without "thanks") on/after checkout.
+    if (onOrAfterCheckout && hostAskedReview && starPromise) {
       return true;
     }
     // Keep pastCheckout alias behavior for older call sites / clarity.
@@ -5268,41 +5339,50 @@ export class GuestMessagingAgent {
     if (this._isPostStayHousekeepingFeedback(guestMessage)) {
       return { applied: false };
     }
-    // Explicit checkout thanks without review language → post-checkout farewell wins (Sarah).
+    // Explicit checkout thanks without review / 5-star language → post-checkout farewell wins (Sarah).
+    // Alexandra "You got 5!" must stay on REVIEW_PROMISE even if checkout thanks also matched.
     if (
       this._isPostCheckoutThankYou(guestMessage, context) &&
-      !/\breview\b/i.test(guestMessage)
+      !/\breview\b/i.test(guestMessage) &&
+      !this._guestPromisedOrGaveStars(guestMessage)
     ) {
       return { applied: false };
     }
 
-    const name = this._guestDisplayFirstName(context);
     const draft = (parsed.proposedResponse || '').trim();
     // Detect lockout recovery language without embedding real lockbox digits in source.
     const looksLikeLockout = /locked out|lock box|lockbox|backup key|street entrance/i.test(draft);
     const looksLikeWelcome = this._hostMessageLooksLikeWelcome(draft);
-    const hasReviewAck = /review/i.test(draft) && /you're welcome|you are welcome|thank you|glad/i.test(draft);
+    // Alexandra miss: thin "You're welcome, Name!" used to count as isGood — never again.
     const isGood =
       draft &&
       draft !== 'none' &&
       !looksLikeLockout &&
       !looksLikeWelcome &&
-      (hasReviewAck || (/you're welcome|you are welcome/i.test(draft) && draft.length < 280));
+      this._hasGoodReviewPromiseAck(draft);
 
     let proposedResponse = draft;
     if (!isGood) {
-      proposedResponse =
-        `You're welcome, ${name}! So glad you had a terrific trip — thank you for the kind words. ` +
-        `We'll look forward to your review and will leave you a 5-star review as well. ` +
-        `Hope to host you again in Portland soon!`;
+      proposedResponse = this._reviewPromiseReplySnippet(context, guestMessage);
     }
 
-    parsed.typeOfMessageReceived = 'REVIEW_PROMISE';
+    // Combine thank-you + review-promise when both intents are present (Jerome: always combine).
+    const typeOfMessageReceived = this._hasThankYouIntent(guestMessage)
+      ? this._mergeCategories('THANK_YOU_MESSAGE', 'REVIEW_PROMISE')
+      : 'REVIEW_PROMISE';
+
+    parsed.typeOfMessageReceived = typeOfMessageReceived;
     parsed.proposedResponse = proposedResponse;
+    const cats = Array.isArray(parsed.categories) ? [...parsed.categories] : [];
+    if (this._hasThankYouIntent(guestMessage) && !cats.includes('THANK_YOU_MESSAGE')) {
+      cats.push('THANK_YOU_MESSAGE');
+    }
+    if (!cats.includes('REVIEW_PROMISE')) cats.push('REVIEW_PROMISE');
+    parsed.categories = cats;
 
     return {
       applied: true,
-      typeOfMessageReceived: 'REVIEW_PROMISE',
+      typeOfMessageReceived,
       proposedResponse,
       shouldReply: true,
       confidence: 1.0,
@@ -7711,6 +7791,47 @@ export class GuestMessagingAgent {
   _applyDeterministicJudgeGuards(llmJudgeResult = {}, firstDecision = {}, context = {}, guestMessage = '') {
     const hvacGuard = this._applyHvacThreadJudgeGuard(llmJudgeResult, firstDecision, context, guestMessage);
     if (hvacGuard) return hvacGuard;
+
+    // Alexandra / Rebecca: bare You're welcome when guest promised 5 stars / a review → REVISE.
+    if (this._isPostStayGratitudeOrReviewPromise(guestMessage, context)) {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const llmAlreadyFixed =
+        llmJudgeResult.verdict === 'REVISE' && this._hasGoodReviewPromiseAck(revised);
+      if (!llmAlreadyFixed) {
+        const thinOrMissing =
+          this._isThinYoureWelcomeAck(draft) ||
+          !this._hasGoodReviewPromiseAck(draft) ||
+          firstDecision.shouldReply === false ||
+          draft === 'none' ||
+          llmJudgeResult.verdict === 'REJECT';
+        if (thinOrMissing) {
+          const policy = this._applyReviewPromisePolicy(
+            { ...firstDecision, proposedResponse: draft },
+            context,
+            guestMessage
+          );
+          if (policy.applied) {
+            console.log(
+              "[Agent] → Deterministic judge guard: review/5-star promise must not stay at bare You're welcome (Alexandra)"
+            );
+            return {
+              ...llmJudgeResult,
+              verdict: 'REVISE',
+              revisedResponse: policy.proposedResponse,
+              notes:
+                (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+                'Deterministic guard: guest promised/confirmed 5 stars or a review — thank them and promise a reciprocal 5-star (not bare You\'re welcome).',
+              issues: [
+                ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+                'Incomplete multi-intent coverage: guest thanked AND promised/confirmed 5 stars (or a review); draft was bare You\'re welcome without thanking for the 5-star / reciprocal REVIEW_PROMISE (Alexandra West End Victorian 2026-09-19).',
+              ],
+              deterministicGuard: true,
+            };
+          }
+        }
+      }
+    }
 
     // Generic: guest already knows WiFi (compliment / prior guest ack / host sent) →
     // never APPROVE credential re-send. Prefer REVISE (intent rework) with early-checkin
