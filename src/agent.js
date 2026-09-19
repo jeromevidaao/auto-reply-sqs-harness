@@ -597,6 +597,28 @@ export class GuestMessagingAgent {
       parsed.confidence = 1.0;
     }
 
+    const lateCheckoutLuggageMulti = this._applyLateCheckoutLuggageMultiIntentPolicy(parsed, context, guestMessage);
+    if (lateCheckoutLuggageMulti.applied) {
+      console.log('[Agent] → Late checkout + luggage multi-intent policy applied');
+      parsed.typeOfMessageReceived = lateCheckoutLuggageMulti.typeOfMessageReceived;
+      parsed.proposedResponse = lateCheckoutLuggageMulti.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
+    }
+
+    const lateCheckoutPolicy = this._applyLateCheckoutPolicy(parsed, context, guestMessage);
+    if (lateCheckoutPolicy.applied) {
+      console.log('[Agent] → Late checkout refuse policy applied');
+      parsed.typeOfMessageReceived = lateCheckoutPolicy.typeOfMessageReceived || 'LATE_CHECKOUT';
+      parsed.proposedResponse = lateCheckoutPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
+    }
+
     const stayWindowAccessPolicy = this._applyStayWindowAccessPolicy(parsed, context, guestMessage);
     if (stayWindowAccessPolicy.applied) {
       this._assignStayWindowAccess(parsed, stayWindowAccessPolicy);
@@ -816,6 +838,17 @@ export class GuestMessagingAgent {
       parsed.proposedResponse = contextualThanksPolicy.proposedResponse;
       shouldReply = contextualThanksPolicy.shouldReply;
       confidence = contextualThanksPolicy.confidence;
+    }
+
+    const lateCheckoutLuggageAfterThanks = this._applyLateCheckoutLuggageMultiIntentPolicy(parsed, context, guestMessage);
+    if (lateCheckoutLuggageAfterThanks.applied) {
+      console.log('[Agent] → Late checkout + luggage multi-intent policy applied (after contextual thanks)');
+      parsed.typeOfMessageReceived = lateCheckoutLuggageAfterThanks.typeOfMessageReceived;
+      parsed.proposedResponse = lateCheckoutLuggageAfterThanks.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
     }
 
     const smokeAllClearPolicy = this._applySmokeAlarmAllClearPolicy(parsed, context, guestMessage);
@@ -4072,12 +4105,171 @@ export class GuestMessagingAgent {
       ? greetingMatch[0].trimEnd() + ' ' + standard
       : standard;
 
+    const luggageCat = isStorage && !isDropOff ? 'LUGGAGE_STORAGE' : 'LUGGAGE_DROP_OFF';
+    // Never drop LATE_CHECKOUT when luggage wins on a multi-ask message (Sara miss).
+    const typeOfMessageReceived = this._isLateCheckoutAsk(guestMessage)
+      ? this._mergeCategories(parsed.typeOfMessageReceived, luggageCat, 'LATE_CHECKOUT')
+      : luggageCat;
     return {
       applied: true,
-      typeOfMessageReceived: isStorage && !isDropOff ? 'LUGGAGE_STORAGE' : 'LUGGAGE_DROP_OFF',
+      typeOfMessageReceived,
       proposedResponse,
     };
   }
+
+
+  /**
+   * Same-day hour late-checkout ask (not a full-day stay extension).
+   * Sara miss: "later checkout" / "flight out is 5pm" must not be dropped when luggage also matches.
+   */
+  _isLateCheckoutAsk(guestMessage = '') {
+    const lower = String(guestMessage || '').toLowerCase();
+    if (!lower.trim()) return false;
+    // Full-day date changes belong to STAY_EXTENSION — exclude those.
+    if (
+      /(one more night|extra night|extend (?:our |the )?stay|checkout on the \d|check out on the \d|instead of the \d|arrive (?:one day |a day )?earlier)/i.test(
+        lower
+      )
+    ) {
+      return false;
+    }
+    return (
+      /late\s*check[\s-]*out/.test(lower) ||
+      /later\s+check[\s-]*out/.test(lower) ||
+      /check[\s-]*out\s+later/.test(lower) ||
+      /check[\s-]*out\s+a\s+bit\s+later/.test(lower) ||
+      /later\s+checkout/.test(lower) ||
+      /checkout\s+later/.test(lower) ||
+      /leave\s+(?:a bit )?later/.test(lower) ||
+      /stay\s+until\s+(noon|1|12|midday)/.test(lower) ||
+      /check\s*out\s+at\s+(11|12|1|2)\b/.test(lower) ||
+      /(12|1)\s*(or|to)\s*(1|2)\s*pm/.test(lower)
+    );
+  }
+
+  /**
+   * Jerome canonical late-checkout refusal — never grant later checkout (cleaning / next guests).
+   */
+  _lateCheckoutRefuseSnippet(_context = {}, _guestMessage = '') {
+    return 'Sorry we cannot allow late checkout because we have guests right after you and the cleaning team needs this time to get the unit ready for them. Checkout is strictly at 10AM';
+  }
+
+  _draftRefusesLateCheckout(draft = '') {
+    const d = String(draft || '');
+    if (/cannot allow late checkout|can't allow late checkout|unable to (?:allow|accommodate) (?:a )?late checkout/i.test(d)) {
+      return true;
+    }
+    // Legacy 10AM + cleaning team refuse still counts as a refuse.
+    if (/10\s*(:00)?\s*am/i.test(d) && /cleaning (?:team|crew)/i.test(d) && /not (?:able|possible)|cannot|can't|strictly/i.test(d)) {
+      return true;
+    }
+    return false;
+  }
+
+  _draftGrantsLateCheckout(draft = '') {
+    const d = String(draft || '');
+    return /(?:we can|happy to|no problem|sure(?:\,|!)|of course).{0,40}late checkout|late checkout(?: is)? (?:ok|fine|available|possible)|(?:checkout|check out) at (?:11|12|1|2|3)\s*(:00)?\s*pm/i.test(
+      d
+    );
+  }
+
+  _draftCoversLuggageRichard(draft = '') {
+    const d = String(draft || '').toLowerCase();
+    const hasRichard = d.includes('richard');
+    const digits = d.replace(/\D/g, '');
+    const hasPhone = /8078071|0100004|5550100004/.test(digits) || /\d{3}.*\d{3}.*\d{4}/.test(d);
+    const hasLuggage = /luggage|suitcase|bags?\b/.test(d);
+    return hasRichard && hasPhone && hasLuggage;
+  }
+
+  /**
+   * Deterministic late-checkout refuse (Jerome copy). Does not wipe other intents —
+   * prefer _applyLateCheckoutLuggageMultiIntentPolicy when luggage is also present.
+   */
+  _applyLateCheckoutPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!this._isLateCheckoutAsk(guestMessage)) return { applied: false };
+    if (this._isLuggageRequest(guestMessage)) return { applied: false }; // multi-intent owns combo
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const guestHasThanks = this._hasThankYouIntent(guestMessage);
+    const typeOfMessageReceived = this._mergeCategories(
+      parsed.typeOfMessageReceived,
+      'LATE_CHECKOUT',
+      guestHasThanks ? 'THANK_YOU_MESSAGE' : null
+    );
+
+    if (
+      this._draftRefusesLateCheckout(draft) &&
+      !this._draftGrantsLateCheckout(draft) &&
+      this._categoriesInclude(parsed.typeOfMessageReceived, 'LATE_CHECKOUT')
+    ) {
+      return { applied: false };
+    }
+
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    const refuse = this._lateCheckoutRefuseSnippet(context, guestMessage);
+    let proposedResponse = refuse;
+    if (firstName) {
+      proposedResponse = `Good evening, ${firstName}. ${refuse}`;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived,
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
+  /**
+   * Sara · Cozy West End Victorian 2026-09-18: late checkout ask + luggage in one message.
+   * Production luggage-only reply dropped the late-checkout refuse. Always merge both:
+   * Jerome late-checkout refuse + Richard luggage drop-off. Never grant late checkout.
+   * Multi categories via _mergeCategories — do not drop LATE_CHECKOUT when LUGGAGE wins.
+   */
+  _applyLateCheckoutLuggageMultiIntentPolicy(parsed = {}, context = {}, guestMessage = '') {
+    const lateAsk = this._isLateCheckoutAsk(guestMessage);
+    const luggageAsk = this._isLuggageRequest(guestMessage);
+    if (!lateAsk || !luggageAsk) return { applied: false };
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const guestHasThanks = this._hasThankYouIntent(guestMessage);
+    const refuses = this._draftRefusesLateCheckout(draft) && !this._draftGrantsLateCheckout(draft);
+    const luggageOk = this._draftCoversLuggageRichard(draft);
+    const catsOk =
+      (this._categoriesInclude(parsed.typeOfMessageReceived, 'LATE_CHECKOUT') ||
+        this._categoriesInclude(parsed.typeOfMessageReceived, 'CHECKOUT')) &&
+      (this._categoriesInclude(parsed.typeOfMessageReceived, 'LUGGAGE_DROP_OFF') ||
+        this._categoriesInclude(parsed.typeOfMessageReceived, 'LUGGAGE_STORAGE') ||
+        this._categoriesInclude(parsed.typeOfMessageReceived, 'LUGGAGE'));
+
+    const typeOfMessageReceived = this._mergeCategories(
+      parsed.typeOfMessageReceived,
+      'LATE_CHECKOUT',
+      'LUGGAGE_DROP_OFF',
+      guestHasThanks ? 'THANK_YOU_MESSAGE' : null
+    );
+
+    if (refuses && luggageOk && catsOk) {
+      return { applied: false };
+    }
+
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    const refuse = this._lateCheckoutRefuseSnippet(context, guestMessage);
+    const luggage = buildLuggageDropOffResponse();
+    const opener = firstName ? `Good evening, ${firstName}. ` : '';
+    const proposedResponse = `${opener}${String(refuse).replace(/\.+$/, '')}. ${luggage}`.replace(/\s+/g, ' ').trim();
+
+    return {
+      applied: true,
+      typeOfMessageReceived,
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
 
   _isPaymentMethodUpdateRequest(guestMessage = '') {
     const lower = (guestMessage || '').toLowerCase();
@@ -6764,6 +6956,34 @@ export class GuestMessagingAgent {
       finalResult.escalated = false;
     }
 
+    const lateCheckoutLuggageMultiFinal = this._applyLateCheckoutLuggageMultiIntentPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (lateCheckoutLuggageMultiFinal.applied) {
+      console.log('[Agent] → Late checkout + luggage multi-intent policy applied (final)');
+      finalResult.typeOfMessageReceived = lateCheckoutLuggageMultiFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = lateCheckoutLuggageMultiFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+    }
+
+    const lateCheckoutPolicyFinal = this._applyLateCheckoutPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (lateCheckoutPolicyFinal.applied) {
+      console.log('[Agent] → Late checkout refuse policy applied (final)');
+      finalResult.typeOfMessageReceived = lateCheckoutPolicyFinal.typeOfMessageReceived || 'LATE_CHECKOUT';
+      finalResult.proposedResponse = lateCheckoutPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+    }
+
     const stayWindowAccessFinal = this._applyStayWindowAccessPolicy(
       finalResult,
       enrichedContext,
@@ -6925,6 +7145,20 @@ export class GuestMessagingAgent {
       finalResult.escalated = contextualThanksFinal.escalated;
     }
 
+    const lateCheckoutLuggageAfterThanksFinal = this._applyLateCheckoutLuggageMultiIntentPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (lateCheckoutLuggageAfterThanksFinal.applied) {
+      console.log('[Agent] → Late checkout + luggage multi-intent policy applied (after contextual thanks final)');
+      finalResult.typeOfMessageReceived = lateCheckoutLuggageAfterThanksFinal.typeOfMessageReceived;
+      finalResult.proposedResponse = lateCheckoutLuggageAfterThanksFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
+    }
+
     const smokeAllClearFinal = this._applySmokeAlarmAllClearPolicy(
       finalResult,
       enrichedContext,
@@ -7015,6 +7249,20 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = contextualThanksAfterStrip.shouldReply;
       finalResult.confidence = contextualThanksAfterStrip.confidence;
       finalResult.escalated = contextualThanksAfterStrip.escalated;
+    }
+
+    const lateCheckoutLuggageAfterStrip = this._applyLateCheckoutLuggageMultiIntentPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (lateCheckoutLuggageAfterStrip.applied) {
+      console.log('[Agent] → Late checkout + luggage multi-intent policy applied (after thanks strip)');
+      finalResult.typeOfMessageReceived = lateCheckoutLuggageAfterStrip.typeOfMessageReceived;
+      finalResult.proposedResponse = lateCheckoutLuggageAfterStrip.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
     }
 
     const transportActivitiesFinal = this._applyThanksPlusTransportActivitiesPolicy(

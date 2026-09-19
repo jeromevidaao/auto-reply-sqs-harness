@@ -7,9 +7,10 @@
 - **Full calendar date changes** ("extend by one day", "checkout on the 29th instead of 28th", "one more night", "arrive one day earlier") are STAY_EXTENSION, not LATE_CHECKOUT. See stay-extension.md.
 
 **Response**:
-- Apologize.
-- Remind them checkout is strictly 10AM.
-- Explain the reason using the exact words: "the cleaning team needs to prepare the unit for the next guests" (must contain "10AM" and "cleaning team").
+- **Never grant** late checkout.
+- Use Jerome canonical refuse (preferred): "Sorry we cannot allow late checkout because we have guests right after you and the cleaning team needs this time to get the unit ready for them. Checkout is strictly at 10AM".
+- Also acceptable: apologize + remind checkout is strictly 10AM + "the cleaning team needs to prepare the unit for the next guests" (must contain "10AM" and "cleaning team").
+- When bundled with luggage: refuse late checkout AND still offer Richard luggage drop-off in one multi-category reply (Sara miss).
 
 **When the question is bundled with early check-in flexibility** (common: "flexibility with check in or check out times? earlier check in and later check out"):
 - Coordinate with early-checkin guidance.

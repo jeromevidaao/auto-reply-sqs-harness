@@ -146,6 +146,7 @@ You must return **only** valid JSON in this exact structure:
     "Repeated prior host instruction: draft re-stated the Nest/heat-pump-remotes control advice that a host message earlier in the thread already provided (see priorHostHVACAdvice or history). Remove the duplicated explanation.",
     "Repeated recent host greeting: draft re-used 'Good morning, Olivia,' (or equivalent) only ~2 min after a prior host message had already opened with the same time greeting + name. Strip the repeated greeting; use only short warm 'You're welcome, Olivia!' (see recentHostGreeting trace).",
     "Incomplete multi-intent coverage: guest thanked AND asked a concrete question; draft only acknowledged thanks and deferred or ignored the question.",
+    "Missing category / incomplete multi-intent coverage: draft answered only LUGGAGE_STORAGE (or similar) but guest also asked about late checkout (actionable LATE_CHECKOUT intent with strict 10am + cleaning team requirement). Must merge categories or include the full strict refusal. Sara late-checkout + luggage storage miss. Verdict: REVISE.",
     "Ungrounded claim: draft asserted a fact not present in tool results or property knowledge.",
     "Contradicts previous host statement about refunds",
     "Failed to direct guest to the official Airbnb policy page",

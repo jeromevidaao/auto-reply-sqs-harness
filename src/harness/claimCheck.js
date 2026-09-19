@@ -275,9 +275,61 @@ export function checkDraftClaims({
     );
   }
 
+
+  // Sara miss: multi-ask late checkout + luggage — draft must refuse late checkout AND cover luggage.
+  const LATE_CHECKOUT_ASK_RE =
+    /\b(late\s*check[\s-]*out|later\s+check[\s-]*out|check[\s-]*out\s+later|later\s+checkout|checkout\s+later)\b/i;
+  const LUGGAGE_ASK_RE = /\b(luggage|suitcase|bags?\b).{0,40}\b(drop|store|storage|leave|keep)|keep our luggage|luggage (?:at|drop)/i;
+  const LATE_CHECKOUT_REFUSE_RE =
+    /cannot allow late checkout|can't allow late checkout|unable to (?:allow|accommodate) (?:a )?late checkout|checkout is strictly (?:at )?10/i;
+  const LATE_CHECKOUT_GRANT_RE =
+    /\bwe can (?!not )(?:definitely |certainly )?(?:allow|offer|do|accommodate) .{0,20}late checkout|late checkout(?: is)? (?:ok|fine|available|approved)/i;
+  const LUGGAGE_COVER_RE = /richard/i;
+  const lateAsk = LATE_CHECKOUT_ASK_RE.test(msg) && !/(one more night|extra night|extend (?:our |the )?stay)/i.test(msg);
+  const luggageAsk = LUGGAGE_ASK_RE.test(msg) || /\bluggage\b/i.test(msg);
+  if (lateAsk && !LATE_CHECKOUT_REFUSE_RE.test(text)) {
+    addIssue(
+      issues,
+      'late_checkout_refuse_missing',
+      'Guest asked for late checkout but draft does not refuse it (Jerome: never grant; cleaning / next guests).',
+      { deterministicFix: 'force_late_checkout_luggage_combo' }
+    );
+  }
+  if (lateAsk && LATE_CHECKOUT_GRANT_RE.test(text)) {
+    addIssue(
+      issues,
+      'late_checkout_granted',
+      'Draft grants late checkout — forbidden (cleaning / next guests).',
+      { deterministicFix: 'force_late_checkout_luggage_combo' }
+    );
+  }
+  if (luggageAsk && (!LUGGAGE_COVER_RE.test(text) || !/\d{3}/.test(text.replace(/\D/g, '')))) {
+    addIssue(
+      issues,
+      'luggage_richard_missing',
+      'Guest luggage ask present but draft omits Richard + phone.',
+      { deterministicFix: 'force_late_checkout_luggage_combo' }
+    );
+  }
+  if (lateAsk && luggageAsk) {
+    const missesLate = !LATE_CHECKOUT_REFUSE_RE.test(text) || LATE_CHECKOUT_GRANT_RE.test(text);
+    const missesLuggage = !LUGGAGE_COVER_RE.test(text);
+    if (missesLate || missesLuggage) {
+      addIssue(
+        issues,
+        'multi_intent_late_checkout_luggage',
+        'Multi-intent miss: guest asked late checkout AND luggage; draft must refuse late checkout and cover Richard luggage (Sara production miss).',
+        { deterministicFix: 'force_late_checkout_luggage_combo' }
+      );
+    }
+  }
+
+
   let revised = text;
   let appliedFix = false;
+  const appliedFixCodes = new Set();
   for (const issue of issues) {
+    if (issue.deterministicFix && appliedFixCodes.has(issue.deterministicFix)) continue;
     if (issue.deterministicFix === 'strip_4pm') {
       revised = revised.replace(/[^.]*\b4\s*pm\b[^.]*\.?/gi, '').replace(/\s{2,}/g, ' ').trim();
       appliedFix = true;
@@ -290,6 +342,22 @@ export function checkDraftClaims({
     } else if (issue.deterministicFix === 'strip_wifi_credentials') {
       revised = stripWifiCredentialSentences(revised);
       appliedFix = true;
+    } else if (issue.deterministicFix === 'force_late_checkout_luggage_combo') {
+      const rawName = context.guestDisplayName || context.guestName || 'there';
+      const name = String(rawName).split(/[\s(]/)[0] || 'there';
+      const refuse =
+        'Sorry we cannot allow late checkout because we have guests right after you and the cleaning team needs this time to get the unit ready for them. Checkout is strictly at 10AM';
+      const wantsLuggage = /\bluggage\b|suitcase|bags?/i.test(msg);
+      let luggageBit = '';
+      if (wantsLuggage) {
+        const existing = revised.match(/[^.!?]*richard[^.!?]*[.!?]/i);
+        luggageBit = existing
+          ? existing[0].trim()
+          : 'Yes, you can coordinate an early luggage drop-off with Richard, our on-site property manager, at (207) 807-8071.';
+      }
+      revised = (`Good evening, ${name}. ${refuse.replace(/\.?$/, '')}.` + (luggageBit ? ` ${luggageBit}` : '')).replace(/\s+/g, ' ').trim();
+      appliedFix = true;
+      appliedFixCodes.add(issue.deterministicFix);
     } else if (issue.deterministicFix === 'force_early_checkin_classic') {
       revised = earlyCheckinClassicFromContext(context, msg);
       appliedFix = true;

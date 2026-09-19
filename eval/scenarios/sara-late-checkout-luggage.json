@@ -1,0 +1,74 @@
+{
+  "id": "sara-late-checkout-luggage",
+  "description": "Sara (Cozy West End Victorian Sep 20\u201322): late checkout ask (flight 5pm) + luggage mention. Production answered only luggage and missed late-checkout refusal.",
+  "guestMessage": "Actually, I'm just realizing the better request was to see if we can get a later checkout, since our flight out is 5pm. Would much prefer that, if I had a choice between the two, as we could keep our luggage at the hotel that first night. I'm recognizing this may be a lot, so really happy with either consideration! Thank you.",
+  "context": {
+    "guestName": "Sara",
+    "checkIn": "2026-09-20",
+    "checkOut": "2026-09-22",
+    "listingId": "60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd",
+    "propertyName": "53 Pine St #3 \u00b7 Cozy West End Victorian | EV Charging + Parking",
+    "conversationHistory": [
+      {
+        "role": "host",
+        "sender_type": "host",
+        "body": "Hi Sara! The Wifi network is Pineland and the password is lobsterbake. Looking forward to hosting you.",
+        "content": "Hi Sara! The Wifi network is Pineland and the password is lobsterbake. Looking forward to hosting you."
+      },
+      {
+        "role": "guest",
+        "sender_type": "guest",
+        "body": "Wonderful! I love your WiFi password! :)\n\nAny chance we can check-in earlier?",
+        "content": "Wonderful! I love your WiFi password! :)\n\nAny chance we can check-in earlier?"
+      },
+      {
+        "role": "host",
+        "sender_type": "host",
+        "body": "Good afternoon, Sara. Check-in is at 4pm and we can't guarantee early check-in, but as soon as cleaning finishes getting the unit ready for you we'll message you right away.",
+        "content": "Good afternoon, Sara. Check-in is at 4pm and we can't guarantee early check-in, but as soon as cleaning finishes getting the unit ready for you we'll message you right away."
+      }
+    ],
+    "asOfDate": "2026-09-18",
+    "asOfInstant": "2026-09-18T14:17:00-07:00",
+    "nowForGreeting": "2026-09-18T14:17:00-07:00",
+    "reservationId": "sara-cozy-west-end-2026-09-20",
+    "conversation_id": "sara-late-checkout-luggage-conv",
+    "airbnbListingId": "24259977",
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "earlyUnitReadyOffered": false,
+      "greeting": {
+        "isFirstHostMessage": false,
+        "numHostMessages": 3
+      },
+      "historySource": "scenario"
+    }
+  },
+  "rubric": {
+    "expectedCategory": [
+      "LATE_CHECKOUT",
+      "LUGGAGE_DROP_OFF",
+      "THANK_YOU_MESSAGE"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "requiredPhrases": [
+      "cannot allow late checkout",
+      "guests right after you",
+      "cleaning team needs this time",
+      "Richard"
+    ],
+    "forbiddenPhrases": [
+      "we can allow late checkout",
+      "happy to offer a late checkout",
+      "late checkout is fine",
+      "checkout at 12",
+      "checkout at 1pm"
+    ]
+  },
+  "notes": "Production ~2026-09-18 14:20 PT. Bad reply only gave Richard luggage drop-off and dropped late-checkout refuse. Jerome: never grant late checkout (cleaning / next guests). Combined reply = Jerome refuse + Richard luggage.",
+  "productionMiss": true,
+  "unitTestEnforced": true,
+  "guestName": "Sara"
+}
