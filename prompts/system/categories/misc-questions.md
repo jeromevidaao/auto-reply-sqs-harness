@@ -29,5 +29,12 @@
 - We use the Graco Pack and Play. All units come with one pre-placed.
 - When this category applies on a first-host-message (availability ask), still follow any dynamic GREETING INSTRUCTIONS (time-based greeting + natural guest name at the start). Do not let general welcome rules override this specific category. In-stay location follow-ups should use the guest's name without repeating a formal time greeting.
 
+**COFFEE_MAKER_QUESTION**:
+- Every Pine apartment (1B/Downtown Studio, Apt 2, Apt 3) has a Keurig coffee maker. Guests may bring their own pods or filters if preferred.
+- Answer **immediately** with the fact. Never hedge, say "I'll check", "get back to you", "not sure", or defer. This is a hard property fact — direct reply only.
+- Required phrases in reply: "Keurig", "Keurig machine", or "Keurig coffee maker".
+- Forbidden: "check on the coffee maker", "get back to you shortly", "I'll check", any hedging language.
+- Works for Tracy (Downtown Studio / 1B) and all units. Model replies on PACK_AND_PLAY_BRAND / BATH_AMENITIES_QUESTION style: direct, warm, concise.
+
 **COOKING_UTENSILS**:
 - Yes, we provide cooking utensils, cookware, dishware, a dishwasher, and a stove.

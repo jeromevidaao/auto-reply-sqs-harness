@@ -86,6 +86,9 @@ const HVAC_REMOTE_PER_UNIT_STANDARD_RESPONSE =
 const LAUNDRY_QUESTION_STANDARD_RESPONSE =
   'We do not have laundry on site, but there is a laundromat next door called Soap Bubble that is very accessible. Address: 68 Pine St, Portland, ME 04102';
 
+const COFFEE_MAKER_STANDARD_RESPONSE =
+  'We have a Keurig machine in every apartment. Feel free to bring your own pods or filters if you prefer.';
+
 const WIFI_LET_ME_KNOW = 'Let me know if it works.';
 
 /** Apt 2 listing UUID (Sunny Downtown 2 Bed) — street-door lockout is unit-specific. */
@@ -574,6 +577,14 @@ export class GuestMessagingAgent {
     if (laundryPolicy.applied) {
       parsed.typeOfMessageReceived = laundryPolicy.typeOfMessageReceived || 'LAUNDRY_QUESTION';
       parsed.proposedResponse = laundryPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+    }
+
+    const coffeePolicy = this._applyCoffeeMakerPolicy(parsed, context, guestMessage);
+    if (coffeePolicy.applied) {
+      parsed.typeOfMessageReceived = coffeePolicy.typeOfMessageReceived || 'COFFEE_MAKER_QUESTION';
+      parsed.proposedResponse = coffeePolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
     }
@@ -1222,6 +1233,7 @@ export class GuestMessagingAgent {
       'LATE_CHECKOUT',
       'STAY_EXTENSION',
       'LAUNDRY_QUESTION',
+      'COFFEE_MAKER_QUESTION',
       'DIRECTIONS',
       'WIFI',
       'WIFI_PASSWORD',
@@ -4431,6 +4443,16 @@ export class GuestMessagingAgent {
     return true;
   }
 
+  /** Coffee maker / Keurig question for Tracy (Downtown Studio 1B) and all units. Hard property fact. */
+  _isCoffeeMakerQuestion(guestMessage = '') {
+    const lower = (guestMessage || '').toLowerCase();
+    // Require coffee/keurig context — bare "pod" / "filter" alone must not fire (water filters, etc.).
+    if (/\b(keurig|coffeemaker|coffee[\s-]?maker|coffee\s+machine)\b/.test(lower)) return true;
+    if (/\bcoffee\b/.test(lower) && /\b(maker|machine|brew|brewer|pod|pods|k-?cups?)\b/.test(lower)) return true;
+    if (/\bk-?cups?\b/.test(lower)) return true;
+    return false;
+  }
+
   /** True when the guest message includes thanks / appreciation (multi-intent with other asks). */
   _hasThankYouIntent(guestMessage = '') {
     const lower = (guestMessage || '').toLowerCase();
@@ -4550,6 +4572,79 @@ export class GuestMessagingAgent {
       proposedResponse = `Hi ${firstName}, ${laundryBodyLower}`;
     } else {
       proposedResponse = laundryBody;
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived,
+      proposedResponse,
+    };
+  }
+
+  /**
+   * Coffee maker / Keurig — every Pine apt (1B / Apt 2 / Apt 3 / Downtown Studio).
+   * Tracy production miss hedged "I'll check on the coffee maker and get back to you shortly."
+   * Answer immediately with Keurig; guests may bring pods/filters. Never invent supplied pod brands.
+   */
+  _applyCoffeeMakerPolicy(parsed, context = {}, guestMessage = '') {
+    if (!this._isCoffeeMakerQuestion(guestMessage)) {
+      return { applied: false };
+    }
+
+    const guestHasThanks = this._hasThankYouIntent(guestMessage);
+    const draft = (parsed.proposedResponse || '').trim();
+    const lower = draft.toLowerCase();
+    const hasKeurig = /\bkeurig\b/.test(lower);
+    const hasDeferral =
+      /i'?ll check|i will check|get back (to you )?shortly|let me check|look into|check on the coffee/i.test(
+        lower
+      );
+    const hasThanksAck = /you'?re welcome|you are welcome/i.test(lower);
+
+    const typeOfMessageReceived = this._mergeCategories(
+      parsed.typeOfMessageReceived,
+      'COFFEE_MAKER_QUESTION',
+      guestHasThanks ? 'THANK_YOU_MESSAGE' : null
+    );
+
+    const catsCorrect =
+      this._categoriesInclude(parsed.typeOfMessageReceived, 'COFFEE_MAKER_QUESTION') &&
+      (!guestHasThanks || this._categoriesInclude(parsed.typeOfMessageReceived, 'THANK_YOU_MESSAGE'));
+
+    const textCorrect = hasKeurig && !hasDeferral && (!guestHasThanks || hasThanksAck);
+
+    if (textCorrect && catsCorrect) {
+      return { applied: false };
+    }
+
+    if (textCorrect && !catsCorrect) {
+      return {
+        applied: true,
+        typeOfMessageReceived,
+        proposedResponse: draft,
+      };
+    }
+
+    const firstName = (context.guestDisplayName || context.guestName || '').split(/[\s(]/)[0];
+    const greetingMatch = draft.match(/^(Good (?:morning|afternoon|evening)|Hi|Hey|Hello)[^!?\n]{0,80}[,!]\s*/i);
+    const coffeeBody = COFFEE_MAKER_STANDARD_RESPONSE;
+    const coffeeBodyLower = coffeeBody.charAt(0).toLowerCase() + coffeeBody.slice(1);
+
+    let proposedResponse;
+    if (guestHasThanks) {
+      if (greetingMatch) {
+        proposedResponse = `${greetingMatch[0].trimEnd()} You're welcome. ${coffeeBody}`;
+      } else if (firstName) {
+        proposedResponse = `You're welcome, ${firstName}! ${coffeeBody}`;
+      } else {
+        proposedResponse = `You're welcome! ${coffeeBody}`;
+      }
+    } else if (greetingMatch) {
+      proposedResponse = `${greetingMatch[0].trimEnd()} ${coffeeBodyLower}`;
+    } else if (firstName) {
+      proposedResponse = `Hi ${firstName}, ${coffeeBodyLower}`;
+    } else {
+      proposedResponse = coffeeBody;
     }
 
     return {
@@ -5611,6 +5706,11 @@ export class GuestMessagingAgent {
       lines.push('- CRITICAL MULTI-CATEGORIZATION (thanks + laundry — Henry incident): Guest thanked you / expressed excitement AND asked about laundry. typeOfMessageReceived MUST be the array ["THANK_YOU_MESSAGE", "LAUNDRY_QUESTION"] (not THANK_YOU_MESSAGE alone). proposedResponse MUST combine a short "You\'re welcome, [Name]!" (or "You\'re welcome!") with the full laundry facts in one message: no laundry on site; laundromat next door Soap Bubble; Address: 68 Pine St, Portland, ME 04102. MUST NOT say "I\'ll check on laundry" or "get back shortly". Applies to all three units.');
     } else if (this._isLaundryFacilitiesQuestion(message)) {
       lines.push('- CRITICAL LAUNDRY_QUESTION (all units): Guest asked about laundry facilities. Answer immediately: no laundry on site; Soap Bubble next door; 68 Pine St, Portland, ME 04102. shouldReply true. Never defer.');
+    }
+    if (this._isCoffeeMakerQuestion(message) && this._hasThankYouIntent(message)) {
+      lines.push('- CRITICAL MULTI-CATEGORIZATION (thanks + coffee maker — Tracy incident): Guest thanked you AND asked about the coffee maker. typeOfMessageReceived MUST be ["THANK_YOU_MESSAGE", "COFFEE_MAKER_QUESTION"]. Reply MUST combine "You\'re welcome" with the Keurig fact: every Pine apt (1B / Apt 2 / Apt 3 / Downtown Studio) has a Keurig; guests may bring their own pods or filters. MUST NOT say "I\'ll check on the coffee maker" or "get back to you shortly".');
+    } else if (this._isCoffeeMakerQuestion(message)) {
+      lines.push('- CRITICAL COFFEE_MAKER_QUESTION (all Pine units): Guest asked about coffee maker / Keurig / coffee machine. Answer immediately: We have a Keurig machine in every apartment; feel free to bring your own pods or filters. shouldReply true. Never hedge, escalate, or "I\'ll check / get back to you".');
     }
 
     if (this._isPostStayHousekeepingFeedback(message)) {
@@ -7031,6 +7131,14 @@ export class GuestMessagingAgent {
       finalResult.typeOfMessageReceived = laundryPolicyFinal.typeOfMessageReceived || 'LAUNDRY_QUESTION';
       finalResult.proposedResponse = laundryPolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
+    }
+
+    const coffeePolicyFinal = this._applyCoffeeMakerPolicy(finalResult, enrichedContext, guestMessage);
+    if (coffeePolicyFinal.applied) {
+      finalResult.typeOfMessageReceived = coffeePolicyFinal.typeOfMessageReceived || 'COFFEE_MAKER_QUESTION';
+      finalResult.proposedResponse = coffeePolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
     }
 
     const wifiPolicyFinal = this._applyWifiPolicy(finalResult, enrichedContext, guestMessage);

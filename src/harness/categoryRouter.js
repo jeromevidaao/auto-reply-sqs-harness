@@ -156,7 +156,7 @@ const RULES = [
     file: 'misc-questions.md',
     priority: 67,
     test: (msg) =>
-      /\b(toiletries|shampoo|soap|bath towels|provide towels|tap water|drink the water|which floor|how many (?:flights|stairs)|cooking utensils|cookware|crib|pack n play|pack and play)\b/i.test(
+      /\b(toiletries|shampoo|soap|bath towels|provide towels|tap water|drink the water|which floor|how many (?:flights|stairs)|cooking utensils|cookware|crib|pack n play|pack and play|coffee|keurig|coffee maker|coffeemaker)\b/i.test(
         msg
       ),
   },

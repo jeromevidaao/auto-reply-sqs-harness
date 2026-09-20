@@ -276,6 +276,21 @@ export function checkDraftClaims({
   }
 
 
+  // Tracy miss: coffee maker ask must answer Keurig immediately — never "I'll check / get back".
+  const COFFEE_ASK_RE =
+    /\b(keurig|coffeemaker|coffee[\s-]?maker|coffee\s+machine)\b|\bcoffee\b[\s\S]{0,40}\b(maker|machine|brew|brewer|pod|pods|k-?cups?)\b|\bk-?cups?\b/i;
+  const COFFEE_KEURIG_RE = /\bkeurig\b/i;
+  const COFFEE_DEFERRAL_RE =
+    /i'?ll check|i will check|get back (to you )?shortly|let me check|check on the coffee|look into .{0,20}coffee/i;
+  if (COFFEE_ASK_RE.test(msg) && (COFFEE_DEFERRAL_RE.test(text) || !COFFEE_KEURIG_RE.test(text))) {
+    addIssue(
+      issues,
+      'coffee_maker_deferral',
+      'Guest asked about coffee maker but draft hedges ("I\'ll check / get back") or omits Keurig. Every Pine apt has a Keurig (Tracy incident).',
+      { deterministicFix: 'force_keurig_coffee' }
+    );
+  }
+
   // Sara miss: multi-ask late checkout + luggage — draft must refuse late checkout AND cover luggage.
   const LATE_CHECKOUT_ASK_RE =
     /\b(late\s*check[\s-]*out|later\s+check[\s-]*out|check[\s-]*out\s+later|later\s+checkout|checkout\s+later)\b/i;
@@ -361,6 +376,23 @@ export function checkDraftClaims({
     } else if (issue.deterministicFix === 'force_early_checkin_classic') {
       revised = earlyCheckinClassicFromContext(context, msg);
       appliedFix = true;
+    } else if (issue.deterministicFix === 'force_keurig_coffee') {
+      const rawName = context.guestDisplayName || context.guestName || '';
+      const name = String(rawName).split(/[\s(]/)[0] || '';
+      const body =
+        'We have a Keurig machine in every apartment. Feel free to bring your own pods or filters if you prefer.';
+      const thanks = /thank|thanks|ty |tysm|appreciate/i.test(msg);
+      if (thanks && name) {
+        revised = `You're welcome, ${name}! ${body}`;
+      } else if (thanks) {
+        revised = `You're welcome! ${body}`;
+      } else if (name) {
+        revised = `Hi ${name}, ${body.charAt(0).toLowerCase() + body.slice(1)}`;
+      } else {
+        revised = body;
+      }
+      appliedFix = true;
+      appliedFixCodes.add(issue.deterministicFix);
     }
   }
 

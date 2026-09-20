@@ -53,6 +53,13 @@ describe('category router', () => {
     assert.ok(!files.includes('extra-linens-towels.md'));
   });
 
+  it('routes coffee maker / Keurig to misc-questions', () => {
+    const { files } = routeCategoryFiles({
+      guestMessage: 'What coffee maker do you have in the apartment?',
+    });
+    assert.ok(files.includes('misc-questions.md'));
+  });
+
   it('routes "cancellation options" to cancellation.md', () => {
     const { files } = routeCategoryFiles({
       guestMessage: "I'm wondering what our cancellation options are.",

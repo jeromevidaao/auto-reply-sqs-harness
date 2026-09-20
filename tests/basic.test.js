@@ -395,6 +395,51 @@ describe('EventRequestTool (no LLM)', () => {
     assert.equal(detergent.applied, false);
   });
 
+  it('answers coffee maker with Keurig via _applyCoffeeMakerPolicy (Tracy bad-reply case)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' }
+    });
+    const msg = 'Thanks! Quick question — what coffee maker do you have in the apartment?';
+    const badDraft =
+      "Hi Tracy, I'll check on the coffee maker and get back to you shortly.";
+    const applied = agent._applyCoffeeMakerPolicy(
+      {
+        typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+        proposedResponse: badDraft,
+      },
+      { guestName: 'Tracy' },
+      msg
+    );
+    assert.equal(applied.applied, true);
+    assert.deepEqual(applied.typeOfMessageReceived, ['THANK_YOU_MESSAGE', 'COFFEE_MAKER_QUESTION']);
+    assert.ok(/you'?re welcome/i.test(applied.proposedResponse));
+    assert.ok(/\bkeurig\b/i.test(applied.proposedResponse));
+    assert.ok(!/i'?ll check|i will check|get back shortly|check on the coffee/i.test(applied.proposedResponse));
+
+    const coffeeOnly = agent._applyCoffeeMakerPolicy(
+      {
+        typeOfMessageReceived: 'OTHER_MESSAGE',
+        proposedResponse: 'none',
+      },
+      { guestName: 'Tracy' },
+      'What kind of coffee maker is in the unit?'
+    );
+    assert.equal(coffeeOnly.applied, true);
+    assert.equal(coffeeOnly.typeOfMessageReceived, 'COFFEE_MAKER_QUESTION');
+    assert.ok(/\bkeurig\b/i.test(coffeeOnly.proposedResponse));
+    assert.ok(!/you'?re welcome/i.test(coffeeOnly.proposedResponse));
+
+    // Bare "filter" / water filter must not fire
+    const noFire = agent._applyCoffeeMakerPolicy(
+      { typeOfMessageReceived: 'OTHER_MESSAGE', proposedResponse: 'none' },
+      { guestName: 'Tracy' },
+      'Is the water filter working?'
+    );
+    assert.equal(noFire.applied, false);
+  });
+
+
   it('forces Apt 2 street-door lockout recovery (Henry bolted-door incident), not keypad-only', () => {
     const agent = new GuestMessagingAgent({
       projectRoot: projectRootForTests,

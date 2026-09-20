@@ -14,6 +14,9 @@
 **COOKING_UTENSILS**:
 - Yes, we provide cooking utensils, cookware, dishware, a dishwasher, and a stove.
 
+**COFFEE_MAKER_QUESTION**:
+- See misc-questions.md. Every Pine apt (1B / Downtown Studio, Apt 2, Apt 3) has a Keurig. Answer immediately — never "I'll check" / "get back to you". Guests may bring pods/filters; do not invent supplied pod brands.
+
 **ABSOLUTE RULE FOR sofa-bed-size-capacity GOLDEN**:
 - Category **MUST** be exactly **SOFA_BED_SIZE**
 - Must include these exact phrases:

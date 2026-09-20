@@ -1,0 +1,64 @@
+{
+  "id": "tracy-coffee-maker-keurig",
+  "description": "Tracy (Downtown Studio / 1B) asked what coffee maker is in the unit. Production auto-reply hedged: \"I'll check on the coffee maker and get back to you shortly.\" Jerome later answered \"We have a Keurig machine!\" Must answer immediately with Keurig for every Pine apt; guests may bring pods/filters; never invent supplied pod brands; never check/get-back hedges.",
+  "productionMiss": true,
+  "guestMessage": "Thanks! Quick question \u2014 what coffee maker do you have in the apartment?",
+  "guestName": "Tracy",
+  "checkIn": "2026-09-18T16:00:00-04:00",
+  "checkOut": "2026-09-21T10:00:00-04:00",
+  "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+  "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+  "context": {
+    "asOfDate": "2026-09-19",
+    "asOfInstant": "2026-09-19T15:00:00-04:00",
+    "nowForGreeting": "2026-09-19T15:00:00-04:00",
+    "guestName": "Tracy",
+    "guestDisplayName": "Tracy",
+    "checkIn": "2026-09-18T16:00:00-04:00",
+    "checkOut": "2026-09-21T10:00:00-04:00",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+    "reservationId": "tracy-downtown-studio-coffee-2026-09",
+    "conversation_id": "tracy-coffee-maker-conv",
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "duplicateRisk": false,
+      "earlyUnitReadyOffered": false,
+      "historyFetchFailed": false,
+      "historySource": "scenario"
+    },
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Thanks for the check-in info!"
+      },
+      {
+        "sender_type": "host",
+        "body": "You're welcome, Tracy!"
+      }
+    ],
+    "suggestedResponseSnippet": "You're welcome, Tracy! We have a Keurig machine in every apartment. Feel free to bring your own pods or filters if you prefer."
+  },
+  "rubric": {
+    "expectedCategory": [
+      "COFFEE_MAKER_QUESTION",
+      "THANK_YOU_MESSAGE"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "Keurig"
+    ],
+    "forbiddenPhrases": [
+      "I'll check",
+      "I will check",
+      "get back to you",
+      "get back shortly",
+      "check on the coffee"
+    ]
+  },
+  "notes": "Tracy \u00b7 Downtown Studio (1B) \u00b7 production hedged coffee maker. Hard property fact: every Pine apt has a Keurig. Deterministic _applyCoffeeMakerPolicy + claimCheck force_keurig_coffee. Skip live re-send \u2014 Jerome already sent \"We have a Keurig machine!\".",
+  "unitTestEnforced": true
+}
