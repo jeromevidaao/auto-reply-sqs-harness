@@ -139,4 +139,37 @@ describe('Sarah checkout thanks — warm multi-sentence (not bare You\'re welcom
     );
     assert.equal(review.applied, false);
   });
+
+  it('guestArrived must not demote Sarah checkout thanks to bare You\'re welcome', async () => {
+    const sent = [];
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      hospitableClient: {
+        sendMessage: async (id, body) => {
+          sent.push({ id, body });
+          return { ok: true };
+        },
+        getConversationMessages: async () => [],
+      },
+      llmAdapter: {
+        complete: async () =>
+          JSON.stringify({
+            typeOfMessageReceived: 'THANK_YOU_MESSAGE',
+            proposedResponse: "You're welcome, Sarah!",
+            shouldReply: true,
+            confidence: 0.95,
+          }),
+      },
+    });
+
+    const out = await agent.processMessage(SARAH_CHECKOUT_THANKS, {
+      ...sarahCtx,
+      guestArrived: true,
+      asOfDate: '2026-09-18',
+      requireLiveConversationHistory: false,
+    });
+    assert.equal(out.shouldReply, true);
+    assertWarmCheckoutThanks(out.proposedResponse, 'Sarah+guestArrived');
+  });
+
 });

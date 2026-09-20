@@ -2121,6 +2121,14 @@ export class GuestMessagingAgent {
     if (/starting the dishwasher|thanks again for your host|thanks for (?:being|your|letting us) (?:a great |such a )?(?:host|stay)/i.test(lower)) {
       return true;
     }
+    // Julia 2026-09-20: "Thanks for hosting!!" / "thanks for hosting us" on checkout day
+    // (paired with checked-out language above, or alone when today is checkout day).
+    if (/thanks for hosting(?:\s+us)?/i.test(lower)) {
+      const checkOut = (context.checkOut || '').slice(0, 10);
+      const today = this._todayDateStr(context);
+      if (checkOut && checkOut === today) return true;
+      if (/checked out|checking out|left the keys|on our way home/i.test(lower)) return true;
+    }
     if (/about to check out|checking out now|on our way (?:home|back)|heading home|departed|end of (?:our|the) stay/i.test(lower)) {
       return true;
     }
@@ -2308,6 +2316,9 @@ export class GuestMessagingAgent {
    * Short in-stay ack ("Thanks" / "All set") — not a question.
    */
   _isInStayPureAck(guestMessage = '', context = {}) {
+    if (this._isPostCheckoutThankYou(guestMessage, context) || this._looksLikeActualCheckout(guestMessage, context)) {
+      return false;
+    }
     if (!this._alreadyInUnit(context, guestMessage)) return false;
     const lower = String(guestMessage || '').trim().toLowerCase();
     if (!lower || /\?/.test(lower)) return false;
@@ -2327,6 +2338,11 @@ export class GuestMessagingAgent {
    * Also rewrite a mistaken first-welcome draft on a short in-stay thanks.
    */
   _applyInStaySeeYouSoonPolicy(parsed = {}, context = {}, guestMessage = '') {
+    // Julia checkout incident: guestArrived stays true after Schlage PIN from check-in.
+    // Post-checkout thanks must keep warm farewell — never demote to bare You're welcome.
+    if (this._isPostCheckoutThankYou(guestMessage, context) || this._looksLikeActualCheckout(guestMessage, context)) {
+      return { applied: false };
+    }
     if (!this._alreadyInUnit(context, guestMessage)) return { applied: false };
     const draft = (parsed.proposedResponse || '').trim();
     const pureAck = this._isInStayPureAck(guestMessage, context);
@@ -7213,6 +7229,21 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = true;
     }
 
+    // Defense: if any later policy thinned a post-checkout farewell (guestArrived trap), restore it.
+    const postCheckoutThanksAfterInStay = this._applyPostCheckoutThankYouPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (postCheckoutThanksAfterInStay.applied) {
+      console.log('[Agent] → Post-checkout thank-you policy re-applied after in-stay policies (Julia guestArrived trap)');
+      finalResult.typeOfMessageReceived = postCheckoutThanksAfterInStay.typeOfMessageReceived;
+      finalResult.proposedResponse = postCheckoutThanksAfterInStay.proposedResponse;
+      finalResult.shouldReply = postCheckoutThanksAfterInStay.shouldReply;
+      finalResult.confidence = postCheckoutThanksAfterInStay.confidence;
+      finalResult.escalated = postCheckoutThanksAfterInStay.escalated;
+    }
+
     const contextualThanksFinal = this._applyContextualThankYouPolicy(
       finalResult,
       enrichedContext,
@@ -7917,37 +7948,54 @@ export class GuestMessagingAgent {
 
     if (this._isPostCheckoutThankYou(guestMessage, context)) {
       const draft = (firstDecision.proposedResponse || '').trim();
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
       const eventMismatch = firstDecision.typeOfMessageReceived === 'EVENT_REQUEST' ||
         /not able to accommodate events|gatherings/i.test(draft);
       const judgeRejected = llmJudgeResult.verdict === 'REJECT';
-      const revised = (llmJudgeResult.revisedResponse || '').trim();
-      const llmAlreadyFixed = llmJudgeResult.verdict === 'REVISE' && revised &&
-        /you're welcome|you are welcome/i.test(revised) &&
+      // Warm multi-sentence farewell required (Sarah / Julia) — bare You're welcome is NOT fixed.
+      const llmAlreadyFixed =
+        llmJudgeResult.verdict === 'REVISE' &&
+        revised &&
+        this._hasWarmPostCheckoutThanks(revised, context) &&
         !/not able to accommodate events|gatherings/i.test(revised);
 
       if (llmAlreadyFixed) {
         return llmJudgeResult;
       }
 
-      if (eventMismatch || judgeRejected) {
+      const thinOrMissing =
+        this._isThinYoureWelcomeAck(draft) ||
+        !this._hasWarmPostCheckoutThanks(draft, context) ||
+        firstDecision.shouldReply === false ||
+        draft === 'none' ||
+        (revised && this._isThinYoureWelcomeAck(revised)) ||
+        (revised && !this._hasWarmPostCheckoutThanks(revised, context) &&
+          /you(?:'|')?re welcome|you are welcome/i.test(revised));
+
+      if (eventMismatch || judgeRejected || thinOrMissing) {
         const policy = this._applyPostCheckoutThankYouPolicy(
-          { ...firstDecision },
+          { ...firstDecision, proposedResponse: draft },
           context,
           guestMessage
         );
-        console.log('[Agent] → Deterministic judge guard: post-checkout thank-you misclassified as EVENT_REQUEST (Rene checkout incident)');
-        return {
-          ...llmJudgeResult,
-          verdict: 'REVISE',
-          revisedResponse: policy.proposedResponse,
-          notes: (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
-            'Deterministic guard: post-checkout thank-you — revise to short You\'re welcome ack (not event decline).',
-          issues: [
-            ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
-            'Post-checkout thank-you misclassified as EVENT_REQUEST — guest confirmed departure and thanked host (Rene checkout incident).'
-          ],
-          deterministicGuard: true,
-        };
+        if (policy.applied) {
+          console.log(
+            "[Agent] → Deterministic judge guard: post-checkout thank-you must be warm farewell (not bare You're welcome) (Sarah/Julia)"
+          );
+          return {
+            ...llmJudgeResult,
+            verdict: 'REVISE',
+            revisedResponse: policy.proposedResponse,
+            notes:
+              (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+              "Deterministic guard: post-checkout thank-you — revise to warm You're welcome + thanks for staying + safe travels (not bare You're welcome / not event decline).",
+            issues: [
+              ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+              "Post-checkout thank-you too thin or misclassified — guest confirmed checkout and thanked host; draft was bare You're welcome without thanks-for-staying + farewell (Sarah/Julia checkout incidents).",
+            ],
+            deterministicGuard: true,
+          };
+        }
       }
     }
 
