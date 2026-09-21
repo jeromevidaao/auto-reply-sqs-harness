@@ -1,0 +1,39 @@
+{
+  "id": "sara-laundry-host-exception",
+  "description": "Bug regression (Sara / Pineland Portland ME): Guest asked about washer/dryer Richard unlocked (damp comforter). Host Jerome granted a one-time exception (~13:58): \"not for guests usually but for this time feel free to use it\". Auto-reply seconds later sent stock Soap Bubble / no-on-site laundry and contradicted the host. Must honor the exception — never Soap Bubble denial when hostLaundryExceptionGranted.",
+  "guestMessage": "Richard unlocked a room that has a washer and dryer in it — our comforter is still a bit damp and we'd love to dry it if that's ok?",
+  "context": {
+    "guestName": "Sara",
+    "checkIn": "2026-09-20",
+    "checkOut": "2026-09-23",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Sunny Apt 2",
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Richard unlocked a room that has a washer and dryer in it — our comforter is still a bit damp and we'd love to dry it if that's ok?",
+        "created_at": "2026-09-21T20:55:00Z"
+      },
+      {
+        "sender_type": "host",
+        "body": "Yes - Sara, this is not for guests usually but for this time feel free to use it!",
+        "created_at": "2026-09-21T20:58:00Z"
+      }
+    ]
+  },
+  "rubric": {
+    "expectedCategory": ["LAUNDRY_QUESTION", "THANK_YOU_MESSAGE", "OTHER_MESSAGE"],
+    "shouldReply": true,
+    "requiredPhrases": [],
+    "forbiddenPhrases": [
+      "Soap Bubble",
+      "soap bubble",
+      "do not have laundry on site",
+      "we do not have laundry on site",
+      "no laundry on site",
+      "68 Pine St",
+      "68 Pine"
+    ]
+  },
+  "notes": "Exact Sara production miss. Host exception in conversationHistory must set hostLaundryExceptionGranted via ConversationContextTool; laundry policy + deterministic judge must never emit Soap Bubble. Good reply: short ack honoring the exception (feel free / this time / washer / dryer). Stock Soap Bubble answer must still apply on laundry asks with NO host exception (Henry)."
+}

@@ -2558,6 +2558,75 @@ export class GuestMessagingAgent {
   }
 
   /**
+   * Host granted a one-time exception / permission in thread history
+   * (Sara laundry 2026-09: "not for guests usually but for this time feel free to use it").
+   * Cheap generalized scan: feel free to use / exception / this time / go ahead and use.
+   */
+  _hostExceptionGrantPhrases() {
+    return [
+      /feel free to use/i,
+      /go ahead and use/i,
+      /you can use (?:the )?(?:washer|dryer|laundry|it)/i,
+      /you(?:'|’)re welcome to use/i,
+      /\bexception\b/i,
+      /for this time/i,
+      /this (?:one )?time (?:you can|feel free|go ahead)/i,
+      /not for guests usually/i,
+      /not (?:usually )?for guests/i,
+      /usually (?:we don(?:'|’)t|not) .{0,40}(?:but|however)/i,
+    ];
+  }
+
+  _looksLikeHostExceptionGrant(body = '') {
+    const text = String(body || '');
+    if (!text.trim()) return false;
+    return this._hostExceptionGrantPhrases().some((re) => re.test(text));
+  }
+
+  _hostGrantedLaundryException(context = {}) {
+    if (
+      context.conversationTraces?.hostLaundryExceptionGranted ||
+      context.hostLaundryExceptionGranted ||
+      context.conversationTraces?.hostGrantedException ||
+      context.hostGrantedException
+    ) {
+      return true;
+    }
+    const history = context.conversationHistory || context.conversationTraces?.recentConversationMessages || [];
+    const hostMsgs = (Array.isArray(history) ? history : []).filter(
+      (m) =>
+        (m.sender_type || m.role || m?.sender?.type || '').toLowerCase() === 'host' ||
+        (m.sender_type || m.role || '').toLowerCase() === 'owner'
+    );
+    for (const m of hostMsgs) {
+      const body = m.body || m.content || m.text || '';
+      if (!this._looksLikeHostExceptionGrant(body)) continue;
+      // Laundry-specific if host mentions washer/dryer/laundry OR guest ask was laundry
+      // OR permission phrasing is general ("feel free to use it") after a laundry ask — caller
+      // also gates on _isLaundryFacilitiesQuestion. Treat any host grant phrase as laundry
+      // exception when we are in the laundry policy path.
+      return true;
+    }
+    return false;
+  }
+
+  _laundryExceptionHonorAck(context = {}) {
+    const raw = context.guestDisplayName || context.guestName || '';
+    const name = String(raw).split(/[\s(]/)[0];
+    if (name) {
+      return `Yes ${name} — as we said, feel free to use the washer and dryer this time!`;
+    }
+    return 'Yes — as we said, feel free to use the washer and dryer this time!';
+  }
+
+  _draftContradictsHostLaundryException(text = '') {
+    const t = String(text || '');
+    return /soap bubble|do not have laundry on site|no laundry on site|don(?:'|’)t have laundry on site|no on-site laundry/i.test(
+      t
+    );
+  }
+
+  /**
    * Check-in day "is it ready / kill an hour / come back closer to 4".
    * Trevor 2026-08-26: last line was FYI without "?" and we sent nothing.
    */
@@ -4512,6 +4581,27 @@ export class GuestMessagingAgent {
       return { applied: false };
     }
 
+    // Sara laundry incident: host already granted a one-time washer/dryer exception.
+    // NEVER force the Soap Bubble / no-on-site denial over that grant.
+    if (this._hostGrantedLaundryException(context)) {
+      const draft = (parsed.proposedResponse || '').trim();
+      if (this._draftContradictsHostLaundryException(draft) || !draft || draft === 'none') {
+        console.log(
+          '[Agent] → Laundry policy: host already granted laundry exception — honoring exception (not Soap Bubble)'
+        );
+        return {
+          applied: true,
+          typeOfMessageReceived: this._mergeCategories(
+            parsed.typeOfMessageReceived,
+            'LAUNDRY_QUESTION'
+          ),
+          proposedResponse: this._laundryExceptionHonorAck(context),
+        };
+      }
+      // Draft already aligns with the exception — do not overwrite with stock denial.
+      return { applied: false };
+    }
+
     const guestHasThanks = this._hasThankYouIntent(guestMessage);
     const draft = (parsed.proposedResponse || '').trim();
     const lower = draft.toLowerCase();
@@ -5508,19 +5598,31 @@ export class GuestMessagingAgent {
   _preSendUpdatePromptLines(context = {}) {
     if (!context._preSendReprocessed) return [];
     const orig = String(context.preSendOriginalGuestMessage || '').trim();
-    const newer = Array.isArray(context.preSendNewerGuestMessages)
+    const newerGuest = Array.isArray(context.preSendNewerGuestMessages)
       ? context.preSendNewerGuestMessages.map((b) => String(b || '').trim()).filter(Boolean)
       : [];
+    const newerHost = Array.isArray(context.preSendNewerHostMessages)
+      ? context.preSendNewerHostMessages.map((b) => String(b || '').trim()).filter(Boolean)
+      : [];
     const stale = String(context.preSendStaleDraft || '').trim();
+    const who = newerHost.length && newerGuest.length
+      ? 'new guest and host messages'
+      : newerHost.length
+        ? 'a new host message'
+        : 'a new guest message';
     const lines = [
-      '- CRITICAL PRE-SEND UPDATE: A new guest message arrived WHILE you were drafting the previous reply. This is a second reasoning round (first pass + judge). The Current guest message is the NEWEST one — reason from that, plus any messages that arrived in between. Discard the stale draft; do not send it.',
+      `- CRITICAL PRE-SEND UPDATE: ${who.charAt(0).toUpperCase() + who.slice(1)} arrived WHILE you were drafting the previous reply. This is a second reasoning round (first pass + judge). Refetch/use the full refreshed conversation history. Discard the stale draft; do not send it.`,
     ];
     if (orig) {
       lines.push(`- You were originally drafting a reply to: "${orig.slice(0, 240)}"`);
     }
-    if (newer.length) {
+    if (newerGuest.length) {
       lines.push('- Guest messages that arrived while drafting (oldest → newest):');
-      newer.forEach((body) => lines.push(`  Guest: ${body.slice(0, 240)}`));
+      newerGuest.forEach((body) => lines.push(`  Guest: ${body.slice(0, 240)}`));
+    }
+    if (newerHost.length) {
+      lines.push('- Host messages that arrived while drafting (oldest → newest) — you MUST honor these and must not contradict them:');
+      newerHost.forEach((body) => lines.push(`  Host: ${body.slice(0, 240)}`));
     }
     if (stale && stale !== 'none') {
       lines.push(`- Stale draft that must NOT be sent: "${stale.slice(0, 280)}"`);
@@ -5702,10 +5804,16 @@ export class GuestMessagingAgent {
     }
 
     // Multi-intent: thanks/excitement + laundry facilities (Henry incident). Soft single-category thank-you is wrong.
-    if (this._isLaundryFacilitiesQuestion(message) && this._hasThankYouIntent(message)) {
+    // Sara laundry incident: when host already granted a one-time washer/dryer exception, NEVER send Soap Bubble denial.
+    if (this._isLaundryFacilitiesQuestion(message) && this._hostGrantedLaundryException(context)) {
+      lines.push('- CRITICAL HOST LAUNDRY EXCEPTION (Sara incident): Host already granted a one-time washer/dryer / laundry exception in this thread (e.g. "not for guests usually but for this time feel free to use it"). proposedResponse MUST NOT say "we do not have laundry on site", MUST NOT recommend Soap Bubble, and MUST NOT contradict the host grant. Honor the exception with a short ack (e.g. "Yes — as we said, feel free to use the washer and dryer this time!") or skip reply. shouldReply may be true for a short aligning ack only.');
+      if (context.conversationTraces?.hostExceptionMessagePreview) {
+        lines.push(`  Host exception preview: "${String(context.conversationTraces.hostExceptionMessagePreview).slice(0, 160)}"`);
+      }
+    } else if (this._isLaundryFacilitiesQuestion(message) && this._hasThankYouIntent(message)) {
       lines.push('- CRITICAL MULTI-CATEGORIZATION (thanks + laundry — Henry incident): Guest thanked you / expressed excitement AND asked about laundry. typeOfMessageReceived MUST be the array ["THANK_YOU_MESSAGE", "LAUNDRY_QUESTION"] (not THANK_YOU_MESSAGE alone). proposedResponse MUST combine a short "You\'re welcome, [Name]!" (or "You\'re welcome!") with the full laundry facts in one message: no laundry on site; laundromat next door Soap Bubble; Address: 68 Pine St, Portland, ME 04102. MUST NOT say "I\'ll check on laundry" or "get back shortly". Applies to all three units.');
     } else if (this._isLaundryFacilitiesQuestion(message)) {
-      lines.push('- CRITICAL LAUNDRY_QUESTION (all units): Guest asked about laundry facilities. Answer immediately: no laundry on site; Soap Bubble next door; 68 Pine St, Portland, ME 04102. shouldReply true. Never defer.');
+      lines.push('- CRITICAL LAUNDRY_QUESTION (all units): Guest asked about laundry facilities. Answer immediately: no laundry on site; Soap Bubble next door; 68 Pine St, Portland, ME 04102. shouldReply true. Never defer. EXCEPTION: if conversation history shows the host already granted a one-time laundry/washer/dryer exception, honor that grant instead — never contradict with Soap Bubble.');
     }
     if (this._isCoffeeMakerQuestion(message) && this._hasThankYouIntent(message)) {
       lines.push('- CRITICAL MULTI-CATEGORIZATION (thanks + coffee maker — Tracy incident): Guest thanked you AND asked about the coffee maker. typeOfMessageReceived MUST be ["THANK_YOU_MESSAGE", "COFFEE_MAKER_QUESTION"]. Reply MUST combine "You\'re welcome" with the Keurig fact: every Pine apt (1B / Apt 2 / Apt 3 / Downtown Studio) has a Keurig; guests may bring their own pods or filters. MUST NOT say "I\'ll check on the coffee maker" or "get back to you shortly".');
@@ -5801,6 +5909,12 @@ export class GuestMessagingAgent {
           lines.push(`  • Readiness statement: "${context.conversationTraces.earlyReadyMessagePreview.substring(0, 120)}..."`);
         }
       }
+      if (context.conversationTraces.hostLaundryExceptionGranted || context.conversationTraces.hostGrantedException) {
+        lines.push('  • HOST EXCEPTION GRANT in prior host message (anti-contradiction active — never override with stock policy denial)');
+        if (context.conversationTraces.hostExceptionMessagePreview) {
+          lines.push(`  • Exception statement: "${String(context.conversationTraces.hostExceptionMessagePreview).substring(0, 120)}..."`);
+        }
+      }
       if (context.conversationTraces.priorHostHVACAdvice || (context.conversationTraces.priorHostInstructions && context.conversationTraces.priorHostInstructions.length)) {
         lines.push('  • PRIOR HOST INSTRUCTIONS / ADVICE already sent in thread (anti-repetition active)');
         if (context.conversationTraces.priorHostHVACAdvice) {
@@ -5859,6 +5973,13 @@ export class GuestMessagingAgent {
     }
     if (context.conversationTraces?.earlyUnitReadyOffered) {
       lines.push('- CRITICAL ANTI-CONTRADICTION (HOST READINESS): Host has already told the guest the unit is ready for early check-in now (see conversation history / lastHost or earlyReadyMessagePreview). proposedResponse MUST NOT mention "4pm", "check-in time is 4pm", "If the unit is ready earlier we\'ll message you", or any default check-in policy language. Use "You\'re welcome", "see you in about an hour", "self-check-in", "anytime", or equivalent warm acknowledgment only. Never contradict the prior host statement that the unit is ready.');
+    }
+
+    if (context.conversationTraces?.hostLaundryExceptionGranted || context.conversationTraces?.hostGrantedException || context.hostLaundryExceptionGranted) {
+      lines.push('- CRITICAL ANTI-CONTRADICTION (HOST EXCEPTION GRANT — Sara laundry): Host already granted a one-time exception/permission in this thread (see hostExceptionMessagePreview / conversation history). proposedResponse MUST NOT contradict that grant. For laundry: MUST NOT say "we do not have laundry on site" or recommend Soap Bubble when the host said the guest may use the washer/dryer this time. Honor the exception with a short aligning ack, or skip reply.');
+      if (context.conversationTraces?.hostExceptionMessagePreview) {
+        lines.push(`  Host exception: "${String(context.conversationTraces.hostExceptionMessagePreview).slice(0, 160)}"`);
+      }
     }
 
     // Anti-repetition of prior host-sent factual instructions / advice (new requirement from full Kathryn AC thread).
@@ -7934,6 +8055,35 @@ export class GuestMessagingAgent {
   _applyDeterministicJudgeGuards(llmJudgeResult = {}, firstDecision = {}, context = {}, guestMessage = '') {
     const hvacGuard = this._applyHvacThreadJudgeGuard(llmJudgeResult, firstDecision, context, guestMessage);
     if (hvacGuard) return hvacGuard;
+
+    // Sara laundry: Soap Bubble / no-on-site denial while host granted a washer/dryer exception → REVISE.
+    if (this._isLaundryFacilitiesQuestion(guestMessage) && this._hostGrantedLaundryException(context)) {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const draftBad = this._draftContradictsHostLaundryException(draft);
+      const revisedBad = revised ? this._draftContradictsHostLaundryException(revised) : false;
+      const llmAlreadyFixed =
+        llmJudgeResult.verdict === 'REVISE' && revised && !this._draftContradictsHostLaundryException(revised);
+      if (!llmAlreadyFixed && (draftBad || revisedBad)) {
+        const fixed = this._laundryExceptionHonorAck(context);
+        console.log(
+          '[Agent] → Deterministic judge guard: laundry Soap Bubble denial contradicts host-granted exception (Sara)'
+        );
+        return {
+          ...llmJudgeResult,
+          verdict: 'REVISE',
+          revisedResponse: fixed,
+          notes:
+            (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+            'Deterministic guard: host already granted a one-time laundry/washer/dryer exception — do not send Soap Bubble / no-on-site denial.',
+          issues: [
+            ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+            'Host laundry exception contradicted by Soap Bubble / no-on-site laundry denial (Sara Pineland 2026-09).',
+          ],
+          deterministicGuard: true,
+        };
+      }
+    }
 
     // Alexandra / Rebecca: bare You're welcome when guest promised 5 stars / a review → REVISE.
     if (this._isPostStayGratitudeOrReviewPromise(guestMessage, context)) {

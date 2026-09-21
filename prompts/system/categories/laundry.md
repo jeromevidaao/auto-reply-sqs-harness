@@ -32,8 +32,21 @@
 - Offering to do laundry or implying there are on-site machines.
 - Answering only with "You're welcome" and ignoring the laundry question.
 - Classifying as only `THANK_YOU_MESSAGE` when laundry was asked.
+- **Contradicting a host-granted laundry exception** in the same thread (Sara incident): never send Soap Bubble / "no laundry on site" after the host said the guest may use the washer/dryer this time.
 
 **Tone**: Brief, warm when they thanked you, then factual.
+
+
+## Host-granted laundry exception (Sara / Jerome incident — CRITICAL)
+
+If conversation history shows the **host already granted a one-time exception** to use an on-site washer/dryer (e.g. "this is not for guests usually but for this time feel free to use it"), you MUST NOT send the stock "no laundry on site / Soap Bubble" denial. That directly contradicts the host.
+
+**Correct behavior when a host laundry exception is present**:
+- Short ack that **honors** the exception (e.g. "Yes — as we said, feel free to use the washer and dryer this time!"), **or** skip reply if the host already fully answered.
+- **Never** recommend Soap Bubble or say there is no laundry on site in that same thread after the grant.
+- Deterministic traces (`hostLaundryExceptionGranted` / `hostGrantedException`) and the conversation judge will REVISE any Soap Bubble draft that contradicts the grant.
+
+**Anti-pattern (Sara 2026-09 Pineland)**: Host: "feel free to use it!" → Auto-reply seconds later: "we do not have laundry on site… Soap Bubble…" → guest confusion. Do not repeat.
 
 ## LAUNDRY_DETERGENT_QUESTION
 

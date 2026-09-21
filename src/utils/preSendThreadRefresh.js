@@ -67,6 +67,25 @@ export function guestMessagesAfter(threadChrono, originalGuestMessage) {
   return threadChrono.slice(idx + 1).filter(isGuestMessage);
 }
 
+/**
+ * Host messages that landed AFTER the guest message we started answering.
+ * Mid-compose host replies (e.g. Jerome granting a one-time laundry exception)
+ * must force reprocess — same as newer guest messages (Sara laundry incident).
+ */
+export function hostMessagesAfter(threadChrono, originalGuestMessage) {
+  const orig = normalizeBody(originalGuestMessage);
+  if (!orig) return [];
+  let idx = -1;
+  for (let i = threadChrono.length - 1; i >= 0; i--) {
+    if (isGuestMessage(threadChrono[i]) && normalizeBody(messageBody(threadChrono[i])) === orig) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) return [];
+  return threadChrono.slice(idx + 1).filter(isHostMessage);
+}
+
 export function looksLikeWelcomeAck(text) {
   return /you're welcome|you are welcome/i.test(String(text || ''));
 }
@@ -181,28 +200,42 @@ export async function runPreSendThreadRefresh({
   }
 
   const chrono = chronologicalThread(thread);
-  const newer = guestMessagesAfter(chrono, originalGuestMessage);
+  const newerGuest = guestMessagesAfter(chrono, originalGuestMessage);
+  const newerHost = hostMessagesAfter(chrono, originalGuestMessage);
   let result = result0;
   let reprocessed = false;
 
+  // Mid-compose: any new guest OR host message (e.g. Jerome granting a laundry
+  // exception while we were drafting Soap Bubble) must force reprocess + history refetch.
   if (
-    newer.length > 0 &&
+    (newerGuest.length > 0 || newerHost.length > 0) &&
     !alreadyReprocessed &&
     !context._preSendReprocessed &&
     typeof reprocess === 'function'
   ) {
-    const latest = newer[newer.length - 1];
-    const latestBody = messageBody(latest);
+    // Prefer the newest guest turn when present; otherwise re-answer the original
+    // guest message with the refreshed history that now includes the new host reply.
+    const latestGuest = newerGuest.length ? newerGuest[newerGuest.length - 1] : null;
+    const latestBody = latestGuest ? messageBody(latestGuest) : originalGuestMessage;
+    const reasonBits = [];
+    if (newerGuest.length) reasonBits.push(`${newerGuest.length} newer guest`);
+    if (newerHost.length) reasonBits.push(`${newerHost.length} newer host`);
     console.log(
-      `[preSend] ${newer.length} newer guest message(s) arrived while drafting; reprocessing latest: "${latestBody.slice(0, 80)}"`
+      `[preSend] ${reasonBits.join(' + ')} message(s) arrived while drafting; reprocessing with refreshed history. latestGuest="${String(latestBody).slice(0, 80)}"`
     );
+    if (newerHost.length) {
+      console.log(
+        `[preSend] newer host message(s): ${newerHost.map((m) => `"${messageBody(m).slice(0, 60)}"`).join('; ')}`
+      );
+    }
     try {
       result = await reprocess(latestBody, {
         ...context,
         conversationHistory: toHistory(chrono),
         _preSendReprocessed: true,
         preSendOriginalGuestMessage: originalGuestMessage,
-        preSendNewerGuestMessages: newer.map(messageBody),
+        preSendNewerGuestMessages: newerGuest.map(messageBody),
+        preSendNewerHostMessages: newerHost.map(messageBody),
         preSendStaleDraft: result0.proposedResponse || '',
       });
       reprocessed = true;

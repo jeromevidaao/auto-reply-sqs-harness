@@ -265,6 +265,53 @@ export class ConversationContextTool extends BaseTool {
       result.traces.push('Early unit ready declared by host in recent/prior message — never contradict with 4pm policy');
     }
 
+    // === Host-granted exception / one-time permission (CRITICAL anti-contradiction) ===
+    // Sara laundry 2026-09: host said "not for guests usually but for this time feel free to use it"
+    // then auto-reply sent Soap Bubble / no-on-site laundry and contradicted the host.
+    // Detect cheap permission-grant phrases; when laundry-related (or guest ask is laundry),
+    // surface hostLaundryExceptionGranted so policy + judge never override the grant.
+    const hostMessagesForExceptionScan = recentHostMessages.length > 0
+      ? recentHostMessages
+      : (context.conversationHistory || []).filter(m => (m.sender_type === 'host' || (m.sender && m.sender.type === 'host') || m.role === 'host'));
+    const hostExceptionGrantPhrases = [
+      /feel free to use/i,
+      /go ahead and use/i,
+      /you can use (?:the )?(?:washer|dryer|laundry|it)/i,
+      /you(?:'|’)re welcome to use/i,
+      /\bexception\b/i,
+      /for this time/i,
+      /this (?:one )?time (?:you can|feel free|go ahead)/i,
+      /not for guests usually/i,
+      /not (?:usually )?for guests/i,
+    ];
+    const laundryCue = /washer|dryer|laundry|laundromat/i;
+    let hostGrantedException = false;
+    let hostLaundryExceptionGranted = false;
+    let hostExceptionMessagePreview = null;
+    const guestAsk = String(input || context.guestMessage || '');
+    const guestAskIsLaundry = laundryCue.test(guestAsk);
+    for (const m of hostMessagesForExceptionScan) {
+      const body = (m.body || m.text || m.content || '');
+      if (!hostExceptionGrantPhrases.some(re => re.test(body))) continue;
+      hostGrantedException = true;
+      hostExceptionMessagePreview = body.substring(0, 160);
+      if (laundryCue.test(body) || guestAskIsLaundry || /feel free to use it|go ahead and use it/i.test(body)) {
+        hostLaundryExceptionGranted = true;
+      }
+      break;
+    }
+    result.hostGrantedException = hostGrantedException;
+    result.hostLaundryExceptionGranted = hostLaundryExceptionGranted;
+    if (hostExceptionMessagePreview) {
+      result.hostExceptionMessagePreview = hostExceptionMessagePreview;
+    }
+    if (hostLaundryExceptionGranted) {
+      result.traces.push('Host granted a one-time laundry/washer/dryer exception in recent/prior message — never contradict with Soap Bubble / no-on-site denial');
+    } else if (hostGrantedException) {
+      result.traces.push('Host granted a one-time exception/permission in recent/prior message — never contradict that grant with stock policy denial');
+    }
+
+
     // === Prior host factual instructions / advice (anti-repetition of host-sent information) ===
     // User requirement (from full Kathryn thread): absolutely avoid repeating twice the same information sent by a host
     // (human host or prior auto-reply). Example: host gave "don't use the Nest... use the heat pump remotes on the wall"
