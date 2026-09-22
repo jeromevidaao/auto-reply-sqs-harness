@@ -63,7 +63,7 @@ prompts/
 
 src/
   harness/                  # Category router, first-pass compose, claim check, draft vs reviewer models
-  agent.js                  # GuestMessagingAgent (traces → routed grok-4.3 draft → claim check → merged grok-3-mini reviewer)
+  agent.js                  # GuestMessagingAgent (traces → routed grok-4.7 draft → claim check → merged grok-3-mini reviewer)
   tools/                    # Rich tool system (Cancellation, Thermostat + Live HeatPump/KumoCloud with auto-fix of mixed modes, UnitReadiness, ConversationContext, etc.)
   clients/                  # HospitableClient, KumoCloudClient (live status + control for the 3 Apt heat pumps)
 

@@ -55,7 +55,7 @@ This document tracks the concrete next steps for the harness. We will grow it it
 
 - [x] Routed first-pass prompt (2 core + ≤4 category files; never load judge/reflection into the writer)
 - [x] Merge reflection into the conversation judge (one reviewer LLM call)
-- [x] Draft = `grok-4.3` temp 0.2; reviewer = `grok-3-mini` temp 0.1
+- [x] Draft = `grok-4.7` temp 0.2; reviewer = `grok-3-mini` temp 0.1
 - [x] Programmatic claim check vs tools (calendar, 4pm-vs-ready, pets, parking, 475, event false positives)
 - [x] Skip LLM judge when a deterministic policy already rewrote the draft and claims pass
 - [x] Eval default path is `handleMessage` (production stack); `--first-pass-only` for debug
@@ -109,7 +109,7 @@ This document tracks the concrete next steps for the harness. We will grow it it
 
 - [ ] Structured rubrics (accuracy, tone, policy, conciseness)
 - [ ] Simple diff reporter between prompt versions
-- [ ] Ability to run evals against both `grok-4.3` and `grok-3-mini` for comparison
+- [ ] Ability to run evals against both `grok-4.7` and `grok-3-mini` for comparison
 - [ ] Record/replay for expensive real-model calls during development
 
 ## Phase 3 — Developer Experience

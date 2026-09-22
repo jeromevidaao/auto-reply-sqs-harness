@@ -28,6 +28,17 @@ import {
   formatConversationHistoryLines,
   normalizeThreadChronological,
 } from './utils/threadHistory.js';
+import {
+  EXTRA_LINENS_TOWELS_FOLLOW_UP,
+  apt23ExtraLinensDraftNeedsRewrite,
+  buildCanonicalExtraLinensTowelsReply,
+  draftHasCorrectSofaLocation,
+  draftHasExtraLinensFollowUp,
+  draftHasPrematureBringOver,
+  draftHasWrongExtraLinensLocation,
+  isApt2OrApt3SofaLinensUnit,
+  looksLikeInStayExtraLinensTowelsAsk,
+} from './utils/extraLinensTowels.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 import {
   loadHostContacts,
@@ -93,9 +104,6 @@ const WIFI_LET_ME_KNOW = 'Let me know if it works.';
 
 /** Apt 2 listing UUID (Sunny Downtown 2 Bed) — street-door lockout is unit-specific. */
 const APT2_LISTING_ID = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
-
-const EXTRA_LINENS_TOWELS_FOLLOW_UP =
-  'If you cannot find them, feel free to let us know.';
 
 const IN_STAY_CRIB_LOCATION_FOLLOW_UP = 'Let us know if you cannot find it.';
 const APT2_CRIB_LOCATION_BODY = 'it should be in the closet of the smaller bedroom.';
@@ -3949,27 +3957,22 @@ export class GuestMessagingAgent {
     if (this._isPreArrivalSofaLinensAsk(guestMessage, context)) {
       return false;
     }
-
-    const lower = (guestMessage || '').toLowerCase();
-    const towelOrLinenAsk =
-      /\b(?:towels?|linens?|sheets?|blankets?|pillows?|wash\s*cloths?)\b/.test(lower) &&
-      /\b(?:more|extra|additional|another|where|find|stored|available|are there|do you have|in the unit|under)\b/.test(lower);
-
-    const sofaBedContext =
-      /\b(?:sofa|couch|sofa bed|bedroom)\b/.test(lower) ||
-      /\b(?:more|extra|additional)\b.{0,40}\b(?:towels?|linens?)\b/.test(lower);
-
-    return towelOrLinenAsk && sofaBedContext;
+    return looksLikeInStayExtraLinensTowelsAsk(guestMessage);
   }
 
   /**
-   * In-stay extra towels/linens replies must include a follow-up offer if the guest cannot find them.
+   * In-stay extra towels/linens (Apt 2 / Apt 3): rewrite wrong locations (linen closet /
+   * bathroom sink / cabinets) and premature "I'll bring towels right over" to the
+   * Ikea sofa lift-up instructions. Append follow-up when sofa guidance is present
+   * but help offer is missing (Sean). Kenneth 2026-09-22.
    */
   _applyExtraLinensTowelsPolicy(parsed, context = {}, guestMessage = '') {
     const categories = Array.isArray(parsed.typeOfMessageReceived)
       ? parsed.typeOfMessageReceived
       : [parsed.typeOfMessageReceived];
-    const isCategory = categories.includes('EXTRA_LINENS_TOWELS');
+    // TOWEL_REQUEST is a model alias — normalize to EXTRA_LINENS_TOWELS (Kenneth eval).
+    const isCategory =
+      categories.includes('EXTRA_LINENS_TOWELS') || categories.includes('TOWEL_REQUEST');
     const isAsk = this._isExtraLinensTowelsInStayAsk(guestMessage, context);
 
     if (!isCategory && !isAsk) {
@@ -3981,25 +3984,44 @@ export class GuestMessagingAgent {
       return { applied: false };
     }
 
-    const lower = draft.toLowerCase();
-    const hasLocationGuidance =
-      /lift up|under the sofa|under there|storage compartment|reveal/.test(lower);
-    const hasFollowUp =
-      /let (?:us|me) know/.test(lower) ||
-      /feel free/.test(lower) ||
-      /cannot find|can't find/.test(lower);
+    const apt23 = isApt2OrApt3SofaLinensUnit(context);
+    const needsCategoryNorm =
+      !categories.includes('EXTRA_LINENS_TOWELS') || categories.includes('TOWEL_REQUEST');
 
-    if (!hasLocationGuidance || hasFollowUp) {
-      return { applied: false };
+    // Apt 2/3: hard rewrite invented closet/sink/cabinets, premature bring-over,
+    // or missing sofa lift-up guidance.
+    if (apt23 && apt23ExtraLinensDraftNeedsRewrite(draft, context)) {
+      return {
+        applied: true,
+        typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
+        proposedResponse: buildCanonicalExtraLinensTowelsReply(context),
+        deterministicRewrite: true,
+      };
     }
 
-    const proposedResponse = `${draft.replace(/\s+$/, '')} ${EXTRA_LINENS_TOWELS_FOLLOW_UP}`;
+    // Non-Apt2/3 or already-correct sofa draft: only append follow-up when needed.
+    const hasLocationGuidance = draftHasCorrectSofaLocation(draft);
+    const hasFollowUp = draftHasExtraLinensFollowUp(draft);
 
-    return {
-      applied: true,
-      typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
-      proposedResponse,
-    };
+    if (hasLocationGuidance && !hasFollowUp) {
+      const proposedResponse = `${draft.replace(/\s+$/, '')} ${EXTRA_LINENS_TOWELS_FOLLOW_UP}`;
+      return {
+        applied: true,
+        typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
+        proposedResponse,
+      };
+    }
+
+    // Already-correct Apt 2/3 draft (or TOWEL_REQUEST alias): still normalize category.
+    if (apt23 && (isAsk || isCategory) && needsCategoryNorm) {
+      return {
+        applied: true,
+        typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
+        proposedResponse: draft,
+      };
+    }
+
+    return { applied: false };
   }
 
   _looksLikeCribAmenityAsk(guestMessage = '') {
@@ -8148,6 +8170,55 @@ export class GuestMessagingAgent {
           ],
           deterministicGuard: true,
         };
+      }
+    }
+
+    // Kenneth Apt 2/3: linen closet / bathroom sink / premature bring-over → REVISE to sofa lift-up.
+    {
+      const draft = (firstDecision.proposedResponse || '').trim();
+      const revised = (llmJudgeResult.revisedResponse || '').trim();
+      const cats = Array.isArray(firstDecision.typeOfMessageReceived)
+        ? firstDecision.typeOfMessageReceived
+        : [firstDecision.typeOfMessageReceived];
+      const isExtraLinens =
+        cats.includes('EXTRA_LINENS_TOWELS') ||
+        cats.includes('TOWEL_REQUEST') ||
+        this._isExtraLinensTowelsInStayAsk(guestMessage, context);
+      if (isExtraLinens && isApt2OrApt3SofaLinensUnit(context)) {
+        const draftBad =
+          draftHasWrongExtraLinensLocation(draft) ||
+          draftHasPrematureBringOver(draft) ||
+          !draftHasCorrectSofaLocation(draft);
+        const revisedBad = revised
+          ? draftHasWrongExtraLinensLocation(revised) ||
+            draftHasPrematureBringOver(revised) ||
+            !draftHasCorrectSofaLocation(revised)
+          : false;
+        const llmAlreadyFixed =
+          llmJudgeResult.verdict === 'REVISE' &&
+          revised &&
+          !draftHasWrongExtraLinensLocation(revised) &&
+          !draftHasPrematureBringOver(revised) &&
+          draftHasCorrectSofaLocation(revised);
+        if (!llmAlreadyFixed && (draftBad || revisedBad)) {
+          const fixed = buildCanonicalExtraLinensTowelsReply(context);
+          console.log(
+            '[Agent] → Deterministic judge guard: Apt 2/3 extra towels wrong location / premature bring-over (Kenneth)'
+          );
+          return {
+            ...llmJudgeResult,
+            verdict: 'REVISE',
+            revisedResponse: fixed,
+            notes:
+              (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
+              'Deterministic guard: Apt 2/3 extras are under the living-room Ikea sofa (lift seat) — never linen closet / bathroom sink / host bring-over first.',
+            issues: [
+              ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
+              'Apt 2/3 extra linens/towels draft used wrong location (closet/sink/cabinets) or premature bring-over (Kenneth 2026-09-22).',
+            ],
+            deterministicGuard: true,
+          };
+        }
       }
     }
 

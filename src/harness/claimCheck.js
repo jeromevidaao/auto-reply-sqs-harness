@@ -11,6 +11,14 @@ import { isAdditionalParkingAsk, isEventHostingDenial, isTripPurposeEventMention
 import { isPetOverMaxAsk, isUnlikelyEventIdiom } from '../tools/pets/petOverMax.js';
 import { isPetFurnitureMitigation } from '../tools/pets/petFurnitureMitigation.js';
 import { hasPriorConversation } from '../utils/threadHistory.js';
+import {
+  apt23ExtraLinensDraftNeedsRewrite,
+  buildCanonicalExtraLinensTowelsReply,
+  draftHasPrematureBringOver,
+  draftHasWrongExtraLinensLocation,
+  isApt2OrApt3SofaLinensUnit,
+  looksLikeInStayExtraLinensTowelsAsk,
+} from '../utils/extraLinensTowels.js';
 
 const EVENT_DECLINE_RE = /not able to accommodate events or gatherings/i;
 const POLICY_475_RE = /help\/article\/475/i;
@@ -340,6 +348,30 @@ export function checkDraftClaims({
   }
 
 
+  // Kenneth Apt 2/3: never place extras in linen closet / bathroom sink / cabinets;
+  // never first-reply with host bring-over when sofa storage exists.
+  {
+    const rawCat = decision.typeOfMessageReceived;
+    const cats = Array.isArray(rawCat) ? rawCat : [rawCat];
+    const isExtra =
+      cats.includes('EXTRA_LINENS_TOWELS') || cats.includes('TOWEL_REQUEST') || looksLikeInStayExtraLinensTowelsAsk(msg);
+    if (isExtra && isApt2OrApt3SofaLinensUnit(context)) {
+      const needs =
+        draftHasWrongExtraLinensLocation(text) ||
+        draftHasPrematureBringOver(text) ||
+        apt23ExtraLinensDraftNeedsRewrite(text, context);
+      if (needs) {
+        addIssue(
+          issues,
+          'apt23_extra_linens_wrong_location',
+          'Apt 2/3 extra towels/linens draft used wrong location (linen closet / bathroom sink / cabinets) or premature host bring-over, or omitted Ikea sofa lift-up storage (Kenneth 2026-09-22).',
+          { deterministicFix: 'force_apt23_sofa_extra_linens' }
+        );
+      }
+    }
+  }
+
+
   let revised = text;
   let appliedFix = false;
   const appliedFixCodes = new Set();
@@ -391,6 +423,10 @@ export function checkDraftClaims({
       } else {
         revised = body;
       }
+      appliedFix = true;
+      appliedFixCodes.add(issue.deterministicFix);
+    } else if (issue.deterministicFix === 'force_apt23_sofa_extra_linens') {
+      revised = buildCanonicalExtraLinensTowelsReply(context);
       appliedFix = true;
       appliedFixCodes.add(issue.deterministicFix);
     }

@@ -31,9 +31,12 @@ This is **not** the same as Apt 3's unit lockbox for normal check-in. Normal Apt
 **Furniture & Pet Rules**:
 - Pets are not allowed on the bed or sofa.
 
-**Sofa bed**:
+**Sofa bed / extra towels & linens** (HARD — Kenneth 2026-09-22):
 - Queen sofa bed in the living room sleeps 2.
-- Sheets, blankets, pillows, and extra towels for the sofa bed are stored in the storage compartment under the sofa (lift up the long part of the sofa to access).
+- Sheets, blankets, pillows, and **extra bath towels** are stored **under the living-room sofa** — it is an **Ikea storage sofa/bed**.
+- **How to open**: lift the **long seat cushion or top section up** to open the storage compartment underneath; towels and linens are inside.
+- **NEVER** tell guests extras are in a linen closet, under the bathroom sink, in cabinets, or in drawers.
+- **NEVER** first-reply with "I'll bring towels right over" when sofa storage exists — tell them where to look; offer help only if they still cannot find them.
 
 **Heat / AC (three wall units)**:
 - Living room, master bedroom, and small bedroom each have their own wall unit and remote.

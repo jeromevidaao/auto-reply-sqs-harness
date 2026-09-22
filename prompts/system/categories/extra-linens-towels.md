@@ -24,21 +24,28 @@ When a guest asks (before or during their stay) whether sheets, blankets, pillow
 
 ## EXTRA_LINENS_TOWELS (guest already in the apartment)
 
-When the guest is **already in the unit** and asks where to find extra towels, sheets for the sofa bed, or linens for an additional guest:
+When the guest is **already in the unit** and asks where to find extra towels, sheets for the sofa bed, or linens for an additional guest — including shortfalls like "only 4 towel sets for 5 people" / "need more bath towels":
 
 - Category **MUST** be **EXTRA_LINENS_TOWELS**
 - **ONLY** for Apt 2 and Apt 3 (2-bedroom units with sofa beds). **NOT** for Studio (1B) — use **STUDIO_FUTON_BLANKET** for the studio futon instead.
 - This is different from pre-arrival capacity questions (**SLEEPING_ARRANGEMENTS** / **SLEEPING_ACCOMMODATION**).
 
-**Required reply content** (from production — include lift-up instructions **and** a follow-up offer):
-- **MUST** tell them where extra towels/linens are (under the sofa bed — lift up the long part of the sofa).
+### Apt 2 & Apt 3 — REQUIRED location (HARD)
+
+- Extras (bath towels, wash cloths, sheets, blankets, pillows) are stored **under the living-room sofa** — it is an **Ikea storage sofa/bed**.
+- **How to open**: lift the **long seat cushion / top section up** to open the storage compartment underneath. Towels and linens are inside.
+- **NEVER** say extras are in a **linen closet**, **under the bathroom sink**, **cabinets**, or **drawers**. Those locations are wrong for Apt 2 and Apt 3 (Kenneth 2026-09-22 incident).
+- **NEVER** as the first reply promise **"I'll bring towels right over"** / host delivery when sofa storage exists. Tell them where to look first. Only offer to help / bring extras **if they still cannot find them after looking under the sofa** (follow-up: "If you cannot find them, feel free to let us know.").
+
+**Required reply content**:
+- **MUST** tell them extras are under the living-room sofa (Ikea storage) and how to lift the seat/top open.
 - **MUST** end with an offer to help if they cannot find them — e.g. "If you cannot find them, feel free to let us know."
 
 **Example tones** (facts matter more than exact words):
-"For the extra guests, we have linens available on the sofa bed. You need to lift up the long part of the sofa to reveal the linens as well as the extra two towels and wash cloths. They should be stored right under there. If you cannot find them, feel free to let us know."
+"Kenneth, extra bath towels and linens are stored under the living-room sofa (it's an Ikea storage sofa/bed). Lift the long seat cushion or top section up to open the storage underneath — the towels and linens are inside. If you cannot find them, feel free to let us know."
 
-"Good evening, Sean, yes there are extra clean towels under the sofa bed. Lift up the long part of the sofa to reveal them along with the linens. If you cannot find them, feel free to let us know."
+"Good evening, Sean, yes there are extra clean towels under the living-room sofa (Ikea storage). Lift the long seat cushion or top section up to open the storage underneath — towels and linens are inside. If you cannot find them, feel free to let us know."
 
 **Recognition cues for in-stay EXTRA_LINENS_TOWELS**:
-- "we are in the apartment", "we're here", "checked in", "can't find", "where are the sheets", "more clean towels", "in the unit"
-- AND asking about sofa bed linens / extra towels
+- "we are in the apartment", "we're here", "checked in", "can't find", "where are the sheets", "more clean towels", "more bath towels", "only X towels for Y people", "in the unit"
+- AND asking about sofa bed linens / extra towels / not enough towels for the party size

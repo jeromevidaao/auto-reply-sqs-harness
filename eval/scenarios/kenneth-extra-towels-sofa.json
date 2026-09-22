@@ -1,0 +1,38 @@
+{
+  "id": "kenneth-extra-towels-sofa",
+  "description": "In-stay Apt 2 guest (Kenneth, party of 5) asks for more bath towels after finding only 4 sets. Must direct them to living-room Ikea sofa lift-up storage \u2014 never linen closet / bathroom sink / cabinets, and never first-reply with host bring-over. Kenneth 2026-09-22 production miss.",
+  "guestMessage": "Hi \u2014 we only have 4 towel sets for 5 people. Could we get more bath towels please?",
+  "context": {
+    "guestName": "Kenneth",
+    "guestDisplayName": "Kenneth",
+    "checkIn": "2026-09-22",
+    "checkOut": "2026-09-25",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "1875 West End Victorian Apt #2",
+    "guestCount": 5,
+    "guestArrived": true,
+    "asOfDate": "2026-09-22",
+    "conversationHistory": []
+  },
+  "rubric": {
+    "expectedCategory": [
+      "EXTRA_LINENS_TOWELS",
+      "TOWEL_REQUEST"
+    ],
+    "shouldReply": true,
+    "requiredPhrases": [
+      "sofa",
+      "lift",
+      "under"
+    ],
+    "forbiddenPhrases": [
+      "linen closet",
+      "bathroom sink",
+      "cabinets",
+      "bring extra bath towels right over",
+      "bring additional sets right over",
+      "manual reply needed"
+    ]
+  },
+  "notes": "Production incident: auto said linen closet / bathroom sink and offered host delivery. Host corrected: Ikea sofa lift-up in living room. Do not re-send \u2014 host already replied."
+}

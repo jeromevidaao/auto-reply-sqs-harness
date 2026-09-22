@@ -1,11 +1,11 @@
 /**
  * LLM routing for the guest-messaging harness.
  *
- * Draft (guest-facing) uses grok-4.3 at low temperature.
+ * Draft (guest-facing) uses grok-4.7 at low temperature.
  * Reviewer (merged reflection + conversation judge) uses grok-3-mini.
  */
 
-export const DRAFT_MODEL = 'grok-4.3';
+export const DRAFT_MODEL = 'grok-4.7';
 export const REVIEWER_MODEL = 'grok-3-mini';
 export const DRAFT_TEMPERATURE = 0.2;
 export const REVIEWER_TEMPERATURE = 0.1;

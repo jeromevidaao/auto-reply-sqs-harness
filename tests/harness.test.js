@@ -242,7 +242,7 @@ describe('first-pass prompt compose', () => {
 });
 
 describe('Grok adapter defaults', () => {
-  it('defaults to grok-4.3 at 0.2', () => {
+  it('defaults to grok-4.7 at 0.2', () => {
     const adapter = new GrokLLMAdapter({ apiKey: 'test' });
     assert.equal(adapter.model, DRAFT_MODEL);
     assert.equal(adapter.temperature, DRAFT_TEMPERATURE);

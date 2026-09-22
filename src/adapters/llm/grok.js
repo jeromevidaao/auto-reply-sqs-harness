@@ -3,7 +3,7 @@
  * Requires GROK_API_KEY in the environment.
  *
  * Per-call options override the constructor defaults so the harness can
- * send the guest-facing draft on grok-4.3 (temp 0.2) and the reviewer on
+ * send the guest-facing draft on grok-4.7 (temp 0.2) and the reviewer on
  * grok-3-mini (temp 0.1) without two adapter instances.
  */
 
