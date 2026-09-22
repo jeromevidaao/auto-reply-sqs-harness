@@ -268,3 +268,129 @@ describe('Early check-in dedup — one message max per stay', () => {
     assert.equal(result.deliveries?.[0]?.sendSkipReason, 'already_sent');
   });
 });
+
+
+describe('Noon vacant nested SQS — would send unit-ready when vacant+clean', () => {
+  const LISTING = LISTING_APT2;
+  const guest = {
+    firstName: 'Kenneth',
+    listingId: LISTING,
+    checkIn: '2026-09-22',
+    checkOut: '2026-09-25',
+    platform: 'hospitable',
+    reservationId: '547e0f98-4e97-4517-9396-4372c4305881',
+    conversationId: '7f0d5c5b-4966-4e3e-8403-c369311d2d78',
+    guestName: 'Kenneth',
+    propertyName: 'Pine Apt #2',
+  };
+
+  /** Exact production envelope from 2026-09-22 noon CW (Apt #2). */
+  function nestedNoonSqsEvent({ simulate = false } = {}) {
+    const inner = {
+      id: `early_checkin_noon_${LISTING}_2026-09-22`,
+      action: 'noon.vacant_unit_ready',
+      data: {
+        listingId: LISTING,
+        listingName: 'Pine Apt #2',
+        date: '2026-09-22',
+        source: 'noon_vacant',
+        eventAt: '2026-09-22T16:00:25.326Z',
+        instruction:
+          'Noon vacant-overnight early check-in: send only if nobody is checking out today (Airbnb or HomeExchange) and the unit is not in uncleanedUnits. Message the guest checking in today on this listing.',
+        simulate,
+        sendGuests: true,
+      },
+    };
+    return {
+      Records: [
+        {
+          body: JSON.stringify({
+            queryStringParameters: { act: 'early_checkin_notice' },
+            body: JSON.stringify(inner),
+          }),
+        },
+      ],
+    };
+  }
+
+  it('nested body + empty early-checkin thread → sends unit-ready (not unknown_listing)', async () => {
+    let sent = 0;
+    let sentBody = '';
+    const result = await handleEarlyCheckinNotice({
+      event: nestedNoonSqsEvent(),
+      now: new Date('2026-09-22T17:00:00Z'), // 1pm ET
+      ddbClient: { send: async () => ({}) },
+      hospitableClient: {
+        getReservations: async () => [
+          {
+            id: guest.reservationId,
+            conversation_id: guest.conversationId,
+            check_in: guest.checkIn,
+            check_out: guest.checkOut,
+            platform: { name: 'airbnb' },
+            guest: { first_name: 'Kenneth', last_name: 'Shurtluff' },
+            properties: [{ id: '114663c5-0709-4eff-a868-fa9ebd6ed42d' }],
+          },
+        ],
+        getReservationMessages: async () => [
+          { sender_type: 'guest', body: 'Looking forward to our stay!' },
+        ],
+        sendMessageToReservation: async (_id, body) => {
+          sent += 1;
+          sentBody = body;
+        },
+      },
+      homeExchangeClient: {
+        listConversations: async () => ({
+          data: { conversations: { edges: [] } },
+        }),
+      },
+    });
+    assert.equal(result.listingId, LISTING);
+    assert.notEqual(result.decision?.reason, 'unknown_listing');
+    assert.equal(result.decision.send, true);
+    assert.equal(result.sent, true);
+    assert.equal(sent, 1);
+    assert.match(sentBody, /unit is ready for you to check in now/i);
+    assert.match(sentBody, /Kenneth/);
+  });
+
+  it('nested body + prior reactive early-checkin → already_sent (dedup OK)', async () => {
+    let sent = 0;
+    const result = await handleEarlyCheckinNotice({
+      event: nestedNoonSqsEvent(),
+      now: new Date('2026-09-22T17:00:00Z'),
+      ddbClient: { send: async () => ({}) },
+      hospitableClient: {
+        getReservations: async () => [
+          {
+            id: guest.reservationId,
+            conversation_id: guest.conversationId,
+            check_in: guest.checkIn,
+            check_out: guest.checkOut,
+            platform: { name: 'airbnb' },
+            guest: { first_name: 'Kenneth', last_name: 'Shurtluff' },
+            properties: [{ id: '114663c5-0709-4eff-a868-fa9ebd6ed42d' }],
+          },
+        ],
+        getReservationMessages: async () => [
+          { sender_type: 'guest', body: KENNETH_MSG },
+          { sender_type: 'host', body: CONSERVATIVE_REPLY },
+        ],
+        sendMessageToReservation: async () => {
+          sent += 1;
+        },
+      },
+      homeExchangeClient: {
+        listConversations: async () => ({
+          data: { conversations: { edges: [] } },
+        }),
+      },
+    });
+    assert.equal(result.listingId, LISTING);
+    assert.equal(result.decision.send, true);
+    assert.equal(result.sent, false);
+    assert.equal(sent, 0);
+    assert.equal(result.deliveries?.[0]?.sendSkipReason, 'already_sent');
+  });
+});
