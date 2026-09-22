@@ -7,6 +7,12 @@
 - We cannot guarantee early check-in.
 - If the unit is ready before 4pm, we will message the guest.
 
+
+**Vacant overnight + clean (Kenneth 2026-09-22 / noon vacant)**:
+- Same gate as `noon.vacant_unit_ready`: no overnight guest before check-in day **and** listing not in Dynamo `uncleanedUnits` → tell them **the unit is ready for you to check in now** (exact phrase). Do **not** say "can't guarantee" / "cleaning finishes" when readiness is confirmed.
+- If prior-night guest + cleaning incomplete, OR `uncleanedUnits.needed`, keep the classic promise (4pm + message when cleaning finishes).
+- Dedup: one early-check-in / unit-ready message max per stay (noon and reactive share this).
+
 **Reply copy (CRITICAL — Alexandra 2026-09-17 production miss)**:
 - ALWAYS promise to message the guest **as soon as cleaning finishes getting the unit ready** (or equivalent: "if cleaning finishes … we'll message you right away").
 - You MAY acknowledge a requested time (e.g. around 3) without guaranteeing it.

@@ -58,11 +58,15 @@ export class UnitReadinessTool extends BaseTool {
       propertyUuid || airbnbListingId,
       previousDate
     );
+    const uncleanedPending = await this._isUncleanedPending(airbnbListingId);
 
     const buttonPressed = !!cleaning.pressedAt;
     let isUnitReady;
     let reason;
-    if (!hadPreviousDayGuests) {
+    if (uncleanedPending) {
+      isUnitReady = false;
+      reason = 'Listing is still in Dynamo uncleanedUnits (needed) — do not offer early check-in.';
+    } else if (!hadPreviousDayGuests) {
       isUnitReady = true;
       reason = 'No guests the previous night — unit should be ready.';
     } else if (buttonPressed) {
@@ -85,6 +89,7 @@ export class UnitReadinessTool extends BaseTool {
       pressedAt: cleaning.pressedAt,
       hadSameDayTurnover: hadPreviousDayGuests,
       hadPreviousDayGuests,
+      uncleanedPending,
       reason,
       source: cleaning.lookedUp ? 'internal_cleaning_table' : 'hospitable_previous_day_check',
     };
@@ -143,6 +148,30 @@ export class UnitReadinessTool extends BaseTool {
     } catch (err) {
       console.error('[UnitReadinessTool] Error calling Hospitable:', err.message);
       return true;
+    }
+  }
+
+  /**
+   * Dynamo uncleanedUnits.needed=true means cleaning still outstanding.
+   * Fail open (false) when DDB unavailable so vacant-night ready path still works in tests.
+   */
+  async _isUncleanedPending(airbnbListingId) {
+    const lid = String(airbnbListingId || '').trim();
+    if (!lid || !this.ddbClient) return false;
+    try {
+      const result = await this.ddbClient.send(
+        new GetCommand({
+          TableName: process.env.UNCLEANED_TABLE_NAME || 'uncleanedUnits',
+          Key: { listingId: lid },
+        })
+      );
+      const item = result?.Item || null;
+      if (!item) return false;
+      if (item.needed === false) return false;
+      return true;
+    } catch (err) {
+      console.warn('[UnitReadinessTool] uncleanedUnits lookup failed:', err?.message || err);
+      return false;
     }
   }
 }

@@ -189,6 +189,28 @@ export function alreadySentUnitReadyNotice(messages) {
   });
 }
 
+/**
+ * One early-check-in / unit-ready message max per stay.
+ * Skip noon (and similar) when we already sent the unit-ready template OR the
+ * classic reactive early-check-in promise (can't guarantee / cleaning finishes).
+ */
+export function alreadyHandledEarlyCheckinOnThread(messages) {
+  if (alreadySentUnitReadyNotice(messages)) return true;
+  const list = Array.isArray(messages) ? messages : [];
+  return list.some((m) => {
+    const role = String(m?.sender_type || m?.role || m?.sender?.type || '').toLowerCase();
+    if (role && role !== 'host' && role !== 'owner' && role !== 'property') return false;
+    const text = String(m?.content || m?.body || m?.text || '');
+    if (!text.trim()) return false;
+    return (
+      /unit is ready for you to check in now/i.test(text) ||
+      /can'?t guarantee (an arrival|early check-in)/i.test(text) ||
+      /cleaning finishes getting the unit ready/i.test(text) ||
+      /as soon as cleaning finishes/i.test(text)
+    );
+  });
+}
+
 export function isEarlyCheckinNoticeAct(value) {
   const raw = String(value || '').toLowerCase();
   return (
@@ -226,23 +248,34 @@ export function isEarlyCheckinNoticeTurn(event = null) {
   return false;
 }
 
-export function extractEarlyCheckinNoticeContext(event = null) {
-  const blobs = [];
-  if (event && typeof event === 'object') blobs.push(event);
+/**
+ * Walk SQS → API Gateway envelopes. Production noon messages arrive as:
+ *   Records[0].body = JSON.stringify({ queryStringParameters, body: JSON.stringify({ action, data }) })
+ * A single parse leaves `body` as a string — we must unwrap nested string bodies
+ * or listingId stays null and the harness skips with unknown_listing (Kenneth 2026-09-22).
+ */
+function collectEarlyCheckinBlobs(event, depth = 0, out = []) {
+  if (!event || depth > 5) return out;
+  if (typeof event === 'string') {
+    try {
+      return collectEarlyCheckinBlobs(JSON.parse(event), depth + 1, out);
+    } catch {
+      return out;
+    }
+  }
+  if (typeof event !== 'object') return out;
+  out.push(event);
+  if (typeof event.body === 'string') {
+    collectEarlyCheckinBlobs(event.body, depth + 1, out);
+  }
   if (typeof event?.Records?.[0]?.body === 'string') {
-    try {
-      blobs.push(JSON.parse(event.Records[0].body));
-    } catch {
-      /* ignore */
-    }
+    collectEarlyCheckinBlobs(event.Records[0].body, depth + 1, out);
   }
-  if (typeof event?.body === 'string') {
-    try {
-      blobs.push(JSON.parse(event.body));
-    } catch {
-      /* ignore */
-    }
-  }
+  return out;
+}
+
+export function extractEarlyCheckinNoticeContext(event = null) {
+  const blobs = collectEarlyCheckinBlobs(event);
   let data = {};
   let action = '';
   for (const p of blobs) {

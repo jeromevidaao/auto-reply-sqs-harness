@@ -13,6 +13,7 @@
  */
 import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
+  alreadyHandledEarlyCheckinOnThread,
   alreadySentUnitReadyNotice,
   buildEarlyCheckinGuestNotify,
   CLEANING_TABLE,
@@ -309,7 +310,8 @@ export async function handleEarlyCheckinNotice({
         hospitableClient,
         homeExchangeClient,
       });
-      if (alreadySentUnitReadyNotice(messages)) {
+      // Dedup: unit-ready OR prior reactive early-checkin reply (one msg max).
+      if (alreadyHandledEarlyCheckinOnThread(messages)) {
         deliveries.push({
           recipient,
           sent: false,

@@ -1997,6 +1997,24 @@ export class GuestMessagingAgent {
     return readyOrCleaning && willMessage && has4pm;
   }
 
+  /**
+   * Vacant overnight (or cleaning complete) AND not in uncleanedUnits → offer unit ready.
+   * Same gate as noon vacant-overnight / Erin early-checkin path.
+   */
+  _unitIsReadyForEarlyCheckin(context = {}) {
+    if (context.uncleanedPending === true) return false;
+    const readiness = context.unitReadiness || {};
+    if (readiness.uncleanedPending === true) return false;
+    if (readiness.isUnitReady === true) return true;
+    return false;
+  }
+
+  /** Shared with noon proactive — keep exact anti-contradiction phrase. */
+  _earlyCheckinUnitReadySnippet(context = {}) {
+    const name = this._guestDisplayFirstName(context) || 'there';
+    return `Hi ${name},\nWe are pleased to let you know that the unit is ready for you to check in now.`;
+  }
+
   _earlyCheckinReplySnippet(context = {}, guestMessage = '') {
     const name = this._guestDisplayFirstName(context) || 'there';
     const greeting = getTimeBasedGreeting(this._nowForGreeting(context)).greeting || 'Hi';
@@ -2039,6 +2057,28 @@ export class GuestMessagingAgent {
     );
     const isAsk = this._isEarlyCheckinAsk(guestMessage);
     if (!isAsk && !isEarlyCat) return { applied: false };
+
+    // Kenneth / Erin: unit empty overnight + no pending clean → tell them it's ready now.
+    // Same copy family as noon.vacant_unit_ready / cleaning.unit_ready.
+    if (isAsk && this._unitIsReadyForEarlyCheckin(context)) {
+      const draftReady = String(parsed.proposedResponse || '');
+      if (/unit is ready for you to check in now/i.test(draftReady)) {
+        return { applied: false };
+      }
+      const proposedResponse = this._earlyCheckinUnitReadySnippet(context);
+      parsed.typeOfMessageReceived = 'EARLY_CHECKIN';
+      parsed.proposedResponse = proposedResponse;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
+      parsed.escalated = false;
+      return {
+        applied: true,
+        typeOfMessageReceived: 'EARLY_CHECKIN',
+        proposedResponse,
+        shouldReply: true,
+        confidence: 1.0,
+      };
+    }
 
     const draft = String(parsed.proposedResponse || '').trim();
     const weak = this._hasWeakEarlyCheckinCopy(draft);
@@ -3530,6 +3570,19 @@ export class GuestMessagingAgent {
     if (categories.some((c) => stayExtCategories.includes(c))) {
       return { applied: false };
     }
+    // Kenneth 2026-09-22: early check-in / unit-ready must never be rewritten into a
+    // NEW_RESERVATION_WELCOME (that welcome has no readiness gate + drops the unit-ready line).
+    const earlyCheckinCategories = [
+      'EARLY_CHECKIN',
+      'EARLY_CHECKIN_QUESTION',
+      'CHECK_IN_TIME_QUESTION',
+    ];
+    if (
+      categories.some((c) => earlyCheckinCategories.includes(c)) ||
+      this._isEarlyCheckinAsk(guestMessage)
+    ) {
+      return { applied: false };
+    }
     // Amber 2026-08-17: thanks + shuttle/rainy-day is not a first-host welcome.
     if (this._isThanksPlusTransportActivitiesAsk(guestMessage)) {
       return { applied: false };
@@ -3539,7 +3592,7 @@ export class GuestMessagingAgent {
       draft &&
       draft !== 'none' &&
       draft.length >= 40 &&
-      /4\s*pm|self-?check|parking|check-?in|calendar|alteration|already booked|not available/i.test(draft);
+      /4\s*pm|self-?check|parking|check[\s-]?in|unit is ready|calendar|alteration|already booked|not available/i.test(draft);
     const shortAck = this._isShortNewBookingAck(guestMessage);
     const noOrWeakDraft =
       !draft ||
@@ -6431,15 +6484,20 @@ export class GuestMessagingAgent {
    * These are only run when they are likely to be relevant.
    */
   async _runContextualTraces(enrichedContext, guestMessage) {
-    // Unit readiness — only on check-in day (existing logic, kept as-is)
+    // Unit readiness — only on check-in day. Do not overwrite a seeded
+    // unitReadiness (eval / Kenneth vacant+clean gate) with a fail-closed
+    // tool result when DDB/Hospitable are unavailable.
     const isCheckInDay = this._looksLikeCheckInDay(enrichedContext);
-    if (isCheckInDay) {
+    if (isCheckInDay && !enrichedContext.unitReadiness) {
       const unitReadinessTool = this.tools.get('get_unit_readiness');
       if (unitReadinessTool) {
         try {
           const readiness = await unitReadinessTool.execute({}, enrichedContext);
           if (readiness) {
             enrichedContext.unitReadiness = readiness;
+            if (typeof readiness.uncleanedPending === 'boolean') {
+              enrichedContext.uncleanedPending = readiness.uncleanedPending;
+            }
             const readyMsg = readiness.isUnitReady
               ? 'unit expected to be ready'
               : 'unit likely needs cleaning (same-day turnover or previous guests)';
@@ -6449,6 +6507,14 @@ export class GuestMessagingAgent {
           // Non-fatal — UnitReadiness is best-effort for traces
         }
       }
+    } else if (isCheckInDay && enrichedContext.unitReadiness) {
+      if (typeof enrichedContext.unitReadiness.uncleanedPending === 'boolean') {
+        enrichedContext.uncleanedPending = enrichedContext.unitReadiness.uncleanedPending;
+      }
+      console.log(
+        '[Agent] → Early unit readiness trace: using seeded unitReadiness isUnitReady=' +
+          enrichedContext.unitReadiness.isUnitReady
+      );
     }
 
     // Reservation status for cancellation talk (Julia already-cancelled incident).

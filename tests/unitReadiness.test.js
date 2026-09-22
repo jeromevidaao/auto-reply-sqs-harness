@@ -14,6 +14,17 @@ const APT3_AIRBNB = '24259977';
 const TREVOR_MSG =
   "Ok we’ll come back closer to 4 if it’s not ready, figured we’d ask ;-)";
 
+function ddbCleaningOnly(itemOrFn) {
+  return {
+    send: async (cmd) => {
+      if (cmd.input?.TableName === 'uncleanedUnits') return {};
+      if (typeof itemOrFn === 'function') return itemOrFn(cmd);
+      return itemOrFn;
+    },
+  };
+}
+
+
 function agentForTests() {
   return new GuestMessagingAgent({
     projectRoot: projectRootForTests,
@@ -28,6 +39,7 @@ describe('UnitReadinessTool (DynamoDB cleaning table)', () => {
       ddbClient: {
         send: async (cmd) => {
           keys.push(cmd.input);
+          if (cmd.input?.TableName === 'uncleanedUnits') return {};
           return {};
         },
       },
@@ -52,14 +64,12 @@ describe('UnitReadinessTool (DynamoDB cleaning table)', () => {
 
   it('treats pressedAt as cleaned / ready after a previous-night guest', async () => {
     const tool = new UnitReadinessTool({
-      ddbClient: {
-        send: async () => ({
-          Item: {
-            listingIdAndDate: `${APT3_AIRBNB}_2026-08-26`,
-            pressedAt: '2026-08-26T16:20:34.921Z',
-          },
-        }),
-      },
+      ddbClient: ddbCleaningOnly({
+        Item: {
+          listingIdAndDate: `${APT3_AIRBNB}_2026-08-26`,
+          pressedAt: '2026-08-26T16:20:34.921Z',
+        },
+      }),
       hospitableClient: { async hasGuestsOnDate() { return true; } },
     });
     const out = await tool.execute(
@@ -75,9 +85,35 @@ describe('UnitReadinessTool (DynamoDB cleaning table)', () => {
     assert.equal(out.pressedAt, '2026-08-26T16:20:34.921Z');
   });
 
+
+  it('uncleanedUnits needed blocks ready even when vacant overnight', async () => {
+    const tool = new UnitReadinessTool({
+      ddbClient: {
+        send: async (cmd) => {
+          if (cmd.input?.TableName === 'uncleanedUnits') {
+            return { Item: { listingId: APT3_AIRBNB, needed: true } };
+          }
+          return {};
+        },
+      },
+      hospitableClient: { async hasGuestsOnDate() { return false; } },
+    });
+    const out = await tool.execute(
+      {},
+      {
+        listingId: APT3_UUID,
+        checkIn: '2026-08-26T16:00:00-04:00',
+        asOfDate: '2026-08-26',
+      }
+    );
+    assert.equal(out.isUnitReady, false);
+    assert.equal(out.uncleanedPending, true);
+    assert.equal(out.hadPreviousDayGuests, false);
+  });
+
   it('vacant previous night is ready even without a press row', async () => {
     const tool = new UnitReadinessTool({
-      ddbClient: { send: async () => ({}) },
+      ddbClient: ddbCleaningOnly({}),
       hospitableClient: { async hasGuestsOnDate() { return false; } },
     });
     const out = await tool.execute(

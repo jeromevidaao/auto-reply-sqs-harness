@@ -125,22 +125,56 @@ export class HospitableClient {
    * Check if a listing had any guests on a specific date (previous day logic).
    * Returns true if there was at least one reservation that overlapped with that date.
    */
+  /**
+   * Overnight occupancy on `date` (YYYY-MM-DD): any accepted stay with
+   * check_in <= date < check_out. Hospitable arrival_date/departure_date
+   * query filters are unreliable (return unrelated future rows) — fetch a
+   * property window and filter client-side.
+   */
   async hasGuestsOnDate(listingId, date) {
     return this._withRetry('hasGuestsOnDate', async () => {
-      const response = await axios.get(`${this.baseUrl}/reservations`, {
-        headers: await this._authHeaders(),
-        params: {
-          'properties[]': listingId,
-          'arrival_date[lte]': date,
-          'departure_date[gt]': date,
-          limit: 5
-        },
-        timeout: HOSPITABLE_READ_TIMEOUT_MS
+      const day = String(date || '').trim().slice(0, 10);
+      if (!listingId || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+        // Fail closed — treat as occupied so we never claim "unit ready" blindly.
+        return true;
+      }
+      const start = this._addDaysYmd(day, -14);
+      const end = this._addDaysYmd(day, 1);
+      let reservations = [];
+      if (typeof this.getPropertyReservations === 'function') {
+        reservations = await this.getPropertyReservations(listingId, start, end);
+      } else {
+        reservations = await this.getReservationsForDateRange(listingId, start, end);
+      }
+      const list = Array.isArray(reservations)
+        ? reservations
+        : reservations?.data || reservations?.reservations || [];
+      return list.some((r) => {
+        const status =
+          r?.reservation_status?.current?.category ||
+          r?.status ||
+          r?.reservation_status ||
+          '';
+        const st = String(status).toLowerCase();
+        if (st && (st.includes('cancel') || st === 'denied' || st === 'expired')) {
+          return false;
+        }
+        const ci = String(r?.check_in || r?.arrival_date || r?.checkIn || '').slice(0, 10);
+        const co = String(r?.check_out || r?.departure_date || r?.checkOut || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(ci) || !/^\d{4}-\d{2}-\d{2}$/.test(co)) {
+          return false;
+        }
+        return ci <= day && co > day;
       });
-
-      const reservations = response.data?.data || [];
-      return reservations.length > 0;
     });
+  }
+
+  _addDaysYmd(ymd, delta) {
+    const [y, m, d] = String(ymd)
+      .split('-')
+      .map((n) => parseInt(n, 10));
+    const dt = new Date(Date.UTC(y, m - 1, d + delta));
+    return dt.toISOString().slice(0, 10);
   }
 
   /**

@@ -23,7 +23,14 @@
       "historySource": "scenario"
     },
     "conversationHistory": [],
-    "suggestedResponseSnippet": "Good afternoon, Alexandra. Check-in is at 4pm so we can't guarantee an arrival around 3pm, but as soon as cleaning finishes getting the unit ready for you we'll message you right away."
+    "suggestedResponseSnippet": "Good afternoon, Alexandra. Check-in is at 4pm so we can't guarantee an arrival around 3pm, but as soon as cleaning finishes getting the unit ready for you we'll message you right away.",
+    "unitReadiness": {
+      "isUnitReady": false,
+      "buttonPressed": false,
+      "hadPreviousDayGuests": true,
+      "uncleanedPending": false
+    },
+    "uncleanedPending": false
   },
   "rubric": {
     "expectedCategory": [

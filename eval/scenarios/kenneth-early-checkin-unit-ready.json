@@ -1,0 +1,73 @@
+{
+  "id": "kenneth-early-checkin-unit-ready",
+  "description": "Kenneth (1875 West End Victorian / Apt #2, Sep 22\u201325 2026): asks early check-in ~3pm on check-in day. Unit vacant overnight (Damian out Sep 21) and uncleanedUnits empty. Must offer unit ready now \u2014 not the conservative can't-guarantee / cleaning-finishes hedge. Noon vacant producer failed listingId=null the same morning.",
+  "productionMiss": true,
+  "guestMessage": "Jerome, is it possible to check in early? We should arrive around 3pm. Thanks, Kenn Shurtluff",
+  "guestName": "Kenneth",
+  "checkIn": "2026-09-22T16:00:00-04:00",
+  "checkOut": "2026-09-25T10:00:00-04:00",
+  "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+  "propertyName": "1875 West End Victorian | EV Charging + Parking",
+  "context": {
+    "asOfDate": "2026-09-22",
+    "asOfInstant": "2026-09-22T13:50:00-04:00",
+    "nowForGreeting": "2026-09-22T13:50:00-04:00",
+    "reservationId": "547e0f98-4e97-4517-9396-4372c4305881",
+    "conversation_id": "7f0d5c5b-4966-4e3e-8403-c369311d2d78",
+    "airbnbListingId": "20150380",
+    "uncleanedPending": false,
+    "unitReadiness": {
+      "isUnitReady": true,
+      "buttonPressed": false,
+      "hadPreviousDayGuests": false,
+      "uncleanedPending": false,
+      "reason": "No guests the previous night \u2014 unit should be ready."
+    },
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "duplicateRisk": false,
+      "earlyUnitReadyOffered": false,
+      "historyFetchFailed": false,
+      "historySource": "scenario"
+    },
+    "conversationHistory": [
+      {
+        "sender_type": "host",
+        "body": "Hi Kenneth, It's almost time for your trip to Portland, ME! Check-in time is 4 PM.",
+        "created_at": "2026-09-19T20:00:43Z"
+      },
+      {
+        "sender_type": "guest",
+        "body": "Thanks",
+        "created_at": "2026-09-20T18:05:47Z"
+      },
+      {
+        "sender_type": "host",
+        "body": "You're welcome, Kenneth!",
+        "created_at": "2026-09-20T18:07:18Z"
+      }
+    ],
+    "suggestedResponseSnippet": "Hi Kenneth,\nWe are pleased to let you know that the unit is ready for you to check in now."
+  },
+  "rubric": {
+    "expectedCategory": [
+      "EARLY_CHECKIN",
+      "EARLY_CHECKIN_QUESTION",
+      "CHECK_IN_TIME_QUESTION"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "unit is ready for you to check in now"
+    ],
+    "forbiddenPhrases": [
+      "can't guarantee",
+      "cannot guarantee",
+      "cleaning finishes",
+      "check with the cleaning",
+      "if we can accommodate"
+    ]
+  }
+}
