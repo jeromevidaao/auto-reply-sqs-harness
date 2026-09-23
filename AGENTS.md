@@ -269,3 +269,7 @@ Follow-up extra-date questions (Caroline Sep 30–Oct 3) still draft/send a date
 If you are an agent and the user asks you to make a change, you must follow the commit+push+verify steps at the end and report the SHA + MCP verification.
 
 This file itself must be kept up to date when product behavior changes.
+
+## Local push gate
+
+Before pushing: `git config core.hooksPath scripts/git-hooks` (once per clone), then `npm run prepush` (or skill `guest-messaging-harness`). The pre-push hook blocks push unless `.git/harness-prepush-ok` matches `HEAD`.

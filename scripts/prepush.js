@@ -9,6 +9,7 @@
  * files changed — that is how required-phrase CI failures happen.
  */
 import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,7 +33,23 @@ const SKIP_LIVE = [
   /^\.github\//,
   /^scripts\/check-eval-phrases\.js$/,
   /^scripts\/prepush\.js$/,
+  /^scripts\/git-hooks\//,
 ];
+
+
+function writePrepushStamp() {
+  // Lets scripts/git-hooks/pre-push skip a second full run for this HEAD.
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
+  if (head.status !== 0) return;
+  const sha = String(head.stdout || '').trim();
+  if (!sha) return;
+  try {
+    writeFileSync(path.join(root, '.git/harness-prepush-ok'), `${sha}\n`);
+    console.log(`Wrote approvals stamp for ${sha}`);
+  } catch (err) {
+    console.warn('Could not write approvals stamp:', err.message);
+  }
+}
 
 function run(cmd, args, { requireZero = true } = {}) {
   console.log(`\n$ ${cmd} ${args.join(' ')}\n`);
@@ -100,6 +117,7 @@ function main() {
   const live = needsLiveEval(paths);
   if (!live) {
     console.log('\nNo guest-facing / eval files in the diff — skipping live Grok eval.');
+    writePrepushStamp();
     console.log('PREPUSH OK');
     return;
   }
@@ -120,6 +138,7 @@ function main() {
   console.log('\nFull live eval (no fail-fast) — same suite as CI, all failures visible.');
   run('node', [path.join(root, 'eval/runner.js')]);
 
+  writePrepushStamp();
   console.log('\nPREPUSH OK');
 }
 

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Block harness pushes unless local approvals (npm run prepush) just passed for this HEAD.
+# Install once:  git config core.hooksPath scripts/git-hooks
+# Bypass only with:  HARNESS_ALLOW_PUSH_WITHOUT_PREPUSH=1 git push   (emergencies)
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if [[ "${HARNESS_ALLOW_PUSH_WITHOUT_PREPUSH:-}" == "1" ]]; then
+  echo "WARN: skipping harness prepush (HARNESS_ALLOW_PUSH_WITHOUT_PREPUSH=1)"
+  exit 0
+fi
+
+HEAD="$(git rev-parse HEAD)"
+STAMP="$ROOT/.git/harness-prepush-ok"
+if [[ -f "$STAMP" ]]; then
+  stamped="$(tr -d '[:space:]' < "$STAMP" || true)"
+  if [[ "$stamped" == "$HEAD" ]]; then
+    echo "pre-push: approvals stamp matches HEAD ($HEAD) — OK"
+    exit 0
+  fi
+fi
+
+echo "pre-push: no fresh approvals stamp for $HEAD — running full local prepush…"
+if [[ -x "$HOME/.grok/skills/guest-messaging-harness/scripts/prepush.py" ]]; then
+  python3 "$HOME/.grok/skills/guest-messaging-harness/scripts/prepush.py"
+else
+  # Fallback: load key then npm
+  if [[ -z "${GROK_API_KEY:-}" ]]; then
+    export GROK_API_KEY="$(aws ssm get-parameter --name /grok/api-key --with-decryption --query Parameter.Value --output text)"
+  fi
+  npm run prepush
+fi
+
+# prepush.js / prepush.py should write the stamp; if not, write it here on success
+echo "$HEAD" > "$STAMP"
+echo "pre-push: approvals green — stamp written for $HEAD"
