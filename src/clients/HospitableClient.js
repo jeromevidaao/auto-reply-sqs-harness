@@ -310,7 +310,7 @@ export class HospitableClient {
    * Send a message to a reservation (the method that the original working
    * auto-reply-sqs Lambda used successfully).
    */
-  async sendMessageToReservation(reservationId, body) {
+  async sendMessageToReservation(reservationId, body, options = {}) {
     if (!reservationId) throw new Error('reservationId is required to send a message');
     if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
 
@@ -321,7 +321,7 @@ export class HospitableClient {
         const token = await this.getToken();
         const response = await axios.post(
           `${this.baseUrl}/reservations/${reservationId}/messages`,
-          { body },
+          { body, ...(Array.isArray(options.images) && options.images.length ? { images: options.images.slice(0, 3) } : {}) },
           {
             headers: {
               'Content-Type': 'application/json',
@@ -342,7 +342,7 @@ export class HospitableClient {
    * Note: The original production system that was sending successfully used
    * sendMessageToReservation (via reservationUuid) instead.
    */
-  async sendMessage(conversationId, body) {
+  async sendMessage(conversationId, body, options = {}) {
     if (!conversationId) throw new Error('conversationId is required to send a message');
     if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
 
@@ -353,7 +353,7 @@ export class HospitableClient {
         const token = await this.getToken();
         const response = await axios.post(
           `${this.baseUrl}/conversations/${conversationId}/messages`,
-          { body },
+          { body, ...(Array.isArray(options.images) && options.images.length ? { images: options.images.slice(0, 3) } : {}) },
           {
             headers: {
               'Content-Type': 'application/json',
@@ -377,7 +377,7 @@ export class HospitableClient {
    * If this (or the conversation fallback) 404s for the ID provided in the webhook,
    * the handler will escalate the generated reply instead of hard-failing the Lambda.
    */
-  async sendMessageToInquiry(inquiryId, body) {
+  async sendMessageToInquiry(inquiryId, body, options = {}) {
     if (!inquiryId) throw new Error('inquiryId is required to send a message');
     if (!body || typeof body !== 'string') throw new Error('body must be a non-empty string');
 
@@ -388,7 +388,7 @@ export class HospitableClient {
         const token = await this.getToken();
         const response = await axios.post(
           `${this.baseUrl}/inquiries/${inquiryId}/messages`,
-          { body },
+          { body, ...(Array.isArray(options.images) && options.images.length ? { images: options.images.slice(0, 3) } : {}) },
           {
             headers: {
               'Content-Type': 'application/json',

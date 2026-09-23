@@ -1588,14 +1588,29 @@ export const handler = async (event, context) => {
           // /conversations and /inquiries messaging endpoints for the current token/integration.
           // We special-case inquiry send failures below so they do not hard-fail the Lambda
           // (prevents the guest-messaging-agent-harness-errors alarm and SQS retry/DLQ spam).
+          const sendImageOpts =
+            Array.isArray(result.replyImages) && result.replyImages.length
+              ? { images: result.replyImages.slice(0, 3) }
+              : {};
+          if (sendImageOpts.images) {
+            console.log('📎 Attaching images:', sendImageOpts.images);
+          }
           if (reservationId && !msgContext.isInquiry) {
-            await hospitableClient.sendMessageToReservation(reservationId, result.proposedResponse);
+            await hospitableClient.sendMessageToReservation(
+              reservationId,
+              result.proposedResponse,
+              sendImageOpts
+            );
           } else if (msgContext.isInquiry) {
             const inquiryIdForSend = msgContext.conversation_id || msgContext.airbnb_conversation_id || convId;
             console.log(`📤 SENDING REPLY → inquiry:`, inquiryIdForSend, '| preview:', sentPreview);
-            await hospitableClient.sendMessageToInquiry(inquiryIdForSend, result.proposedResponse);
+            await hospitableClient.sendMessageToInquiry(
+              inquiryIdForSend,
+              result.proposedResponse,
+              sendImageOpts
+            );
           } else {
-            await hospitableClient.sendMessage(convId, result.proposedResponse);
+            await hospitableClient.sendMessage(convId, result.proposedResponse, sendImageOpts);
           }
           console.log('✅ Reply successfully sent to guest via Hospitable');
           // Do not GET the thread again after a 200 POST. That verify GET sat in the

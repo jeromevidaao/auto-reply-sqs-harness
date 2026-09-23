@@ -7,6 +7,7 @@ import { checkDraftClaims } from '../src/harness/claimCheck.js';
 import {
   APT2_LISTING_ID,
   APT3_LISTING_ID,
+  APT23_CHAISE_STORAGE_IMAGE_URL,
   buildCanonicalExtraLinensTowelsReply,
   looksLikeInStayExtraLinensTowelsAsk,
 } from '../src/utils/extraLinensTowels.js';
@@ -84,6 +85,7 @@ describe('Kenneth Apt 2 extra towels → sofa lift-up (2026-09-22)', () => {
     assert.equal(applied.applied, true);
     assert.equal(applied.typeOfMessageReceived, 'EXTRA_LINENS_TOWELS');
     assertSofaCanonical(applied.proposedResponse);
+    assert.deepEqual(applied.replyImages, [APT23_CHAISE_STORAGE_IMAGE_URL]);
     assert.match(applied.proposedResponse, /Kenneth/i);
   });
 
@@ -143,6 +145,7 @@ describe('Kenneth Apt 2 extra towels → sofa lift-up (2026-09-22)', () => {
         !/living-room sofa/i.test(applied.proposedResponse) || applied.applied !== true,
         'must not force Apt2/3 sofa copy onto Studio'
       );
+    assert.ok(!applied.replyImages?.length);
     }
   });
 

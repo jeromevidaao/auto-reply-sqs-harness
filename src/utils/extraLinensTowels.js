@@ -33,6 +33,15 @@ export function isApt2OrApt3SofaLinensUnit(context = {}) {
   return false;
 }
 
+/** Public CDN photo of chaise storage open (Apt 2/3 guest replies). */
+export const APT23_CHAISE_STORAGE_IMAGE_URL =
+  'https://www.cleaningbutton.com/images/guest-guides/apt23-chaise-storage.jpg';
+
+/** Hospitable `images` URLs for Apt 2/3 extra-linens/towels replies. */
+export function apt23ExtraLinensReplyImages(context = {}) {
+  return isApt2OrApt3SofaLinensUnit(context) ? [APT23_CHAISE_STORAGE_IMAGE_URL] : [];
+}
+
 /**
  * In-stay ask for more / where towels or linens are.
  * Widened for Kenneth: "only 4 towel sets for 5 people" / "more bath towels".

@@ -30,6 +30,7 @@ import {
 } from './utils/threadHistory.js';
 import {
   EXTRA_LINENS_TOWELS_FOLLOW_UP,
+  apt23ExtraLinensReplyImages,
   apt23ExtraLinensDraftNeedsRewrite,
   buildCanonicalExtraLinensTowelsReply,
   draftHasCorrectSofaLocation,
@@ -681,6 +682,9 @@ export class GuestMessagingAgent {
     if (extraLinensTowelsPolicy.applied) {
       parsed.typeOfMessageReceived = extraLinensTowelsPolicy.typeOfMessageReceived || 'EXTRA_LINENS_TOWELS';
       parsed.proposedResponse = extraLinensTowelsPolicy.proposedResponse;
+      if (extraLinensTowelsPolicy.replyImages?.length) {
+        parsed.replyImages = extraLinensTowelsPolicy.replyImages;
+      }
       shouldReply = true;
     }
 
@@ -925,6 +929,7 @@ export class GuestMessagingAgent {
     return {
       typeOfMessageReceived: parsed.typeOfMessageReceived || 'OTHER_MESSAGE',
       proposedResponse,
+      replyImages: Array.isArray(parsed.replyImages) ? parsed.replyImages : undefined,
       shouldReply,
       confidence,
       postCheckoutParkingInfo: context.postCheckoutParkingInfo || null,
@@ -3996,6 +4001,7 @@ export class GuestMessagingAgent {
         typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
         proposedResponse: buildCanonicalExtraLinensTowelsReply(context),
         deterministicRewrite: true,
+        replyImages: apt23ExtraLinensReplyImages(context),
       };
     }
 
@@ -4009,6 +4015,7 @@ export class GuestMessagingAgent {
         applied: true,
         typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
         proposedResponse,
+        replyImages: apt23ExtraLinensReplyImages(context),
       };
     }
 
@@ -4018,6 +4025,7 @@ export class GuestMessagingAgent {
         applied: true,
         typeOfMessageReceived: 'EXTRA_LINENS_TOWELS',
         proposedResponse: draft,
+        replyImages: apt23ExtraLinensReplyImages(context),
       };
     }
 
@@ -7455,6 +7463,9 @@ export class GuestMessagingAgent {
     if (extraLinensTowelsPolicyFinal.applied) {
       finalResult.typeOfMessageReceived = extraLinensTowelsPolicyFinal.typeOfMessageReceived || 'EXTRA_LINENS_TOWELS';
       finalResult.proposedResponse = extraLinensTowelsPolicyFinal.proposedResponse;
+      if (extraLinensTowelsPolicyFinal.replyImages?.length) {
+        finalResult.replyImages = extraLinensTowelsPolicyFinal.replyImages;
+      }
       finalResult.shouldReply = true;
     }
 
