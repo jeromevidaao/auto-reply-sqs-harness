@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { guestRoomName } from '../tools/hvac/headLayout.js';
+import { decideHvacModeFromOutdoorF, fetchPortlandOutdoorTempF } from '../tools/hvac/outdoorMode.js';
 
 const ssm = new SSMClient({ region: 'us-east-1' });
 
@@ -304,16 +305,33 @@ export class KumoCloudClient {
       mode = 'heat';
       tempF = 72;
     } else if (wantsCool) {
-      mode = 'auto'; // match real-world fix for the "remotes on, no air" case (one head was heat); auto at 65 will cool when outdoor is hot
+      mode = 'auto'; // Kathryn / hot-day AC: auto at 65 cools when outdoor is hot
       tempF = 65;
     }
-    // If guest mentioned "auto" or we want to match the real fix in the Kathryn case, prefer auto for cooling issues
     if (wantsCool && /auto/.test(lower)) {
       mode = 'auto';
     }
 
     const before = await this.getStatusForListing(listingId);
     const summary = before.summary || {};
+
+    let outdoorTempF = null;
+    // Mixed modes: prefer outdoor Portland ME temp (heat ≤62°F, else cool) over lecture-only.
+    if (summary.mixedModes) {
+      try {
+        outdoorTempF = await fetchPortlandOutdoorTempF();
+        const decided = decideHvacModeFromOutdoorF(outdoorTempF);
+        if (decided.mode) {
+          mode = decided.mode;
+          tempF = decided.mode === 'heat' ? 72 : 65;
+        }
+      } catch (wxErr) {
+        console.warn(
+          '[KumoCloudClient] outdoor temp fetch failed; falling back to complaint heuristic:',
+          wxErr && wxErr.message ? wxErr.message : wxErr
+        );
+      }
+    }
 
     const needsFix = summary.mixedModes ||
       (summary.modes && summary.modes.length > 0 && !summary.modes.includes(mode) && !summary.modes.includes('auto'));
@@ -324,12 +342,12 @@ export class KumoCloudClient {
         reason: summary.mixedModes ? 'mixed but we decided not to override' : 'already consistent or no data',
         before,
         recommendedMode: mode,
-        recommendedTempF: tempF
+        recommendedTempF: tempF,
+        outdoorTempF,
       };
     }
 
     const setResult = await this.setAllUnits(listingId, mode, tempF);
-    // Re-fetch briefly for "after" view (best effort)
     let after = null;
     try { after = await this.getStatusForListing(listingId); } catch (_) {}
 
@@ -340,7 +358,10 @@ export class KumoCloudClient {
       after,
       recommendedMode: mode,
       recommendedTempF: tempF,
-      reason: 'mixed modes or wrong season mode for complaint'
+      outdoorTempF,
+      reason: outdoorTempF != null
+        ? 'mixed modes auto-fixed from outdoor temp'
+        : 'mixed modes or wrong season mode for complaint',
     };
   }
 }

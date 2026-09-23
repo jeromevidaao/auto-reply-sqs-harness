@@ -6,6 +6,7 @@ import {
   headLayoutForListing,
   mixedModeRule,
 } from './headLayout.js';
+import { buildOutdoorAutoFixSnippet } from './outdoorMode.js';
 
 /**
  * HeatPumpTool (live KumoCloud)
@@ -274,13 +275,25 @@ export class HeatPumpTool extends BaseTool {
       const t = fix.recommendedTempF || 65;
       const roomInfo = summary.avgRoomTempF ? ` (room ~${summary.avgRoomTempF}°F)` : '';
 
-      if (liveMix) parts.push(liveMix);
-      parts.push(mixedModeRule(rooms));
-      parts.push(`I checked the heat pumps for you${roomInfo}.`);
-      const unitCount = units.length || rooms.length || 'the';
-      parts.push(`I've set all ${unitCount} units to ${m} at ${t}°F now so it should cool down shortly.`);
-      parts.push('You can still adjust with the remotes on the wall in each room.');
-      parts.push('Let me know in a few minutes if the air is moving and the temperature is improving!');
+      // Outdoor-driven mixed-mode auto-fix: lead with "I fixed it" + room names.
+      if (fix.outdoorTempF != null && (m === 'heat' || m === 'cool')) {
+        parts.push(
+          buildOutdoorAutoFixSnippet({
+            guestName: null, // already prefixed with guestName below
+            rooms,
+            mode: m,
+            outdoorTempF: fix.outdoorTempF,
+          })
+        );
+      } else {
+        if (liveMix) parts.push(liveMix);
+        parts.push(mixedModeRule(rooms));
+        parts.push(`I checked the heat pumps for you${roomInfo}.`);
+        const unitCount = units.length || rooms.length || 'the';
+        parts.push(`I've set all ${unitCount} units to ${m} at ${t}°F now so it should cool down shortly.`);
+        parts.push('You can still adjust with the remotes on the wall in each room.');
+        parts.push('Let me know in a few minutes if the air is moving and the temperature is improving!');
+      }
     } else if (status && !status.error) {
       if (priorAdvice) {
         parts.push('I checked the live status of the units.');
