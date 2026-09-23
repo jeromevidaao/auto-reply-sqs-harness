@@ -27,7 +27,8 @@ const alexandraCtx = {
 };
 
 function assertStrongEarlyCheckinCopy(text) {
-  assert.match(text, /cleaning finishes|getting the unit ready|unit ready/i);
+  assert.match(text, /getting the unit ready/i);
+  assert.match(text, /cleaning finishes/i);
   assert.match(text, /message you|let you know|we['’]?ll message|we will message/i);
   assert.doesNotMatch(text, /check with the cleaning team/i);
   assert.doesNotMatch(text, /if we can accommodate/i);
@@ -42,6 +43,9 @@ describe('Alexandra early check-in reply copy (Cozy West End Victorian productio
     assert.equal(agent._isEarlyCheckinAsk(ALEXANDRA_MSG), true);
     assert.equal(agent._hasWeakEarlyCheckinCopy(BAD_PRODUCTION_REPLY), true);
     assert.equal(agent._hasStrongEarlyCheckinPromise(BAD_PRODUCTION_REPLY), false);
+    const nearMiss =
+      "Good afternoon, Alexandra. Check-in is at 4pm and we can't guarantee early check-in, but as soon as cleaning finishes we'll message you right away.";
+    assert.equal(agent._hasStrongEarlyCheckinPromise(nearMiss), false);
   });
 
   it('rewrites weak "check with cleaning / if we can accommodate" draft (Alexandra miss)', () => {
@@ -73,7 +77,7 @@ describe('Alexandra early check-in reply copy (Cozy West End Victorian productio
       llmAdapter: { complete: async () => '{}' },
     });
     const good =
-      "Good evening, Olivia, we can't guarantee early check-in since the unit needs preparation time, but if cleaning finishes before 4pm we'll message you right away. Thanks for the heads-up on your early Sunday departure—we'll note that.";
+      "Good evening, Olivia. Check-in is at 4pm and we can't guarantee early check-in, but as soon as cleaning finishes getting the unit ready for you we'll message you right away. Thanks for the heads-up on your early Sunday departure—we'll note that.";
     const applied = agent._applyEarlyCheckinReplyPolicy(
       {
         typeOfMessageReceived: 'EARLY_CHECKIN',

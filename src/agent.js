@@ -1995,19 +1995,23 @@ export class GuestMessagingAgent {
     );
   }
 
-  /** Strong promise: message when cleaning finishes / unit ready (Olivia golden class). */
+  /**
+   * Strong promise: must include the golden substring "getting the unit ready"
+   * (Olivia / Sarah eval requiredPhrases). "cleaning finishes" alone is NOT enough —
+   * CI 35804570282 failed sarah-wifi-compliment-early-checkin when the LLM wrote
+   * "cleaning finishes … message you" without that exact phrase and policy treated
+   * it as strong.
+   */
   _hasStrongEarlyCheckinPromise(draft = '') {
     const d = String(draft || '');
     if (this._hasWeakEarlyCheckinCopy(d)) return false;
-    const readyOrCleaning =
-      /cleaning finishes|as soon as cleaning|getting the unit ready|unit (is )?ready|if the unit is ready|ready before/i.test(
-        d
-      );
+    // Exact rubric / golden phrase — do not accept looser "unit ready" paraphrases.
+    const hasCanonicalReady = /getting the unit ready/i.test(d);
     const willMessage =
       /message you|let you know|we['’]?ll message|we will message|message you right away/i.test(d);
     // Standard policy always states 4pm check-in when we have not already offered early.
     const has4pm = /4\s*(:00)?\s*pm/i.test(d);
-    return readyOrCleaning && willMessage && has4pm;
+    return hasCanonicalReady && willMessage && has4pm;
   }
 
   /**

@@ -71,7 +71,8 @@ const sarahCtx = {
 function assertClassicEarlyCheckin(text, label = 'reply') {
   const body = String(text || '');
   assert.ok(body && body.toLowerCase() !== 'none', `${label}: must have a sendable draft`);
-  assert.match(body, /cleaning finishes|getting the unit ready|unit ready/i, `${label}: early check-in ready promise`);
+  assert.match(body, /getting the unit ready/i, `${label}: must include exact phrase "getting the unit ready"`);
+  assert.match(body, /cleaning finishes/i, `${label}: cleaning finishes`);
   assert.match(body, /message you|let you know|we['’]?ll message|we will message/i, `${label}: will message`);
   assert.match(body, /4\s*(:00)?\s*pm/i, `${label}: states 4pm check-in`);
   assert.doesNotMatch(body, /check with the cleaning team/i, `${label}: no weak cleaning-team copy`);
@@ -285,4 +286,38 @@ describe('Sarah WiFi compliment + early check-in (Cozy West End Victorian produc
       assertClassicEarlyCheckin(sent[0].body, 'live Grok send payload');
     }
   );
+
+  it('near-miss "cleaning finishes … message you" without "getting the unit ready" is rewritten (CI flake)', () => {
+    const agent = new GuestMessagingAgent({
+      projectRoot: projectRootForTests,
+      llmAdapter: { complete: async () => '{}' },
+    });
+    const nearMiss =
+      "Good afternoon, Sara. Check-in is at 4pm and we can't guarantee early check-in, but as soon as cleaning finishes we'll message you right away.";
+    assert.equal(
+      agent._hasStrongEarlyCheckinPromise(nearMiss),
+      false,
+      'near-miss must NOT count as strong (missing getting the unit ready)'
+    );
+    let parsed = {
+      typeOfMessageReceived: ['THANK_YOU_MESSAGE', 'FYI_STATEMENT', 'EARLY_CHECKIN'],
+      proposedResponse: nearMiss,
+      shouldReply: true,
+      confidence: 0.95,
+    };
+    const early = agent._applyEarlyCheckinReplyPolicy(parsed, sarahCtx, SARAH_MSG);
+    assert.equal(early.applied, true, 'early policy must rewrite near-miss');
+    parsed = { ...parsed, ...early, shouldReply: true };
+    const multi = agent._applyWifiEarlyCheckinMultiIntentPolicy(parsed, sarahCtx, SARAH_MSG);
+    if (multi.applied) {
+      parsed = {
+        ...parsed,
+        typeOfMessageReceived: multi.typeOfMessageReceived,
+        proposedResponse: multi.proposedResponse,
+        shouldReply: true,
+      };
+    }
+    assertClassicEarlyCheckin(parsed.proposedResponse, 'near-miss rewritten');
+  });
+
 });
