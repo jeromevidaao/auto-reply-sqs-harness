@@ -82,6 +82,10 @@ import {
   draftContainsForbiddenPineWifi,
   CANONICAL_PINE_WIFI,
 } from './useCases/checkinTemplates/index.js';
+import {
+  formatGuestFriendlyMonthDay,
+  resolveCheckInInstructionsTiming,
+} from './utils/checkInInstructionsDates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..', '..');
@@ -596,6 +600,18 @@ export class GuestMessagingAgent {
       parsed.proposedResponse = coffeePolicy.proposedResponse;
       shouldReply = true;
       confidence = 1.0;
+    }
+
+    const checkInInstructionsPolicy = this._applyCheckInInstructionsAskPolicy(parsed, context, guestMessage);
+    if (checkInInstructionsPolicy.applied) {
+      console.log('[Agent] → Check-in instructions ask policy applied (dated 3-day deferral / channel confirm)');
+      parsed.typeOfMessageReceived = checkInInstructionsPolicy.typeOfMessageReceived || 'CHECK_IN_INSTRUCTIONS';
+      parsed.proposedResponse = checkInInstructionsPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
+      parsed.escalated = false;
     }
 
     const wifiPolicy = this._applyWifiPolicy(parsed, context, guestMessage);
@@ -1247,6 +1263,7 @@ export class GuestMessagingAgent {
       'STAY_EXTENSION',
       'LAUNDRY_QUESTION',
       'COFFEE_MAKER_QUESTION',
+      'CHECK_IN_INSTRUCTIONS',
       'DIRECTIONS',
       'WIFI',
       'WIFI_PASSWORD',
@@ -4763,6 +4780,171 @@ export class GuestMessagingAgent {
    * Tracy production miss hedged "I'll check on the coffee maker and get back to you shortly."
    * Answer immediately with Keurig; guests may bring pods/filters. Never invent supplied pod brands.
    */
+
+  /**
+   * Guest asks for entry / check-in instructions ahead of arrival (Cynthia Downtown Studio).
+   * Not a live lockout — they want the how-to guide that goes out 3 days before check-in.
+   */
+  _isCheckInInstructionsAsk(guestMessage = '') {
+    const msg = String(guestMessage || '');
+    if (!msg.trim()) return false;
+    if (
+      /\b(can'?t get in|cannot get in|locked out|code (?:is )?(?:not|doesn'?t) work|door (?:won'?t|will not) open)\b/i.test(
+        msg
+      )
+    ) {
+      return false;
+    }
+    return (
+      /\b((?:check[-\s]?in|entry|access|arrival)\s+instructions?|instructions?\s+on\s+how\s+to\s+get\s+in|how\s+to\s+get\s+into\s+(?:the\s+)?(?:unit|apartment|place|studio)|how\s+(?:do|does|to)\s+(?:we|i|you)\s+get\s+in|get\s+into\s+the\s+unit|door\s+code\s+instructions?)\b/i.test(
+        msg
+      ) ||
+      (/\binstructions?\b/i.test(msg) &&
+        /\b(get\s+in|get\s+into|enter|entry|check[-\s]?in|unit|door)\b/i.test(msg))
+    );
+  }
+
+  /**
+   * Follow-up: will instructions arrive on this Airbnb text / same thread?
+   */
+  _isCheckInInstructionsChannelAsk(guestMessage = '') {
+    const msg = String(guestMessage || '');
+    if (!msg.trim()) return false;
+    return (
+      /\b(on this (?:text|thread|conversation|message|chat)|this same (?:text|thread|conversation|message)|same (?:text|thread|conversation)|send it (?:here|on this)|you(?:'ll| will) send it on this)\b/i.test(
+        msg
+      ) ||
+      (/\b(this text|this thread|this conversation)\b/i.test(msg) &&
+        /\b(send|sent|come|coming|arrive|message)\b/i.test(msg))
+    );
+  }
+
+  _hostAlreadyDeferredCheckInInstructions(context = {}) {
+    const history = Array.isArray(context.conversationHistory)
+      ? context.conversationHistory
+      : [];
+    return history.some((m) => {
+      const role = String(m?.sender_type || m?.role || m?.sender?.type || '').toLowerCase();
+      if (!(role === 'host' || role === 'owner' || role === 'host_message')) return false;
+      const body = String(m?.body || m?.message || m?.text || m?.content || '');
+      return (
+        /(check[-\s]?in|entry)\s+instructions?|instructions?\s+before you arrive|send (?:the )?(?:entry|check[-\s]?in) instructions?/i.test(
+          body
+        ) || /on september \d+/i.test(body)
+      );
+    });
+  }
+
+  _buildCheckInInstructionsDeferralReply(context = {}, { channelConfirm = false } = {}) {
+    const timing = resolveCheckInInstructionsTiming(context);
+    const rawName = context.guestDisplayName || context.guestName || '';
+    const name = String(rawName).split(/[\s(·]/)[0] || '';
+    const nameBit = name ? `${name} — ` : '';
+
+    if (timing.shouldDefer && timing.sendLabel) {
+      if (channelConfirm) {
+        return (
+          `Yes — I'll send the check-in instructions in this same conversation on ${timing.sendLabel} ` +
+          `(3 days before your arrival).`
+        );
+      }
+      return (
+        `${nameBit}you're welcome. You're all set for check-in, and I'll send the check-in instructions ` +
+        `on ${timing.sendLabel} (3 days before your arrival) so you have clear steps for getting into the unit.`
+      );
+    }
+
+    if (channelConfirm) {
+      return (
+        `Yes — I'll send the check-in instructions in this same conversation shortly ` +
+        `so you have clear steps for getting into the unit.`
+      );
+    }
+    return (
+      `${nameBit}happy to help. I'll send the check-in instructions in this conversation shortly ` +
+      `so you have clear steps for getting into the unit.`
+    );
+  }
+
+  _draftHasDatedCheckInInstructionsDeferral(draft = '', context = {}) {
+    const timing = resolveCheckInInstructionsTiming(context);
+    const text = String(draft || '');
+    if (timing.shouldDefer && timing.sendLabel) {
+      const hasDate = text.toLowerCase().includes(String(timing.sendLabel).toLowerCase());
+      const hasThreeDays = /\b3 days\b/i.test(text);
+      return hasDate && hasThreeDays;
+    }
+    const namesPastSend =
+      timing.sendLabel && text.toLowerCase().includes(String(timing.sendLabel).toLowerCase());
+    const immediate =
+      /\b(shortly|right away|in this (?:same )?(?:conversation|thread)|send(?:ing)? (?:them |it )?now)\b/i.test(
+        text
+      );
+    return immediate && !namesPastSend;
+  }
+
+  _draftHasChannelConfirm(draft = '') {
+    return /\b(same (?:conversation|thread|text)|this (?:same )?(?:conversation|thread|text))\b/i.test(
+      String(draft || '')
+    );
+  }
+
+  /**
+   * Cynthia incident: entry/check-in instructions ask while still >3 days out must name
+   * the concrete send day (check-in − 3). Channel follow-ups must confirm this conversation.
+   */
+  _applyCheckInInstructionsAskPolicy(parsed = {}, context = {}, guestMessage = '') {
+    const channelAsk = this._isCheckInInstructionsChannelAsk(guestMessage);
+    const entryAsk = this._isCheckInInstructionsAsk(guestMessage);
+    const channelFollowUp =
+      channelAsk && (entryAsk || this._hostAlreadyDeferredCheckInInstructions(context));
+
+    if (!entryAsk && !channelFollowUp) {
+      return { applied: false };
+    }
+
+    const timing = resolveCheckInInstructionsTiming(context);
+    if (!timing.checkInYmd || timing.daysUntilCheckIn == null) {
+      return { applied: false };
+    }
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const needsChannel = channelFollowUp;
+    const datedOk = this._draftHasDatedCheckInInstructionsDeferral(draft, context);
+    const channelOk = !needsChannel || this._draftHasChannelConfirm(draft);
+
+    const typeOfMessageReceived = this._mergeCategories(
+      parsed.typeOfMessageReceived,
+      'CHECK_IN_INSTRUCTIONS',
+      this._hasThankYouIntent(guestMessage) ? 'THANK_YOU_MESSAGE' : null
+    );
+
+    const catsOk = this._categoriesInclude(typeOfMessageReceived, 'CHECK_IN_INSTRUCTIONS');
+
+    if (datedOk && channelOk && catsOk && draft.length >= 20) {
+      if (!this._categoriesInclude(parsed.typeOfMessageReceived, 'CHECK_IN_INSTRUCTIONS')) {
+        return {
+          applied: true,
+          typeOfMessageReceived,
+          proposedResponse: draft,
+        };
+      }
+      return { applied: false };
+    }
+
+    const proposedResponse = this._buildCheckInInstructionsDeferralReply(context, {
+      channelConfirm: needsChannel,
+    });
+
+    return {
+      applied: true,
+      typeOfMessageReceived,
+      proposedResponse,
+      shouldReply: true,
+      confidence: 1.0,
+    };
+  }
+
   _applyCoffeeMakerPolicy(parsed, context = {}, guestMessage = '') {
     if (!this._isCoffeeMakerQuestion(guestMessage)) {
       return { applied: false };
@@ -5901,6 +6083,14 @@ export class GuestMessagingAgent {
       lines.push('- CRITICAL MULTI-CATEGORIZATION (thanks + laundry — Henry incident): Guest thanked you / expressed excitement AND asked about laundry. typeOfMessageReceived MUST be the array ["THANK_YOU_MESSAGE", "LAUNDRY_QUESTION"] (not THANK_YOU_MESSAGE alone). proposedResponse MUST combine a short "You\'re welcome, [Name]!" (or "You\'re welcome!") with the full laundry facts in one message: no laundry on site; laundromat next door Soap Bubble; Address: 68 Pine St, Portland, ME 04102. MUST NOT say "I\'ll check on laundry" or "get back shortly". Applies to all three units.');
     } else if (this._isLaundryFacilitiesQuestion(message)) {
       lines.push('- CRITICAL LAUNDRY_QUESTION (all units): Guest asked about laundry facilities. Answer immediately: no laundry on site; Soap Bubble next door; 68 Pine St, Portland, ME 04102. shouldReply true. Never defer. EXCEPTION: if conversation history shows the host already granted a one-time laundry/washer/dryer exception, honor that grant instead — never contradict with Soap Bubble.');
+    }
+    if (this._isCheckInInstructionsAsk(message) || this._isCheckInInstructionsChannelAsk(message)) {
+      const timing = resolveCheckInInstructionsTiming(context);
+      if (timing.shouldDefer && timing.sendLabel) {
+        lines.push(`- CRITICAL CHECK_IN_INSTRUCTIONS (Cynthia incident): Guest asked for entry/check-in instructions (or where they will be sent) and check-in is >3 days out. proposedResponse MUST include "on ${timing.sendLabel}" and "3 days". Do NOT only say vague "before you arrive". If they ask whether it comes on this Airbnb text / thread, also say "this same conversation". Category CHECK_IN_INSTRUCTIONS. shouldReply true.`);
+      } else if (timing.daysUntilCheckIn != null && timing.daysUntilCheckIn <= 3) {
+        lines.push('- CRITICAL CHECK_IN_INSTRUCTIONS (≤3 days out): Guest asked for entry/check-in instructions. Do NOT promise a past send date. Say you will send them in this conversation shortly (or send now). Category CHECK_IN_INSTRUCTIONS.');
+      }
     }
     if (this._isCoffeeMakerQuestion(message) && this._hasThankYouIntent(message)) {
       lines.push('- CRITICAL MULTI-CATEGORIZATION (thanks + coffee maker — Tracy incident): Guest thanked you AND asked about the coffee maker. typeOfMessageReceived MUST be ["THANK_YOU_MESSAGE", "COFFEE_MAKER_QUESTION"]. Reply MUST combine "You\'re welcome" with the Keurig fact: every Pine apt (1B / Apt 2 / Apt 3 / Downtown Studio) has a Keurig; guests may bring their own pods or filters. MUST NOT say "I\'ll check on the coffee maker" or "get back to you shortly".');
@@ -7360,6 +7550,17 @@ export class GuestMessagingAgent {
       finalResult.proposedResponse = coffeePolicyFinal.proposedResponse;
       finalResult.shouldReply = true;
       finalResult.confidence = 1.0;
+    }
+
+    
+    const checkInInstructionsPolicyFinal = this._applyCheckInInstructionsAskPolicy(finalResult, enrichedContext, guestMessage);
+    if (checkInInstructionsPolicyFinal.applied) {
+      console.log('[Agent] → Check-in instructions ask policy applied (final pass)');
+      finalResult.typeOfMessageReceived = checkInInstructionsPolicyFinal.typeOfMessageReceived || 'CHECK_IN_INSTRUCTIONS';
+      finalResult.proposedResponse = checkInInstructionsPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
     }
 
     const wifiPolicyFinal = this._applyWifiPolicy(finalResult, enrichedContext, guestMessage);

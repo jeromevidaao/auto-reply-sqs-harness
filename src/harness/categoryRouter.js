@@ -85,7 +85,16 @@ const RULES = [
       ),
   },
   {
-    file: 'door-code-issues.md',
+    file: 'check-in-instructions.md',
+    priority: 83,
+    test: (msg) =>
+      /\b((?:check[-\s]?in|entry|access|arrival)\s+instructions?|how\s+to\s+get\s+into\s+(?:the\s+)?(?:unit|apartment)|get\s+into\s+the\s+unit|on this (?:text|thread|conversation))\b/i.test(
+        msg
+      ) ||
+      (/\binstructions?\b/i.test(msg) && /\b(get\s+in|entry|check[-\s]?in|unit)\b/i.test(msg)),
+  },
+  {
+        file: 'door-code-issues.md',
     priority: 82,
     also: ['not-checkin-day-access.md', 'post-stay-access.md'],
     test: (msg) =>

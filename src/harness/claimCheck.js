@@ -12,6 +12,10 @@ import { isPetOverMaxAsk, isUnlikelyEventIdiom } from '../tools/pets/petOverMax.
 import { isPetFurnitureMitigation } from '../tools/pets/petFurnitureMitigation.js';
 import { hasPriorConversation } from '../utils/threadHistory.js';
 import {
+  resolveCheckInInstructionsTiming,
+} from '../utils/checkInInstructionsDates.js';
+
+import {
   apt23ExtraLinensDraftNeedsRewrite,
   buildCanonicalExtraLinensTowelsReply,
   draftHasPrematureBringOver,
@@ -299,6 +303,50 @@ export function checkDraftClaims({
     );
   }
 
+
+  // Cynthia miss: entry/check-in instructions ask while >3 days out must name send day (check-in − 3).
+  const ENTRY_INSTRUCTIONS_ASK_RE =
+    /\b((?:check[-\s]?in|entry|access|arrival)\s+instructions?|instructions?\s+on\s+how\s+to\s+get\s+in|how\s+to\s+get\s+into\s+(?:the\s+)?(?:unit|apartment|place|studio)|how\s+(?:do|does|to)\s+(?:we|i|you)\s+get\s+in|get\s+into\s+the\s+unit)\b/i;
+  const ENTRY_CHANNEL_ASK_RE =
+    /\b(on this (?:text|thread|conversation|message)|this same (?:text|thread|conversation)|same (?:text|thread|conversation)|send it (?:here|on this))\b/i;
+  const entryAsk =
+    ENTRY_INSTRUCTIONS_ASK_RE.test(msg) ||
+    (/\binstructions?\b/i.test(msg) && /\b(get\s+in|get\s+into|enter|entry|check[-\s]?in|unit|door)\b/i.test(msg));
+  const channelAsk = ENTRY_CHANNEL_ASK_RE.test(msg);
+  if (entryAsk || channelAsk) {
+    const timing = resolveCheckInInstructionsTiming(context);
+    if (timing.shouldDefer && timing.sendLabel) {
+      const hasDate = text.toLowerCase().includes(String(timing.sendLabel).toLowerCase());
+      const hasThreeDays = /\b3 days\b/i.test(text);
+      const hasChannel =
+        !channelAsk ||
+        /\b(same (?:conversation|thread|text)|this (?:same )?(?:conversation|thread|text))\b/i.test(text);
+      if (!hasDate || !hasThreeDays || !hasChannel) {
+        addIssue(
+          issues,
+          'check_in_instructions_deferral_missing_date',
+          `Guest asked for entry/check-in instructions (or where they will be sent) more than 3 days out, but draft omits the concrete send day (${timing.sendLabel}) and/or "3 days"${channelAsk ? ' and/or same-conversation confirm' : ''}.`,
+          { deterministicFix: 'force_check_in_instructions_deferral_missing_date' }
+        );
+      }
+    } else if (timing.daysUntilCheckIn != null && timing.daysUntilCheckIn <= 3) {
+      const namesPast =
+        timing.sendLabel && text.toLowerCase().includes(String(timing.sendLabel).toLowerCase());
+      const immediate =
+        /\b(shortly|right away|in this (?:same )?(?:conversation|thread)|send(?:ing)? (?:them |it )?now)\b/i.test(
+          text
+        );
+      if (namesPast || !immediate) {
+        addIssue(
+          issues,
+          'check_in_instructions_deferral_missing_date',
+          'Guest asked for entry/check-in instructions within 3 days of check-in; draft must use immediate/shortly language and must not promise a past send day.',
+          { deterministicFix: 'force_check_in_instructions_deferral_missing_date' }
+        );
+      }
+    }
+  }
+
   // Sara miss: multi-ask late checkout + luggage — draft must refuse late checkout AND cover luggage.
   const LATE_CHECKOUT_ASK_RE =
     /\b(late\s*check[\s-]*out|later\s+check[\s-]*out|check[\s-]*out\s+later|later\s+checkout|checkout\s+later)\b/i;
@@ -408,6 +456,36 @@ export function checkDraftClaims({
     } else if (issue.deterministicFix === 'force_early_checkin_classic') {
       revised = earlyCheckinClassicFromContext(context, msg);
       appliedFix = true;
+    } else if (issue.deterministicFix === 'force_check_in_instructions_deferral_missing_date') {
+      const timing = resolveCheckInInstructionsTiming(context);
+      const rawName = context.guestDisplayName || context.guestName || '';
+      const name = String(rawName).split(/[\s(]/)[0] || '';
+      const nameBit = name ? `${name} — ` : '';
+      const channelAsk =
+        /\b(on this (?:text|thread|conversation|message)|this same (?:text|thread|conversation)|same (?:text|thread|conversation)|send it (?:here|on this))\b/i.test(
+          msg
+        );
+      if (timing.shouldDefer && timing.sendLabel) {
+        if (channelAsk) {
+          revised =
+            `Yes — I'll send the check-in instructions in this same conversation on ${timing.sendLabel} ` +
+            `(3 days before your arrival).`;
+        } else {
+          revised =
+            `${nameBit}you're welcome. You're all set for check-in, and I'll send the check-in instructions ` +
+            `on ${timing.sendLabel} (3 days before your arrival) so you have clear steps for getting into the unit.`;
+        }
+      } else if (channelAsk) {
+        revised =
+          `Yes — I'll send the check-in instructions in this same conversation shortly ` +
+          `so you have clear steps for getting into the unit.`;
+      } else {
+        revised =
+          `${nameBit}happy to help. I'll send the check-in instructions in this conversation shortly ` +
+          `so you have clear steps for getting into the unit.`;
+      }
+      appliedFix = true;
+      appliedFixCodes.add(issue.deterministicFix);
     } else if (issue.deterministicFix === 'force_keurig_coffee') {
       const rawName = context.guestDisplayName || context.guestName || '';
       const name = String(rawName).split(/[\s(]/)[0] || '';

@@ -1,0 +1,59 @@
+{
+  "id": "cynthia-entry-instructions-where-channel",
+  "description": "Cynthia follow-up after entry-instructions deferral: asks whether instructions will come on this same Airbnb text. Must confirm yes \u2014 in this same conversation \u2014 and name September 30 (3 days before Oct 3).",
+  "productionMiss": true,
+  "guestMessage": "OK, you'll send it on this text just as you did this one correct? Perfect thank you Cynthia.",
+  "guestName": "Cynthia",
+  "checkIn": "2026-10-03T16:00:00-04:00",
+  "checkOut": "2026-10-04T10:00:00-04:00",
+  "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+  "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+  "context": {
+    "asOfDate": "2026-09-23",
+    "asOfInstant": "2026-09-23T18:43:00-04:00",
+    "nowForGreeting": "2026-09-23T18:43:00-04:00",
+    "guestName": "Cynthia",
+    "guestDisplayName": "Cynthia",
+    "checkIn": "2026-10-03T16:00:00-04:00",
+    "checkOut": "2026-10-04T10:00:00-04:00",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+    "reservationId": "bc82537b-5188-4dc9-9fc5-e4aa1e9c8214",
+    "conversation_id": "956c771e-00b0-46c5-b207-3c45f9aeef7a",
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "duplicateRisk": false,
+      "earlyUnitReadyOffered": false,
+      "historyFetchFailed": false,
+      "historySource": "scenario"
+    },
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Jerome, I just need to get instructions on how to get into the unit when we arrive on Oct. 3rd. Thank you, Cynthia"
+      },
+      {
+        "sender_type": "host",
+        "body": "Cynthia \u2014 you're welcome. You're all set for October 3rd, and I'll send the entry instructions before you arrive so you have clear steps for getting into the unit. Message me if anything else comes up before then."
+      }
+    ],
+    "suggestedResponseSnippet": "Yes \u2014 I'll send the check-in instructions in this same conversation on September 30 (3 days before your Oct 3 arrival)."
+  },
+  "rubric": {
+    "expectedCategory": [
+      "CHECK_IN_INSTRUCTIONS",
+      "THANK_YOU_MESSAGE"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.9,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "September 30",
+      "same conversation"
+    ],
+    "forbiddenPhrases": []
+  },
+  "notes": "Channel follow-up after vague deferral. Must say this same conversation/thread AND September 30. Jerome authorized live send with that shape.",
+  "unitTestEnforced": true
+}

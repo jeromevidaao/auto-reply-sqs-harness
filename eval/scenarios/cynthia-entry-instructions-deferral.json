@@ -1,0 +1,69 @@
+{
+  "id": "cynthia-entry-instructions-deferral",
+  "description": "Cynthia (Downtown Studio / 1B, Oct 3\u20134 2026) asks how to get into the unit ~10 days before check-in. Production auto-replied 'I'll send the entry instructions before you arrive' with no concrete date. Must defer with the 3-day send day (September 30) and say '3 days'.",
+  "productionMiss": true,
+  "guestMessage": "Jerome, I just need to get instructions on how to get into the unit when we arrive on Oct. 3rd. Thank you, Cynthia",
+  "guestName": "Cynthia",
+  "checkIn": "2026-10-03T16:00:00-04:00",
+  "checkOut": "2026-10-04T10:00:00-04:00",
+  "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+  "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+  "context": {
+    "asOfDate": "2026-09-23",
+    "asOfInstant": "2026-09-23T18:41:00-04:00",
+    "nowForGreeting": "2026-09-23T18:41:00-04:00",
+    "guestName": "Cynthia",
+    "guestDisplayName": "Cynthia",
+    "checkIn": "2026-10-03T16:00:00-04:00",
+    "checkOut": "2026-10-04T10:00:00-04:00",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+    "reservationId": "bc82537b-5188-4dc9-9fc5-e4aa1e9c8214",
+    "conversation_id": "956c771e-00b0-46c5-b207-3c45f9aeef7a",
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "duplicateRisk": false,
+      "earlyUnitReadyOffered": false,
+      "historyFetchFailed": false,
+      "historySource": "scenario"
+    },
+    "conversationHistory": [
+      {
+        "sender_type": "guest",
+        "body": "Jerome, Just making sure we are all set for Oct3rd-4th!\n9092611899"
+      },
+      {
+        "sender_type": "host",
+        "body": "Good afternoon Cynthia, yes you're all set for October 3\u20134! Let me know if you need anything else."
+      },
+      {
+        "sender_type": "guest",
+        "body": "Excellent we will be there"
+      },
+      {
+        "sender_type": "host",
+        "body": "You're welcome, Cynthia!"
+      }
+    ],
+    "suggestedResponseSnippet": "Cynthia \u2014 you're welcome. You're all set for October 3rd. I'll send the check-in instructions on September 30 (3 days before your arrival) so you have clear steps for getting into the unit."
+  },
+  "rubric": {
+    "expectedCategory": [
+      "CHECK_IN_INSTRUCTIONS",
+      "THANK_YOU_MESSAGE"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.9,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "September 30",
+      "3 days"
+    ],
+    "forbiddenPhrases": [
+      "before you arrive"
+    ]
+  },
+  "notes": "Cynthia \u00b7 Downtown Studio \u00b7 Oct 3 check-in \u00b7 asOf Sep 23 \u2192 send day Sep 30. Deterministic _applyCheckInInstructionsAskPolicy. Live where-follow-up already sent; do not reprocess original ask.",
+  "unitTestEnforced": true
+}

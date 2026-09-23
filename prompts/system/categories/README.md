@@ -44,6 +44,7 @@ Each file corresponds to one or more `typeOfMessageReceived` categories used by 
 - `pet-policy.md`
 - `pricing.md`
 - `review.md`
+- `check-in-instructions.md` (ahead-of-arrival entry/check-in instructions deferral with computed send date — Cynthia)
 - `self-checkin.md`
 - `street-safety-noise.md`
 - `studio-futon.md`

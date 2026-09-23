@@ -1,0 +1,38 @@
+{
+  "id": "cynthia-entry-instructions-within-3-days",
+  "description": "Same entry-instructions ask when check-in is \u22643 days away (asOf Oct 1, check-in Oct 3). Must NOT promise September 30 (past/send-day window). Use immediate / shortly language in this conversation.",
+  "guestMessage": "Jerome, I just need to get instructions on how to get into the unit when we arrive on Oct. 3rd. Thank you, Cynthia",
+  "guestName": "Cynthia",
+  "checkIn": "2026-10-03T16:00:00-04:00",
+  "checkOut": "2026-10-04T10:00:00-04:00",
+  "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+  "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+  "context": {
+    "asOfDate": "2026-10-01",
+    "asOfInstant": "2026-10-01T10:00:00-04:00",
+    "nowForGreeting": "2026-10-01T10:00:00-04:00",
+    "guestName": "Cynthia",
+    "guestDisplayName": "Cynthia",
+    "checkIn": "2026-10-03T16:00:00-04:00",
+    "checkOut": "2026-10-04T10:00:00-04:00",
+    "listingId": "c899481f-2e5b-402d-80c4-3167fd824d96",
+    "propertyName": "Downtown Studio, Walk Everywhere, Parking",
+    "conversationHistory": [],
+    "suggestedResponseSnippet": "Cynthia \u2014 happy to help. I'll send the check-in instructions in this conversation shortly so you have clear steps for getting into the unit."
+  },
+  "rubric": {
+    "expectedCategory": "CHECK_IN_INSTRUCTIONS",
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.9,
+    "requiredPhrases": [
+      "shortly"
+    ],
+    "forbiddenPhrases": [
+      "September 30",
+      "before you arrive"
+    ]
+  },
+  "notes": "Edge: daysUntilCheckIn=2 \u22643 \u2192 immediate path, never promise the computed past send day.",
+  "unitTestEnforced": true
+}
