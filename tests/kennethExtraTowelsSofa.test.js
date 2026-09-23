@@ -46,11 +46,11 @@ function kennethCtx(extra = {}) {
 }
 
 function assertSofaCanonical(text) {
-  assert.match(text, /sofa/i);
-  assert.match(text, /living[- ]?room|under the (?:living[- ]?room )?sofa/i);
+  assert.match(text, /chaise|sofa/i);
+  assert.match(text, /living[- ]?room|chaise|under the (?:living[- ]?room )?sofa/i);
   assert.match(text, /lift/i);
-  assert.match(text, /storage|lift/i);
-  assert.doesNotMatch(text, /ikea/i);
+  assert.match(text, /chaise|storage|lid stays open/i);
+  assert.doesNotMatch(text, /ikea|friheten/i);
   assert.ok(!/linen closet/i.test(text), 'must not mention linen closet');
   assert.ok(!/bathroom sink/i.test(text), 'must not mention bathroom sink');
   assert.ok(!/\bcabinets?\b/i.test(text), 'must not mention cabinets as storage');

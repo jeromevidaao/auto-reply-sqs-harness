@@ -32,19 +32,19 @@ When the guest is **already in the unit** and asks where to find extra towels, s
 
 ### Apt 2 & Apt 3 — REQUIRED location (HARD)
 
-- Extras (bath towels, wash cloths, sheets, blankets, pillows) are stored **under the living-room sofa** (storage sofa/bed).
-- **How to open**: lift the **long seat cushion / top section up** to open the storage compartment underneath. Towels and linens are inside.
+- Extras (bath towels, wash cloths, sheets, blankets, pillows) are stored **under the chaise** of the living-room sofa (the long lounge section). The chaise lid lifts and **stays open**.
+- **How to open**: lift the **chaise seat up** — the lid stays open — towels and linens are inside.
 - **NEVER** say extras are in a **linen closet**, **under the bathroom sink**, **cabinets**, or **drawers**. Those locations are wrong for Apt 2 and Apt 3 (Kenneth 2026-09-22 incident).
 - **NEVER** as the first reply promise **"I'll bring towels right over"** / host delivery when sofa storage exists. Tell them where to look first. Only offer to help / bring extras **if they still cannot find them after looking under the sofa** (follow-up: "If you cannot find them, feel free to let us know.").
 
 **Required reply content**:
-- **MUST** tell them extras are under the living-room sofa and how to lift the seat/top open. Do **not** name the furniture brand.
+- **MUST** tell them extras are under the chaise (long lounge section) and to lift the chaise seat (lid stays open). Do **not** name the furniture brand.
 - **MUST** end with an offer to help if they cannot find them — e.g. "If you cannot find them, feel free to let us know."
 
 **Example tones** (facts matter more than exact words):
-"Kenneth, extra bath towels and linens are stored under the living-room sofa. Lift the long seat cushion or top section up to open the storage underneath — the towels and linens are inside. If you cannot find them, feel free to let us know."
+"Kenneth, extra bath towels and linens are stored under the chaise of the living-room sofa (the long lounge section). Lift the chaise seat up — the lid stays open — and the towels and linens are inside. If you cannot find them, feel free to let us know."
 
-"Good evening, Sean, yes there are extra clean towels under the living-room sofa. Lift the long seat cushion or top section up to open the storage underneath — towels and linens are inside. If you cannot find them, feel free to let us know."
+"Good evening, Sean, yes there are extra clean towels under the chaise of the living-room sofa (the long lounge section). Lift the chaise seat up — the lid stays open — and towels and linens are inside. If you cannot find them, feel free to let us know."
 
 **Recognition cues for in-stay EXTRA_LINENS_TOWELS**:
 - "we are in the apartment", "we're here", "checked in", "can't find", "where are the sheets", "more clean towels", "more bath towels", "only X towels for Y people", "in the unit"

@@ -1,5 +1,5 @@
 /**
- * Apt 2 / Apt 3 extra towels & linens — under the living-room storage sofa.
+ * Apt 2 / Apt 3 extra towels & linens — under the living-room sofa chaise (FRIHETEN-style; never name brand to guests).
  * Kenneth 2026-09-22: model invented linen closet / bathroom sink and offered
  * host delivery. Shared by agent policy + claimCheck.
  */
@@ -12,7 +12,7 @@ export const EXTRA_LINENS_TOWELS_FOLLOW_UP =
 
 /** Correct Apt 2/3 storage guidance (sofa lift-up). */
 export const CORRECT_SOFA_LOCATION_RE =
-  /lift up|lift the|under the (?:living[- ]?room )?sofa|under the sofa|storage compartment|storage sofa/i;
+  /lift up|lift the|chaise|under the (?:living[- ]?room )?sofa|under the sofa|storage compartment|storage sofa|lid stays open/i;
 
 /** Invented wrong places — never tell Apt 2/3 guests extras are here. */
 export const WRONG_EXTRA_LINENS_LOCATION_RE =
@@ -91,8 +91,8 @@ export function buildCanonicalExtraLinensTowelsReply(context = {}) {
   const rawName = context.guestDisplayName || context.guestName || '';
   const name = String(rawName).split(/[\s(]/)[0] || '';
   const body =
-    "extra bath towels and linens are stored under the living-room sofa. " +
-    'Lift the long seat cushion or top section up to open the storage underneath — the towels and linens are inside. ' +
+    "extra bath towels and linens are stored under the chaise of the living-room sofa (the long lounge section). " +
+    "Lift the chaise seat up — the lid stays open — and the towels and linens are inside. " +
     EXTRA_LINENS_TOWELS_FOLLOW_UP;
   if (name) {
     return `${name}, ${body}`;

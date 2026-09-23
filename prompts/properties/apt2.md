@@ -33,8 +33,8 @@ This is **not** the same as Apt 3's unit lockbox for normal check-in. Normal Apt
 
 **Sofa bed / extra towels & linens** (HARD — Kenneth 2026-09-22):
 - Queen sofa bed in the living room sleeps 2.
-- Sheets, blankets, pillows, and **extra bath towels** are stored **under the living-room sofa** (storage sofa/bed — lift the long seat cushion or top section up to open).
-- **How to open**: lift the **long seat cushion or top section up** to open the storage compartment underneath; towels and linens are inside.
+- Sheets, blankets, pillows, and **extra bath towels** are stored **under the chaise** of the living-room sofa (the long lounge section). Lift the chaise seat up — the lid stays open. Do **not** name the furniture brand.
+- **How to open**: lift the **chaise seat up** — the lid stays open — towels and linens are inside.
 - **NEVER** tell guests extras are in a linen closet, under the bathroom sink, in cabinets, or in drawers.
 - **NEVER** first-reply with "I'll bring towels right over" when sofa storage exists — tell them where to look; offer help only if they still cannot find them.
 

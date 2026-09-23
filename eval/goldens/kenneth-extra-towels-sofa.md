@@ -4,19 +4,19 @@
 
 **Approved ideal behavior**:
 - Recognize as **EXTRA_LINENS_TOWELS** (in-stay find extras).
-- Tell them extras are under the **living-room sofa** (storage sofa/bed). Do **not** name a furniture brand.
-- Instruct clearly: **lift the long seat cushion or top section up** to open the storage underneath — towels and linens are inside.
+- Tell them extras are under the **chaise** of the living-room sofa (long lounge section). Do **not** name a furniture brand.
+- Instruct clearly: **lift the chaise seat up** — the lid stays open — towels and linens are inside.
 - Offer help only if they cannot find them ("If you cannot find them, feel free to let us know.").
 - **Never** say linen closet, bathroom sink, cabinets, or drawers.
 - **Never** first-reply with "I'll bring towels right over" when sofa storage exists.
 
 **Rubric requirements**:
 - Must reply.
-- Must mention sofa, lift, and under.
+- Must mention chaise (or living-room sofa), lift, and under/storage.
 - Must not mention linen closet, bathroom sink, cabinets, or bring-right-over delivery.
 
 **Example of good output**:
-"Kenneth, extra bath towels and linens are stored under the living-room sofa. Lift the long seat cushion or top section up to open the storage underneath — the towels and linens are inside. If you cannot find them, feel free to let us know."
+"Kenneth, extra bath towels and linens are stored under the chaise of the living-room sofa (the long lounge section). Lift the chaise seat up — the lid stays open — and the towels and linens are inside. If you cannot find them, feel free to let us know."
 
 **Why this golden exists**:
 - Locks Apt 2/3 sofa storage facts after the Kenneth closet/sink hallucination.
