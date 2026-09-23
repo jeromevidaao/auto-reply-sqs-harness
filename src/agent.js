@@ -3963,7 +3963,7 @@ export class GuestMessagingAgent {
   /**
    * In-stay extra towels/linens (Apt 2 / Apt 3): rewrite wrong locations (linen closet /
    * bathroom sink / cabinets) and premature "I'll bring towels right over" to the
-   * Ikea sofa lift-up instructions. Append follow-up when sofa guidance is present
+   * Sofa lift-up instructions. Append follow-up when sofa guidance is present
    * but help offer is missing (Sean). Kenneth 2026-09-22.
    */
   _applyExtraLinensTowelsPolicy(parsed, context = {}, guestMessage = '') {
@@ -8211,7 +8211,7 @@ export class GuestMessagingAgent {
             revisedResponse: fixed,
             notes:
               (llmJudgeResult.notes ? llmJudgeResult.notes + ' ' : '') +
-              'Deterministic guard: Apt 2/3 extras are under the living-room Ikea sofa (lift seat) — never linen closet / bathroom sink / host bring-over first.',
+              'Deterministic guard: Apt 2/3 extras are under the living-room sofa (lift seat) — never linen closet / bathroom sink / host bring-over first.',
             issues: [
               ...(Array.isArray(llmJudgeResult.issues) ? llmJudgeResult.issues : []),
               'Apt 2/3 extra linens/towels draft used wrong location (closet/sink/cabinets) or premature bring-over (Kenneth 2026-09-22).',

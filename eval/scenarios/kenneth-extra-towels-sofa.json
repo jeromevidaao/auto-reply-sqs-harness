@@ -1,6 +1,6 @@
 {
   "id": "kenneth-extra-towels-sofa",
-  "description": "In-stay Apt 2 guest (Kenneth, party of 5) asks for more bath towels after finding only 4 sets. Must direct them to living-room Ikea sofa lift-up storage \u2014 never linen closet / bathroom sink / cabinets, and never first-reply with host bring-over. Kenneth 2026-09-22 production miss.",
+  "description": "In-stay Apt 2 guest (Kenneth, party of 5) asks for more bath towels after finding only 4 sets. Must direct them to living-room sofa lift-up storage \u2014 never linen closet / bathroom sink / cabinets, and never first-reply with host bring-over. Kenneth 2026-09-22 production miss.",
   "guestMessage": "Hi \u2014 we only have 4 towel sets for 5 people. Could we get more bath towels please?",
   "context": {
     "guestName": "Kenneth",
@@ -34,5 +34,5 @@
       "manual reply needed"
     ]
   },
-  "notes": "Production incident: auto said linen closet / bathroom sink and offered host delivery. Host corrected: Ikea sofa lift-up in living room. Do not re-send \u2014 host already replied."
+  "notes": "Production incident: auto said linen closet / bathroom sink and offered host delivery. Host corrected: sofa lift-up in living room. Do not re-send \u2014 host already replied."
 }

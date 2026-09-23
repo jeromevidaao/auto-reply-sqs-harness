@@ -364,7 +364,7 @@ export function checkDraftClaims({
         addIssue(
           issues,
           'apt23_extra_linens_wrong_location',
-          'Apt 2/3 extra towels/linens draft used wrong location (linen closet / bathroom sink / cabinets) or premature host bring-over, or omitted Ikea sofa lift-up storage (Kenneth 2026-09-22).',
+          'Apt 2/3 extra towels/linens draft used wrong location (linen closet / bathroom sink / cabinets) or premature host bring-over, or omitted sofa lift-up storage (Kenneth 2026-09-22).',
           { deterministicFix: 'force_apt23_sofa_extra_linens' }
         );
       }

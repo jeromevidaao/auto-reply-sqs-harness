@@ -49,7 +49,8 @@ function assertSofaCanonical(text) {
   assert.match(text, /sofa/i);
   assert.match(text, /living[- ]?room|under the (?:living[- ]?room )?sofa/i);
   assert.match(text, /lift/i);
-  assert.match(text, /ikea|storage/i);
+  assert.match(text, /storage|lift/i);
+  assert.doesNotMatch(text, /ikea/i);
   assert.ok(!/linen closet/i.test(text), 'must not mention linen closet');
   assert.ok(!/bathroom sink/i.test(text), 'must not mention bathroom sink');
   assert.ok(!/\bcabinets?\b/i.test(text), 'must not mention cabinets as storage');
@@ -63,7 +64,7 @@ function assertSofaCanonical(text) {
   assert.match(text, /feel free to let us know|cannot find|can't find|let (?:us|me) know/i);
 }
 
-describe('Kenneth Apt 2 extra towels → sofa Ikea lift-up (2026-09-22)', () => {
+describe('Kenneth Apt 2 extra towels → sofa lift-up (2026-09-22)', () => {
   it('detector catches Kenneth shortfall / more bath towels ask', () => {
     assert.equal(looksLikeInStayExtraLinensTowelsAsk(KENNETH_MSG), true);
     const agent = makeAgent();
@@ -139,8 +140,8 @@ describe('Kenneth Apt 2 extra towels → sofa Ikea lift-up (2026-09-22)', () => 
     // Studio is not Apt 2/3 sofa path — either no apply or no sofa rewrite from this policy.
     if (applied.applied && applied.proposedResponse) {
       assert.ok(
-        !/ikea storage sofa/i.test(applied.proposedResponse),
-        'must not force Apt2/3 Ikea sofa copy onto Studio'
+        !/living-room sofa/i.test(applied.proposedResponse) || applied.applied !== true,
+        'must not force Apt2/3 sofa copy onto Studio'
       );
     }
   });

@@ -18,7 +18,7 @@
 
 **Sofa bed / extra towels & linens** (HARD — Kenneth 2026-09-22):
 - Queen sofa bed in the living room sleeps 2.
-- Sheets, blankets, pillows, and **extra bath towels** are stored **under the living-room sofa** — it is an **Ikea storage sofa/bed**.
+- Sheets, blankets, pillows, and **extra bath towels** are stored **under the living-room sofa** (storage sofa/bed — lift the long seat cushion or top section up to open).
 - **How to open**: lift the **long seat cushion or top section up** to open the storage compartment underneath; towels and linens are inside.
 - **NEVER** tell guests extras are in a linen closet, under the bathroom sink, in cabinets, or in drawers.
 - **NEVER** first-reply with "I'll bring towels right over" when sofa storage exists — tell them where to look; offer help only if they still cannot find them.
