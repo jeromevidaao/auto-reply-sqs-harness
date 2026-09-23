@@ -362,10 +362,12 @@ export async function handleEarlyCheckinNotice({
       deliveries.find((d) => d.sendSkipReason)?.sendSkipReason || result.sendSkipReason;
   }
 
+  const opened = deliveries.find((d) => d.sent)?.recipient || first;
   await notifyDecision(notifyOwner, {
     simulate: false,
     decision,
     recipients,
+    openRecipient: opened,
     listingId,
     listingName: result.listingName,
     proposedResponse: result.proposedResponse,

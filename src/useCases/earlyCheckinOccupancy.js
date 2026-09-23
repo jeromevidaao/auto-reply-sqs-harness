@@ -312,6 +312,7 @@ export function buildEarlyCheckinGuestNotify({
   simulate,
   decision,
   recipients,
+  openRecipient,
   listingId,
   listingName,
   proposedResponse,
@@ -321,7 +322,7 @@ export function buildEarlyCheckinGuestNotify({
   sendSkipReason,
 } = {}) {
   const list = Array.isArray(recipients) ? recipients : [];
-  const first = list[0] || null;
+  const first = openRecipient || list[0] || null;
   const guest = first ? guestFirstName(first) : 'guest';
   const unit =
     listingName ||
@@ -341,6 +342,9 @@ export function buildEarlyCheckinGuestNotify({
     listingName: String(unit),
     guestName: String(guest),
     platform: String(first?.platform || ''),
+    reservationId: String(first?.reservationId || ''),
+    conversationId: String(first?.conversationId || ''),
+    peerName: String(first?.guestName || first?.firstName || guest),
     reason: String(decision?.reason || sendSkipReason || ''),
     simulate: simulate ? 'true' : 'false',
     sent: sent ? 'true' : 'false',

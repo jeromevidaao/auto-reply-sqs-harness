@@ -660,6 +660,26 @@ describe('handleEarlyCheckinNotice', () => {
     assert.match(n.title, /message sent to Jamie/);
     assert.match(n.body, /Pine Apt #2/);
     assert.equal(n.data.type, 'early_checkin_guest_notice');
+    assert.equal(n.data.reservationId, 'res-apt2');
+    assert.equal(n.data.conversationId, 'conv-apt2');
+    assert.equal(n.data.platform, 'hospitable');
+  });
+
+  it('owner FCM points at the guest thread that was actually sent', () => {
+    const n = buildEarlyCheckinGuestNotify({
+      simulate: false,
+      decision: { reason: 'next_checkin_airbnb_and_he', send: true },
+      recipients: [JAMIE, KATIE],
+      openRecipient: KATIE,
+      listingId: LISTING_APT2,
+      listingName: 'Pine Apt #2',
+      sent: true,
+      sentCount: 1,
+    });
+    assert.match(n.title, /message sent to Katie/);
+    assert.equal(n.data.platform, 'homeexchange');
+    assert.equal(n.data.conversationId, '95101669');
+    assert.equal(n.data.reservationId, '');
   });
 
   it('does not build an owner FCM for expected unit-ready skips', () => {
