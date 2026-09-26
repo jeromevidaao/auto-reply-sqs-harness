@@ -40,6 +40,11 @@ import {
   isApt2OrApt3SofaLinensUnit,
   looksLikeInStayExtraLinensTowelsAsk,
 } from './utils/extraLinensTowels.js';
+import {
+  buildCanonicalDirtyLinenCheckoutReply,
+  draftHasDirtyLinenBathroomGuidance,
+  looksLikeDirtyLinenDispositionAsk,
+} from './utils/dirtyLinenCheckout.js';
 import { normalizeGuestName } from './utils/normalizeGuestName.js';
 import {
   loadHostContacts,
@@ -692,6 +697,17 @@ export class GuestMessagingAgent {
         parsed.proposedResponse = sofaLinensPolicy.proposedResponse;
       }
       shouldReply = true;
+    }
+
+    const dirtyLinenCheckoutPolicy = this._applyDirtyLinenCheckoutPolicy(parsed, context, guestMessage);
+    if (dirtyLinenCheckoutPolicy.applied) {
+      console.log('[Agent] → Dirty linen checkout disposition policy applied (bathroom floor)');
+      parsed.typeOfMessageReceived = dirtyLinenCheckoutPolicy.typeOfMessageReceived || 'CHECKOUT';
+      parsed.proposedResponse = dirtyLinenCheckoutPolicy.proposedResponse;
+      shouldReply = true;
+      confidence = 1.0;
+      parsed.shouldReply = true;
+      parsed.confidence = 1.0;
     }
 
     const extraLinensTowelsPolicy = this._applyExtraLinensTowelsPolicy(parsed, context, guestMessage);
@@ -1357,6 +1373,10 @@ export class GuestMessagingAgent {
   _applyCleaningIssueEscalationPolicy(parsed, cleaningIssue = {}, guestMessage = '') {
     if (!cleaningIssue.detected) {
       return { applied: false };
+    }
+    // Dirty linen disposition (strip / where put dirty) is CHECKOUT — never wipe for bare "dirty".
+    if (looksLikeDirtyLinenDispositionAsk(guestMessage)) {
+      return { applied: false, alertOnly: false, reason: 'dirty_linen_disposition' };
     }
     // Post-stay review + housekeeping FYI: cleaning alert only — auto-reply is fine (Amy incident).
     if (this._isPostStayHousekeepingFeedback(guestMessage)) {
@@ -3983,7 +4003,47 @@ export class GuestMessagingAgent {
     if (this._isPreArrivalSofaLinensAsk(guestMessage, context)) {
       return false;
     }
+    if (looksLikeDirtyLinenDispositionAsk(guestMessage)) {
+      return false;
+    }
     return looksLikeInStayExtraLinensTowelsAsk(guestMessage);
+  }
+
+  /**
+   * Dirty linen / checkout disposition (Isabella 2026-09-26): guest asks whether to
+   * change/strip linens and where to put dirty ones. Always auto-reply with bathroom floor.
+   * Must NOT answer with chaise/sofa extra-storage (that is EXTRA_LINENS_TOWELS find-more).
+   */
+  _applyDirtyLinenCheckoutPolicy(parsed = {}, context = {}, guestMessage = '') {
+    if (!looksLikeDirtyLinenDispositionAsk(guestMessage)) {
+      return { applied: false };
+    }
+
+    const draft = String(parsed.proposedResponse || '').trim();
+    const hasGuidance = draftHasDirtyLinenBathroomGuidance(draft);
+    // Prior chaise how-to in thread can tempt a chaise-only draft — rewrite if no bathroom floor.
+    const chaiseOnly =
+      /\b(?:chaise|lift the|under the (?:living[- ]?room )?sofa)\b/i.test(draft) && !hasGuidance;
+
+    if (hasGuidance && draft && draft !== 'none' && !chaiseOnly) {
+      return {
+        applied: true,
+        typeOfMessageReceived: 'CHECKOUT',
+        proposedResponse: draft,
+        shouldReply: true,
+        confidence: 1.0,
+        deterministicRewrite: false,
+      };
+    }
+
+    return {
+      applied: true,
+      typeOfMessageReceived: 'CHECKOUT',
+      proposedResponse: buildCanonicalDirtyLinenCheckoutReply(context),
+      shouldReply: true,
+      confidence: 1.0,
+      deterministicRewrite: true,
+    };
   }
 
   /**
@@ -3993,6 +4053,11 @@ export class GuestMessagingAgent {
    * but help offer is missing (Sean). Kenneth 2026-09-22.
    */
   _applyExtraLinensTowelsPolicy(parsed, context = {}, guestMessage = '') {
+    // Dirty linen disposition (strip / where put dirty) is CHECKOUT — never sofa rewrite.
+    if (looksLikeDirtyLinenDispositionAsk(guestMessage)) {
+      return { applied: false };
+    }
+
     const categories = Array.isArray(parsed.typeOfMessageReceived)
       ? parsed.typeOfMessageReceived
       : [parsed.typeOfMessageReceived];
@@ -7664,6 +7729,19 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = true;
     }
 
+    const dirtyLinenCheckoutPolicyFinal = this._applyDirtyLinenCheckoutPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (dirtyLinenCheckoutPolicyFinal.applied) {
+      console.log('[Agent] → Dirty linen checkout disposition policy applied (final, bathroom floor)');
+      finalResult.typeOfMessageReceived = dirtyLinenCheckoutPolicyFinal.typeOfMessageReceived || 'CHECKOUT';
+      finalResult.proposedResponse = dirtyLinenCheckoutPolicyFinal.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+    }
+
     const extraLinensTowelsPolicyFinal = this._applyExtraLinensTowelsPolicy(finalResult, enrichedContext, guestMessage);
     if (extraLinensTowelsPolicyFinal.applied) {
       finalResult.typeOfMessageReceived = extraLinensTowelsPolicyFinal.typeOfMessageReceived || 'EXTRA_LINENS_TOWELS';
@@ -8030,6 +8108,21 @@ export class GuestMessagingAgent {
       finalResult.shouldReply = cleaningEscalationPolicyFinal.shouldReply;
       finalResult.confidence = cleaningEscalationPolicyFinal.confidence;
       finalResult.escalated = cleaningEscalationPolicyFinal.escalated;
+    }
+
+    // Isabella: dirty-linen CHECKOUT must survive cleaning-tool false positive on bare "dirty".
+    const dirtyLinenAfterCleaning = this._applyDirtyLinenCheckoutPolicy(
+      finalResult,
+      enrichedContext,
+      guestMessage
+    );
+    if (dirtyLinenAfterCleaning.applied) {
+      console.log('[Agent] → Dirty linen checkout disposition restored after cleaning gate');
+      finalResult.typeOfMessageReceived = dirtyLinenAfterCleaning.typeOfMessageReceived || 'CHECKOUT';
+      finalResult.proposedResponse = dirtyLinenAfterCleaning.proposedResponse;
+      finalResult.shouldReply = true;
+      finalResult.confidence = 1.0;
+      finalResult.escalated = false;
     }
 
     // Final restore: judge-approved substantial draft for safe categories must not die

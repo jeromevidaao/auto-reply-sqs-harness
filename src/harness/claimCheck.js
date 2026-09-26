@@ -23,6 +23,11 @@ import {
   isApt2OrApt3SofaLinensUnit,
   looksLikeInStayExtraLinensTowelsAsk,
 } from '../utils/extraLinensTowels.js';
+import {
+  buildCanonicalDirtyLinenCheckoutReply,
+  draftHasDirtyLinenBathroomGuidance,
+  looksLikeDirtyLinenDispositionAsk,
+} from '../utils/dirtyLinenCheckout.js';
 
 const EVENT_DECLINE_RE = /not able to accommodate events or gatherings/i;
 const POLICY_475_RE = /help\/article\/475/i;
@@ -396,9 +401,28 @@ export function checkDraftClaims({
   }
 
 
+  // Isabella dirty linen disposition: strip + bathroom floor (never chaise-only / skip).
+  if (looksLikeDirtyLinenDispositionAsk(msg)) {
+    const needs =
+      !text ||
+      text === 'none' ||
+      !draftHasDirtyLinenBathroomGuidance(text) ||
+      (/\b(?:chaise|lift the|under the (?:living[- ]?room )?sofa)\b/i.test(text) &&
+        !draftHasDirtyLinenBathroomGuidance(text));
+    if (needs) {
+      addIssue(
+        issues,
+        'dirty_linen_bathroom_missing',
+        'Guest asked about changing/dirty linens disposition but draft missing strip + bathroom floor guidance (Isabella 2026-09-26).',
+        { deterministicFix: 'force_dirty_linen_bathroom' }
+      );
+    }
+  }
+
   // Kenneth Apt 2/3: never place extras in linen closet / bathroom sink / cabinets;
   // never first-reply with host bring-over when sofa storage exists.
-  {
+  // Skip when this is a dirty-linen disposition ask (CHECKOUT path owns the reply).
+  if (!looksLikeDirtyLinenDispositionAsk(msg)) {
     const rawCat = decision.typeOfMessageReceived;
     const cats = Array.isArray(rawCat) ? rawCat : [rawCat];
     const isExtra =
@@ -505,6 +529,10 @@ export function checkDraftClaims({
       appliedFixCodes.add(issue.deterministicFix);
     } else if (issue.deterministicFix === 'force_apt23_sofa_extra_linens') {
       revised = buildCanonicalExtraLinensTowelsReply(context);
+      appliedFix = true;
+      appliedFixCodes.add(issue.deterministicFix);
+    } else if (issue.deterministicFix === 'force_dirty_linen_bathroom') {
+      revised = buildCanonicalDirtyLinenCheckoutReply(context);
       appliedFix = true;
       appliedFixCodes.add(issue.deterministicFix);
     }

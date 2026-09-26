@@ -32,3 +32,11 @@ For the exact message: "Sounds great! Thank you! And what is the latest time we 
 Never fall back to low confidence or no reply for this. The unit test enforces this.
 Always set confidence to 1.0 for honest unit test enforcement on this scenario.
 This guarantees the auto-reply happens.
+
+**Dirty linen disposition (Isabella 2026-09-26)**:
+When the guest asks whether they should **change / strip** the linens, or **where to put the dirty / used** sheets and towels (e.g. "Are we to change the linens? Where should we put the dirty ones?"):
+- Category **MUST** be **CHECKOUT** (not EXTRA_LINENS_TOWELS).
+- Always set shouldReply: true and confidence: 1.0
+- **MUST** tell them to strip the dirty linens and leave used sheets and towels on the **bathroom floor**.
+- **MUST NOT** answer only with chaise / sofa lift-up storage (that is for finding *clean* extras — EXTRA_LINENS_TOWELS). Prior host messages about chaise storage do not answer this ask.
+- Example tone: "Hi Isabella, if you can strip the dirty linens that would be great — please leave the used sheets and towels on the bathroom floor. Thank you!"

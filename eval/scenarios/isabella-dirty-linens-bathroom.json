@@ -1,0 +1,68 @@
+{
+  "id": "isabella-dirty-linens-bathroom",
+  "description": "Isabella (booker) · Cozy West End Victorian / Pine Apt 2 · Sep 23–26 checkout morning: asks whether to change linens and where to put dirty ones. Prior host auto-message already explained chaise sofa for clean extras + photo. Harness skipped; Ruby co-host replied manually. Must auto-reply strip + bathroom floor — never chaise-only / EXTRA_LINENS find-more.",
+  "guestMessage": "Are we to change the linens? Where should we put the dirty ones?",
+  "context": {
+    "guestName": "Isabella",
+    "guestDisplayName": "Isabella",
+    "checkIn": "2026-09-23",
+    "checkOut": "2026-09-26",
+    "listingId": "114663c5-0709-4eff-a868-fa9ebd6ed42d",
+    "propertyName": "Cozy West End Victorian · Apt #2",
+    "guestArrived": true,
+    "asOfDate": "2026-09-26",
+    "asOfInstant": "2026-09-26T06:30:00-07:00",
+    "nowForGreeting": "2026-09-26T06:30:00-07:00",
+    "conversation_id": "isabella-dirty-linens-bathroom-conv",
+    "conversationHistory": [
+      {
+        "role": "host",
+        "sender_type": "host",
+        "body": "Isabella, extra bath towels and linens are stored under the chaise of the living-room sofa (the long lounge section). Lift the chaise seat up — the lid stays open — and the towels and linens are inside. If you cannot find them, feel free to let us know.",
+        "content": "Isabella, extra bath towels and linens are stored under the chaise of the living-room sofa (the long lounge section). Lift the chaise seat up — the lid stays open — and the towels and linens are inside. If you cannot find them, feel free to let us know.",
+        "note": "Photo of chaise storage attached; Sent via hosting software"
+      },
+      {
+        "role": "guest",
+        "sender_type": "guest",
+        "body": "Are we to change the linens? Where should we put the dirty ones?",
+        "content": "Are we to change the linens? Where should we put the dirty ones?"
+      }
+    ],
+    "suggestedResponseSnippet": "Hi Isabella, if you can strip the dirty linens that would be great — please leave the used sheets and towels on the bathroom floor. Thank you!",
+    "conversationTraces": {
+      "hasRecentHostMessage": true,
+      "priorHostInstructions": ["chaise sofa storage for extra clean towels and linens"],
+      "repeatedInstructionRisk": true,
+      "greeting": {
+        "isFirstHostMessage": false,
+        "numHostMessages": 2
+      },
+      "historySource": "scenario"
+    }
+  },
+  "rubric": {
+    "expectedCategory": [
+      "CHECKOUT",
+      "CHECKOUT_INSTRUCTIONS",
+      "CHECKOUT_TRASH_LINEN"
+    ],
+    "shouldReply": true,
+    "shouldAlwaysReply": true,
+    "minConfidence": 0.95,
+    "productionMiss": true,
+    "requiredPhrases": [
+      "bathroom floor",
+      "strip"
+    ],
+    "forbiddenPhrases": [
+      "manual reply needed",
+      "linen closet",
+      "bathroom sink"
+    ]
+  },
+  "notes": "Production miss 2026-09-26 ~06:30 PT. Ruby manual: strip dirty + leave in bathroom. Canonical product copy uses bathroom floor. Not EXTRA_LINENS_TOWELS / Kenneth chaise find-more — do not only re-send sofa lift-up.",
+  "productionMiss": true,
+  "unitTestEnforced": true,
+  "guestName": "Isabella"
+}

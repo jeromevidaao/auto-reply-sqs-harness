@@ -4,6 +4,8 @@
  * host delivery. Shared by agent policy + claimCheck.
  */
 
+import { looksLikeDirtyLinenDispositionAsk } from './dirtyLinenCheckout.js';
+
 export const APT2_LISTING_ID = '114663c5-0709-4eff-a868-fa9ebd6ed42d';
 export const APT3_LISTING_ID = '60fc0321-c8be-46f4-8edd-8f5cd2c6c7bd';
 
@@ -49,6 +51,9 @@ export function apt23ExtraLinensReplyImages(context = {}) {
 export function looksLikeInStayExtraLinensTowelsAsk(guestMessage = '') {
   const lower = String(guestMessage || '').toLowerCase();
   if (!lower.trim()) return false;
+
+  // Isabella dirty-linen disposition (checkout strip / where put dirty) is CHECKOUT — not sofa find-more.
+  if (looksLikeDirtyLinenDispositionAsk(guestMessage)) return false;
 
   const towelOrLinen =
     /\b(?:towels?|bath\s*towels?|linens?|sheets?|blankets?|pillows?|wash\s*cloths?)\b/.test(lower);

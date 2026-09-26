@@ -1,4 +1,5 @@
 import { BaseTool } from './BaseTool.js';
+import { looksLikeDirtyLinenDispositionAsk } from '../utils/dirtyLinenCheckout.js';
 
 /**
  * CleaningIssueTool
@@ -123,6 +124,19 @@ export class CleaningIssueTool extends BaseTool {
     }
 
     const text = message.toLowerCase();
+
+    // Isabella dirty-linen disposition ("where put the dirty ones?") is CHECKOUT policy —
+    // not a cleaning complaint. Bare "dirty" must not escalate / wipe auto-reply.
+    if (looksLikeDirtyLinenDispositionAsk(message)) {
+      return {
+        detected: false,
+        strength: null,
+        blocksAutoReply: false,
+        logisticsOnly: false,
+        matchedPhrase: null,
+        reason: 'dirty_linen_disposition_not_complaint',
+      };
+    }
 
     // Logistics-only mentions (Olivia) — hard no-detect.
     if (this.isLogisticsOnlyCleaningMention(text)) {
